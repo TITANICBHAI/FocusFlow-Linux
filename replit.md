@@ -16,6 +16,25 @@ Three workflows build on every push to `main`:
 - AppImage is created via a manual `appimagetool` fallback if Compose Desktop's built-in step produces nothing
 - `.deb` and `.rpm` Requires/Depends fields are injected post-build (xdotool, wmctrl)
 
+## Next major workstream: Linux migration
+
+The forward development plan is the Linux migration. Keep the production Windows path intact and add Linux behavior beside it using platform guards. The source-of-truth documents are:
+
+- `focusflow-linux-plan.md` — prioritized findings from direct code analysis.
+- `focusflow-linux-tracker.html` — interactive status tracker with agent prompts and manual test checklist.
+- `focusflow-linux-tracker.md` — Markdown checklist suitable for code review and commit tracking.
+
+Work through the tracker in order:
+
+1. **Phase 1 — Build blockers:** create the Linux icon resource and remove unrelated React/video files.
+2. **Phase 2 — Core blocking:** implement Linux app icon lookup, reliable process-name matching and Flatpak/Snap scanning, and guard the Windows registry orphan check.
+3. **Phase 3 — Kiosk hardening:** address Wayland keyboard limitations, expand Linux escape-process coverage, and keep the overlay raised on X11/XWayland.
+4. **Phase 4 — System integration:** add Wayland notifications, verify Linux autostart paths, and handle desktop-environment-specific panel behavior.
+5. **Phase 5 — Polish and distribution:** fix Linux-facing UI text, verify Linux-safe crash cleanup, and run Linux tests/package builds in CI.
+6. **After ship:** consider AppImage updates, native Wayland kiosk integration and Snap packaging.
+
+Do not mark Linux migration complete until the manual X11, Wayland, desktop-environment, packaging, and Windows regression checks in the trackers have been run.
+
 # FocusFlow JVM — by TBTechs
 
 A real-enforcement productivity & focus app for Windows, built with Kotlin + Compose Multiplatform Desktop.
@@ -124,8 +143,8 @@ export PATH=$JAVA_HOME/bin:$PATH
 ## Platform Notes
 
 - **UI**: Cross-platform — Compose Desktop renders on Linux/Mac/Windows
-- **Enforcement**: Windows-only — JNA calls to Win32 APIs are no-ops on Linux
-- **Packaging**: Windows EXE/MSI via GitHub Actions (`windows-latest`); MSIX built manually in CI
+- **Enforcement**: Windows is production; Linux enforcement is being completed in the tracked migration phases
+- **Packaging**: Windows EXE/MSI via GitHub Actions (`windows-latest`); Linux `.deb`, `.rpm`, and AppImage via Linux CI
 - **Database**: SQLite at `~/.focusflow/focusflow.db`
 
 ## JVM Args (build.gradle.kts)

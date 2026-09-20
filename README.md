@@ -2,9 +2,21 @@
 
 > **Real enforcement. No soft timers. No workarounds.**
 
-FocusFlow is a Windows productivity app built with **Kotlin + Compose Multiplatform Desktop**. It kills blocked processes via Win32/JNA, adds live Windows Firewall rules, and now includes a full **Focus Launcher** — a CBT-style kiosk mode that replaces your desktop during deep work sessions.
+FocusFlow is a Windows productivity app built with **Kotlin + Compose Multiplatform Desktop**. It kills blocked processes via Win32/JNA, adds live Windows Firewall rules, and now includes a full **Focus Launcher** — a CBT-style kiosk mode that replaces your desktop during deep work sessions. A Linux port is the next major workstream, with platform-specific enforcement being added alongside the production Windows path.
 
 Available on the **Microsoft Store** as *FocusFlow — Deep Focus App Blocker* by TBTechs.
+
+---
+
+## Linux Migration Roadmap
+
+Linux migration work is planned and tracked in two root-level documents:
+
+- **[Linux migration plan](focusflow-linux-plan.md)** — code-grounded findings, priorities, platform limitations, and the suggested implementation order.
+- **[Interactive Linux tracker](focusflow-linux-tracker.html)** — browser-based task status board with agent prompts and manual test checklists.
+- **[Markdown Linux tracker](focusflow-linux-tracker.md)** — Git-friendly checkbox version of the interactive tracker for reviews and commits.
+
+The migration must preserve the Windows implementation. Add Linux branches alongside existing Windows branches; do not replace or remove working Windows enforcement. Before calling the Linux port ready, complete the five tracked phases and run the Linux and Windows regression checks described in the trackers.
 
 ---
 

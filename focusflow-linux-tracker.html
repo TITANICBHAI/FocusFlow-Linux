@@ -1,0 +1,2030 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FocusFlow Linux Migration Tracker</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --surface2: #22263a;
+    --border: #2e3248; --border2: #3a4060;
+    --text: #e4e6f0; --text2: #8b90a8; --text3: #5a6080;
+    --accent: #6c8aff; --accent2: #4f6de0;
+    --green: #3dd68c; --green-bg: #0d2918;
+    --yellow: #f5c542; --yellow-bg: #251f06;
+    --red: #f56565; --red-bg: #2a0f0f;
+    --orange: #f5935e; --orange-bg: #2a1506;
+    --purple: #b57ef5; --purple-bg: #1e1230;
+    --blue: #5eb8f5; --blue-bg: #081a2a;
+    --todo-c: #8b90a8; --doing-c: #f5c542; --done-c: #3dd68c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* ── LAYOUT ── */
+  .shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 220px; min-width: 220px; background: var(--surface);
+    border-right: 1px solid var(--border); padding: 20px 0;
+    position: sticky; top: 0; height: 100vh; overflow-y: auto; flex-shrink: 0; }
+  .main { flex: 1; padding: 28px 32px; min-width: 0; }
+
+  /* ── SIDEBAR ── */
+  .sidebar-title { font-size: 11px; font-weight: 700; letter-spacing: .1em;
+    color: var(--text3); text-transform: uppercase; padding: 0 18px 10px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 18px;
+    cursor: pointer; font-size: 13.5px; color: var(--text2); border-left: 3px solid transparent;
+    transition: all .15s; user-select: none; }
+  .nav-item:hover { background: var(--surface2); color: var(--text); }
+  .nav-item.active { border-left-color: var(--accent); background: rgba(108,138,255,.08);
+    color: var(--accent); }
+  .nav-item .phase-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .nav-badge { margin-left: auto; font-size: 11px; background: var(--surface2);
+    color: var(--text3); padding: 1px 6px; border-radius: 99px; }
+  .nav-divider { height: 1px; background: var(--border); margin: 10px 18px; }
+
+  /* ── DASHBOARD ── */
+  .dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; margin-bottom: 28px; }
+  .dash-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .dash-num { font-size: 28px; font-weight: 700; line-height: 1; }
+  .dash-label { font-size: 12px; color: var(--text2); margin-top: 4px; }
+  .progress-bar { height: 6px; background: var(--surface2); border-radius: 3px; margin-top: 8px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--green)); border-radius: 3px; transition: width .4s ease; }
+
+  /* ── SECTION HEADER ── */
+  .section { display: none; }
+  .section.active { display: block; }
+  .page-title { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+  .page-sub { color: var(--text2); font-size: 14px; margin-bottom: 24px; }
+  .phase-header { display: flex; align-items: center; gap: 10px; margin: 28px 0 14px; }
+  .phase-label { font-size: 12px; font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--text3); }
+  .phase-line { flex: 1; height: 1px; background: var(--border); }
+
+  /* ── TASK CARD ── */
+  .task-card { background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; margin-bottom: 12px; overflow: hidden; transition: border-color .15s; }
+  .task-card:hover { border-color: var(--border2); }
+  .task-card.done { opacity: .6; }
+  .task-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px;
+    cursor: pointer; }
+  .task-head:hover { background: rgba(255,255,255,.02); }
+  .status-btn { border: none; border-radius: 6px; font-size: 11.5px; font-weight: 600;
+    padding: 3px 10px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    transition: all .15s; }
+  .status-btn.todo { background: var(--surface2); color: var(--todo-c); }
+  .status-btn.doing { background: var(--yellow-bg); color: var(--yellow); }
+  .status-btn.done { background: var(--green-bg); color: var(--green); }
+  .task-id { font-size: 11px; font-weight: 700; color: var(--text3); flex-shrink: 0; }
+  .task-title { font-size: 14.5px; font-weight: 600; flex: 1; }
+  .task-title.done { text-decoration: line-through; color: var(--text2); }
+  .pri-badge { font-size: 10px; font-weight: 700; padding: 2px 7px;
+    border-radius: 4px; text-transform: uppercase; letter-spacing: .06em; flex-shrink: 0; }
+  .pri-critical { background: var(--red-bg); color: var(--red); }
+  .pri-high { background: var(--orange-bg); color: var(--orange); }
+  .pri-medium { background: var(--yellow-bg); color: var(--yellow); }
+  .pri-low { background: var(--purple-bg); color: var(--purple); }
+  .expand-icon { color: var(--text3); flex-shrink: 0; transition: transform .2s; font-size: 12px; }
+  .expand-icon.open { transform: rotate(180deg); }
+
+  .task-body { border-top: 1px solid var(--border); display: none; }
+  .task-body.open { display: block; }
+
+  .task-tabs { display: flex; border-bottom: 1px solid var(--border); }
+  .task-tab { padding: 10px 16px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+    color: var(--text3); border-bottom: 2px solid transparent; transition: all .15s; }
+  .task-tab:hover { color: var(--text2); }
+  .task-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .task-panel { display: none; padding: 16px; }
+  .task-panel.active { display: block; }
+
+  .task-desc { font-size: 13.5px; line-height: 1.65; color: var(--text2); }
+  .task-desc strong { color: var(--text); }
+
+  .files-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .file-chip { background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 5px; padding: 3px 9px; font-size: 11.5px; font-family: monospace; color: var(--blue); }
+
+  .agent-box { position: relative; margin-top: 0; }
+  .agent-prompt { background: #0c0e18; border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px; font-size: 12.5px; font-family: monospace; line-height: 1.6;
+    color: var(--text2); white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow-y: auto; }
+  .copy-btn { position: absolute; top: 10px; right: 10px; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px;
+    font-size: 11.5px; font-weight: 600; cursor: pointer; color: var(--text2);
+    transition: all .15s; }
+  .copy-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .copy-btn.copied { background: var(--green-bg); color: var(--green); border-color: var(--green); }
+
+  .test-list { list-style: none; }
+  .test-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0;
+    border-bottom: 1px solid var(--border); font-size: 13px; }
+  .test-item:last-child { border-bottom: none; }
+  .test-cb { width: 16px; height: 16px; border: 1.5px solid var(--border2);
+    border-radius: 4px; flex-shrink: 0; margin-top: 2px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; transition: all .15s; }
+  .test-cb.checked { background: var(--green); border-color: var(--green); }
+  .test-cb.checked::after { content: '✓'; font-size: 10px; color: #000; font-weight: 700; }
+  .test-env { font-size: 10px; font-weight: 700; padding: 1px 6px;
+    border-radius: 3px; text-transform: uppercase; flex-shrink: 0; margin-top: 3px; }
+  .env-x11 { background: var(--blue-bg); color: var(--blue); }
+  .env-wayland { background: var(--purple-bg); color: var(--purple); }
+  .env-both { background: var(--surface2); color: var(--text2); }
+  .env-auto { background: var(--green-bg); color: var(--green); }
+
+  /* ── GLOBAL TEST TAB ── */
+  .test-section-header { font-size: 12px; font-weight: 700; color: var(--text3);
+    text-transform: uppercase; letter-spacing: .08em; margin: 22px 0 10px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border); }
+  .big-test-item { background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px; margin-bottom: 8px;
+    display: flex; align-items: flex-start; gap: 12px; }
+  .big-test-cb { width: 20px; height: 20px; border: 1.5px solid var(--border2);
+    border-radius: 5px; flex-shrink: 0; margin-top: 1px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; transition: all .15s; }
+  .big-test-cb.checked { background: var(--green); border-color: var(--green); }
+  .big-test-cb.checked::after { content: '✓'; font-size: 12px; color: #000; font-weight: 700; }
+  .big-test-right { flex: 1; }
+  .big-test-title { font-size: 13.5px; font-weight: 600; margin-bottom: 3px; }
+  .big-test-desc { font-size: 12.5px; color: var(--text2); line-height: 1.55; }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--surface); }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="shell">
+
+<!-- ── SIDEBAR ── -->
+<nav class="sidebar">
+  <div class="sidebar-title">FocusFlow Linux</div>
+  <div class="nav-item active" data-section="dash" onclick="showSection('dash',this)">
+    <div class="phase-dot" style="background:#6c8aff"></div> Dashboard
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-item" data-section="p1" onclick="showSection('p1',this)">
+    <div class="phase-dot" style="background:#f56565"></div> Phase 1 — Build
+    <span class="nav-badge" id="badge-p1">2</span>
+  </div>
+  <div class="nav-item" data-section="p2" onclick="showSection('p2',this)">
+    <div class="phase-dot" style="background:#f5935e"></div> Phase 2 — Core
+    <span class="nav-badge" id="badge-p2">3</span>
+  </div>
+  <div class="nav-item" data-section="p3" onclick="showSection('p3',this)">
+    <div class="phase-dot" style="background:#f5c542"></div> Phase 3 — Kiosk
+    <span class="nav-badge" id="badge-p3">3</span>
+  </div>
+  <div class="nav-item" data-section="p4" onclick="showSection('p4',this)">
+    <div class="phase-dot" style="background:#3dd68c"></div> Phase 4 — Integration
+    <span class="nav-badge" id="badge-p4">3</span>
+  </div>
+  <div class="nav-item" data-section="p5" onclick="showSection('p5',this)">
+    <div class="phase-dot" style="background:#b57ef5"></div> Phase 5 — Polish
+    <span class="nav-badge" id="badge-p5">4</span>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-item" data-section="tests" onclick="showSection('tests',this)">
+    <div class="phase-dot" style="background:#5eb8f5"></div> Manual Tests
+  </div>
+</nav>
+
+<!-- ── MAIN ── -->
+<main class="main">
+
+<!-- ════ DASHBOARD ════ -->
+<div id="dash" class="section active">
+  <div class="page-title">Linux Migration Tracker</div>
+  <div class="page-sub">FocusFlow PC — Kotlin/Compose Desktop · All findings from direct code analysis</div>
+  <div class="dash-grid">
+    <div class="dash-card">
+      <div class="dash-num" id="stat-total" style="color:var(--accent)">15</div>
+      <div class="dash-label">Total Tasks</div>
+    </div>
+    <div class="dash-card">
+      <div class="dash-num" id="stat-done" style="color:var(--green)">0</div>
+      <div class="dash-label">Done</div>
+      <div class="progress-bar"><div class="progress-fill" id="prog-bar" style="width:0%"></div></div>
+    </div>
+    <div class="dash-card">
+      <div class="dash-num" id="stat-doing" style="color:var(--yellow)">0</div>
+      <div class="dash-label">In Progress</div>
+    </div>
+    <div class="dash-card">
+      <div class="dash-num" id="stat-todo" style="color:var(--text2)">15</div>
+      <div class="dash-label">To Do</div>
+    </div>
+  </div>
+
+  <div class="phase-header"><div class="phase-label">Quick Status</div><div class="phase-line"></div></div>
+
+  <div style="display:grid; gap:8px;">
+    <div id="dash-p1" class="dash-card" style="border-left:3px solid var(--red)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:700;font-size:13.5px">Phase 1 — Build Blockers</span>
+        <span style="font-size:12px;color:var(--text3)" id="dl1">0 / 2</span>
+      </div>
+      <div style="font-size:12.5px;color:var(--text2);margin-top:4px">
+        App won't build or run on Linux until these are fixed first.
+      </div>
+    </div>
+    <div id="dash-p2" class="dash-card" style="border-left:3px solid var(--orange)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:700;font-size:13.5px">Phase 2 — Core Blocking</span>
+        <span style="font-size:12px;color:var(--text3)" id="dl2">0 / 3</span>
+      </div>
+      <div style="font-size:12.5px;color:var(--text2);margin-top:4px">
+        Icons, app scanning, and a confirmed bug in App.kt (registry dialog on Linux).
+      </div>
+    </div>
+    <div id="dash-p3" class="dash-card" style="border-left:3px solid var(--yellow)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:700;font-size:13.5px">Phase 3 — Kiosk Hardening</span>
+        <span style="font-size:12px;color:var(--text3)" id="dl3">0 / 3</span>
+      </div>
+      <div style="font-size:12.5px;color:var(--text2);margin-top:4px">
+        Wayland keyboard gap, escape process list, overlay persistence.
+      </div>
+    </div>
+    <div id="dash-p4" class="dash-card" style="border-left:3px solid var(--green)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:700;font-size:13.5px">Phase 4 — System Integration</span>
+        <span style="font-size:12px;color:var(--text3)" id="dl4">0 / 3</span>
+      </div>
+      <div style="font-size:12.5px;color:var(--text2);margin-top:4px">
+        Notifications on Wayland, autostart path, panel hide per DE.
+      </div>
+    </div>
+    <div id="dash-p5" class="dash-card" style="border-left:3px solid var(--purple)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:700;font-size:13.5px">Phase 5 — Polish</span>
+        <span style="font-size:12px;color:var(--text3)" id="dl5">0 / 4</span>
+      </div>
+      <div style="font-size:12.5px;color:var(--text2);margin-top:4px">
+        UI text fixes, crash cleanup guard, CI build step.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════ PHASE 1 ════ -->
+<div id="p1" class="section">
+  <div class="page-title">Phase 1 — Build Blockers</div>
+  <div class="page-sub">Fix these FIRST. Nothing builds or runs on Linux without them.</div>
+
+  <!-- P1.1 -->
+  <div class="task-card" id="card-P1.1">
+    <div class="task-head" onclick="toggleCard('P1.1')">
+      <button class="status-btn todo" id="sbtn-P1.1" onclick="cycleStatus(event,'P1.1')">● TODO</button>
+      <span class="task-id">P1.1</span>
+      <span class="task-title" id="title-P1.1">Add missing focusflow.png resource</span>
+      <span class="pri-badge pri-critical">CRITICAL</span>
+      <span class="expand-icon" id="icon-P1.1">▼</span>
+    </div>
+    <div class="task-body" id="body-P1.1">
+      <div class="task-tabs">
+        <div class="task-tab active" onclick="switchTab(event,'P1.1','info')">Info</div>
+        <div class="task-tab" onclick="switchTab(event,'P1.1','agent')">Agent Prompt</div>
+        <div class="task-tab" onclick="switchTab(event,'P1.1','tests')">Tests</div>
+      </div>
+      <div class="task-panel active" id="panel-P1.1-info">
+        <div class="task-desc">
+          <strong>What's broken:</strong> <code>build.gradle.kts</code> sets the Linux package icon as <code>focusflow.png</code>. <code>Main.kt</code> also loads <code>focusflow.png</code> at runtime on Linux via <code>if (IS_LINUX) "focusflow.png" else "focusflow_256.png"</code>. Neither file exists — only <code>focusflow_256.png</code> is in <code>src/main/resources/</code>. The Linux <code>packageDeb</code> / <code>packageRpm</code> Gradle tasks will fail and the window icon will be missing at runtime.<br><br>
+          <strong>Fix:</strong> Copy <code>focusflow_256.png</code> → <code>focusflow.png</code> in the same folder. Do NOT rename or remove the original — Windows still uses it via the else branch.
+        </div>
+        <div class="files-list">
+          <div class="file-chip">src/main/resources/focusflow.png (create)</div>
+          <div class="file-chip">build.gradle.kts (verify ref)</div>
+          <div class="file-chip">Main.kt (line ~247)</div>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P1.1-agent">
+        <div class="agent-box">
+          <div class="agent-prompt" id="ap-P1.1">In the FocusFlow Kotlin/Compose Desktop project:
+
+PROBLEM:
+build.gradle.kts references:
+  linux { iconFile.set(project.file("src/main/resources/focusflow.png")) }
+Main.kt loads:
+  val iconRes = if (IS_LINUX) "focusflow.png" else "focusflow_256.png"
+
+But src/main/resources/ only contains focusflow_256.png and focusflow_logo_nobg.png.
+No focusflow.png exists. The Linux packageDeb/packageRpm tasks fail,
+and the window icon is missing at runtime on Linux.
+
+FIX:
+Copy src/main/resources/focusflow_256.png to src/main/resources/focusflow.png
+
+This is a single file copy. Do NOT rename or delete focusflow_256.png —
+the Windows build (else branch in Main.kt) still needs it.
+
+VERIFY after the copy:
+1. src/main/resources/focusflow.png exists with identical content to focusflow_256.png
+2. Run: ./gradlew packageDeb
+   It must complete without "icon file not found" or similar errors.
+3. Confirm build.gradle.kts linux { iconFile } path resolves correctly.
+4. No other file in the project references "focusflow.png" that would also need updating.</div>
+          <button class="copy-btn" onclick="copyPrompt('P1.1')">Copy</button>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P1.1-tests">
+        <ul class="test-list">
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-auto">Auto</span>
+            <span>Run <code>./gradlew packageDeb</code> — must complete without icon errors.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Both</span>
+            <span>Run app on Linux — title bar and taskbar must show the FocusFlow icon, not a blank/generic Java icon.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Win</span>
+            <span>Run <code>./gradlew packageMsi</code> — must still succeed (verify Windows build is unaffected).</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- P1.2 -->
+  <div class="task-card" id="card-P1.2">
+    <div class="task-head" onclick="toggleCard('P1.2')">
+      <button class="status-btn todo" id="sbtn-P1.2" onclick="cycleStatus(event,'P1.2')">● TODO</button>
+      <span class="task-id">P1.2</span>
+      <span class="task-title" id="title-P1.2">Delete stray React/video files from repo</span>
+      <span class="pri-badge pri-critical">CRITICAL</span>
+      <span class="expand-icon" id="icon-P1.2">▼</span>
+    </div>
+    <div class="task-body" id="body-P1.2">
+      <div class="task-tabs">
+        <div class="task-tab active" onclick="switchTab(event,'P1.2','info')">Info</div>
+        <div class="task-tab" onclick="switchTab(event,'P1.2','agent')">Agent Prompt</div>
+        <div class="task-tab" onclick="switchTab(event,'P1.2','tests')">Tests</div>
+      </div>
+      <div class="task-panel active" id="panel-P1.2-info">
+        <div class="task-desc">
+          <strong>What's wrong:</strong> The repo contains a complete React/TSX video template project under <code>src/</code>. These files have zero relationship to the Kotlin/Compose Desktop app. They'll confuse any agent working on the codebase and may cause lint/IDE warnings.<br><br>
+          <strong>Files to delete:</strong> <code>src/App.tsx</code>, <code>src/main.tsx</code>, <code>src/index.css</code>, <code>src/components/video/VideoTemplate.tsx</code>, <code>src/components/video/video_scenes/Scene1–5.tsx</code>, and the <code>src/components/</code> directory if empty after deletion.
+        </div>
+        <div class="files-list">
+          <div class="file-chip">src/App.tsx (DELETE)</div>
+          <div class="file-chip">src/main.tsx (DELETE)</div>
+          <div class="file-chip">src/index.css (DELETE)</div>
+          <div class="file-chip">src/components/video/ (DELETE)</div>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P1.2-agent">
+        <div class="agent-box">
+          <div class="agent-prompt" id="ap-P1.2">In the FocusFlow Kotlin/Compose Desktop project:
+
+Delete these files — they are from a completely different React/video project
+and do not belong in this Kotlin codebase:
+  - src/App.tsx
+  - src/main.tsx
+  - src/index.css
+  - src/components/video/VideoTemplate.tsx
+  - src/components/video/video_scenes/Scene1.tsx through Scene5.tsx
+  - src/components/ directory (if it becomes empty after the above deletions)
+
+IMPORTANT: Do NOT delete anything in:
+  - src/main/kotlin/   (Kotlin source)
+  - src/main/resources/ (app resources)
+  - src/test/kotlin/   (test source)
+
+VERIFY after deletion:
+1. Run: ./gradlew compileKotlin
+   Must succeed — no references to .tsx files exist in the Kotlin/Gradle build.
+2. Confirm src/ only contains: main/, test/ directories.
+3. Check git status — the deleted files should show as removed, nothing Kotlin should be affected.</div>
+          <button class="copy-btn" onclick="copyPrompt('P1.2')">Copy</button>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P1.2-tests">
+        <ul class="test-list">
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-auto">Auto</span>
+            <span><code>./gradlew compileKotlin</code> succeeds after deletion.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-auto">Auto</span>
+            <span><code>find src/ -name "*.tsx" -o -name "*.jsx"</code> returns nothing.</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════ PHASE 2 ════ -->
+<div id="p2" class="section">
+  <div class="page-title">Phase 2 — Core Blocking</div>
+  <div class="page-sub">Fixes that break core functionality on Linux — icons, app scanning, confirmed dialog bug.</div>
+
+  <!-- P2.1 -->
+  <div class="task-card" id="card-P2.1">
+    <div class="task-head" onclick="toggleCard('P2.1')">
+      <button class="status-btn todo" id="sbtn-P2.1" onclick="cycleStatus(event,'P2.1')">● TODO</button>
+      <span class="task-id">P2.1</span>
+      <span class="task-title" id="title-P2.1">AppIconExtractor — XDG icon lookup on Linux</span>
+      <span class="pri-badge pri-high">HIGH</span>
+      <span class="expand-icon" id="icon-P2.1">▼</span>
+    </div>
+    <div class="task-body" id="body-P2.1">
+      <div class="task-tabs">
+        <div class="task-tab active" onclick="switchTab(event,'P2.1','info')">Info</div>
+        <div class="task-tab" onclick="switchTab(event,'P2.1','agent')">Agent Prompt</div>
+        <div class="task-tab" onclick="switchTab(event,'P2.1','tests')">Tests</div>
+      </div>
+      <div class="task-panel active" id="panel-P2.1-info">
+        <div class="task-desc">
+          <strong>What's broken:</strong> The Linux branch of <code>doExtract()</code> falls through to <code>extractViaFileSystemView()</code> — this gives every app a generic Java file icon. The App Blocker screen on Linux will show blank/identical icons for every app the user can block.<br><br>
+          <strong>Fix:</strong> Implement XDG icon lookup: read the <code>Icon=</code> field from the app's <code>.desktop</code> file, then search standard icon directories (<code>/usr/share/icons/hicolor/</code>, <code>/usr/share/pixmaps/</code>, <code>~/.local/share/icons/</code>) for a matching PNG. Load it with <code>ImageIO.read()</code>. Fall back to <code>FileSystemView</code> only if no icon is found. Must run on <code>Dispatchers.IO</code>.
+        </div>
+        <div class="files-list">
+          <div class="file-chip">enforcement/AppIconExtractor.kt</div>
+          <div class="file-chip">enforcement/InstalledAppsScanner.kt (read .desktop path)</div>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P2.1-agent">
+        <div class="agent-box">
+          <div class="agent-prompt" id="ap-P2.1">In the FocusFlow Kotlin/Compose Desktop project,
+file: src/main/kotlin/com/focusflow/enforcement/AppIconExtractor.kt
+
+PROBLEM:
+The Linux branch of doExtract() calls extractViaFileSystemView() which returns
+only a generic Java file icon — not the actual app icon from the system.
+Every app in the App Blocker screen shows the same blank/generic icon on Linux.
+
+FIX — implement XDG icon lookup:
+
+Add a private function:
+  private fun extractXdgIcon(processName: String): ImageBitmap?
+
+Logic inside it:
+1. Find the .desktop file for this app by asking InstalledAppsScanner for the
+   cached ScannedApp where processName matches. Get the desktopFilePath.
+   If no path, return null.
+
+2. Read the .desktop file and parse the "Icon=" field value.
+   - Skip lines that start with #
+   - Find the line starting with "Icon="
+   - Take the value after the = sign, trimmed
+
+3. If the Icon= value starts with "/" → it is an absolute path → load File(iconValue) directly.
+
+4. If Icon= is a name (e.g. "firefox", "org.gnome.Nautilus"):
+   Search these paths in order, returning the first existing file:
+     "${System.getProperty("user.home")}/.local/share/icons/hicolor/48x48/apps/$iconName.png"
+     "${System.getProperty("user.home")}/.local/share/icons/hicolor/32x32/apps/$iconName.png"
+     "/usr/share/icons/hicolor/48x48/apps/$iconName.png"
+     "/usr/share/icons/hicolor/32x32/apps/$iconName.png"
+     "/usr/share/icons/hicolor/scalable/apps/$iconName.svg"  // skip if SVG rendering not available
+     "/usr/share/icons/$iconName.png"
+     "/usr/share/pixmaps/$iconName.png"
+     "/usr/share/pixmaps/$iconName.xpm"  // skip XPM (AWT can't load it)
+
+5. Load the found file: ImageIO.read(File(path)) → convert to ImageBitmap using
+   the same conversion pattern already used elsewhere in the file.
+
+6. Return null if nothing found (FileSystemView fallback stays in doExtract).
+
+Then update doExtract() Linux branch:
+  isLinux -> extractXdgIcon(processName) ?: extractViaFileSystemView(File(exePath))
+
+IMPORTANT:
+- This function does file I/O — it must already be called from a Dispatchers.IO context
+  (check how the existing Windows branch handles this and match the pattern).
+- Do NOT add new library dependencies — use only File, ImageIO, and existing imports.
+- processName here is the binary name (e.g. "firefox"), not the full path.
+
+TEST: Open App Blocker screen on Linux. Firefox, Chrome, VLC, Telegram should show
+their real icons instead of generic icons.</div>
+          <button class="copy-btn" onclick="copyPrompt('P2.1')">Copy</button>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P2.1-tests">
+        <ul class="test-list">
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Linux</span>
+            <span>Open App Blocker screen. Apps like Firefox, VLC, Telegram must show their real icons (not a generic file icon).</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Linux</span>
+            <span>App with no icon (e.g. obscure CLI wrapped in .desktop) — must show generic fallback without crash.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Win</span>
+            <span>Windows app icon extraction still works normally (regression check).</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- P2.2 -->
+  <div class="task-card" id="card-P2.2">
+    <div class="task-head" onclick="toggleCard('P2.2')">
+      <button class="status-btn todo" id="sbtn-P2.2" onclick="cycleStatus(event,'P2.2')">● TODO</button>
+      <span class="task-id">P2.2</span>
+      <span class="task-title" id="title-P2.2">InstalledAppsScanner — Exec= stripping + Flatpak/Snap dirs</span>
+      <span class="pri-badge pri-high">HIGH</span>
+      <span class="expand-icon" id="icon-P2.2">▼</span>
+    </div>
+    <div class="task-body" id="body-P2.2">
+      <div class="task-tabs">
+        <div class="task-tab active" onclick="switchTab(event,'P2.2','info')">Info</div>
+        <div class="task-tab" onclick="switchTab(event,'P2.2','agent')">Agent Prompt</div>
+        <div class="task-tab" onclick="switchTab(event,'P2.2','tests')">Tests</div>
+      </div>
+      <div class="task-panel active" id="panel-P2.2-info">
+        <div class="task-desc">
+          <strong>What's broken:</strong> Two issues.<br><br>
+          <strong>1. Exec= stripping:</strong> A <code>.desktop</code> file's <code>Exec=</code> field looks like <code>/usr/bin/firefox %U</code> or <code>flatpak run org.telegram.desktop</code>. If this string is stored as <code>processName</code> verbatim, it will never match what <code>ProcessHandle.info().command()</code> returns (just <code>firefox</code> or <code>/usr/bin/firefox</code>). Blocking won't work.<br><br>
+          <strong>2. Missing dirs:</strong> Only <code>/usr/share/applications</code> and <code>~/.local/share/applications</code> are scanned. Flatpak and Snap apps (which are a large share of Ubuntu apps) live elsewhere and won't appear.
+        </div>
+        <div class="files-list">
+          <div class="file-chip">enforcement/InstalledAppsScanner.kt</div>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P2.2-agent">
+        <div class="agent-box">
+          <div class="agent-prompt" id="ap-P2.2">In the FocusFlow Kotlin/Compose Desktop project,
+file: src/main/kotlin/com/focusflow/enforcement/InstalledAppsScanner.kt
+Function: scanLinuxDesktopFiles() (the private function that reads .desktop files)
+
+TWO FIXES NEEDED:
+
+── FIX 1: Exec= field stripping ──────────────────────────────────────────────
+
+The Exec= field in .desktop files looks like:
+  "/usr/bin/firefox %U"
+  "google-chrome-stable %U %F"
+  "flatpak run org.telegram.desktop"
+  "env WINEPREFIX=/home/user/.wine wine program.exe"
+
+The processName stored in ScannedApp must match what ProcessHandle.info().command()
+or ProcessHandle.info().commandLine() returns. These return the binary name or full path.
+
+After reading the Exec= value, apply this stripping logic:
+  1. Remove any field codes at the end (%U %F %i %c %k %d %n %v — anything starting with %)
+  2. Split on spaces, take only the first token (drop all args)
+  3. Remove the directory path prefix: take only the filename after the last "/"
+  4. Special case — "flatpak" as the binary: take the last component of the app-id
+     e.g. "flatpak run org.telegram.desktop" → processName = "telegram-desktop"
+         "flatpak run org.gnome.Nautilus" → processName = "nautilus" (lowercase last segment)
+  5. Special case — "env" as the binary: skip the env var assignments, find the real binary
+  6. Lowercase the result for case-insensitive matching
+
+Store BOTH the stripped processName AND the full Exec= value (as execFull or similar)
+for debugging purposes.
+
+── FIX 2: Additional scan directories ────────────────────────────────────────
+
+Current dirs scanned (keep these):
+  /usr/share/applications
+  ~/.local/share/applications
+
+Add these dirs IF they exist (use File.exists() check before adding to the list):
+  ${home}/.local/share/flatpak/exports/share/applications  (Flatpak user installs)
+  /var/lib/flatpak/exports/share/applications              (Flatpak system installs)
+  /var/lib/snapd/desktop/applications                      (Snap installs)
+
+Only scan a dir if the File object for it returns exists() == true.
+No crash if they don't exist — just skip silently.
+
+── VERIFY ────────────────────────────────────────────────────────────────────
+After both fixes:
+1. Run app on Linux and open App Blocker screen
+2. Firefox should appear and its processName should be "firefox" (not "/usr/bin/firefox %U")
+3. If Flatpak is installed, at least one Flatpak app should appear in the list
+4. Start Firefox, then check FocusFlow blocks it when session is active — confirms matching works
+5. Systems without Flatpak/Snap must not crash (dirs don't exist → silently skipped)</div>
+          <button class="copy-btn" onclick="copyPrompt('P2.2')">Copy</button>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P2.2-tests">
+        <ul class="test-list">
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Linux</span>
+            <span>Open App Blocker. Firefox/Chrome/etc. appear. Their processName in the DB is the bare binary name, not the full path+args.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Linux</span>
+            <span>Block Firefox in a session → launch Firefox → FocusFlow kills it within one poll cycle (500ms).</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Linux+Flatpak</span>
+            <span>If Flatpak is installed (e.g. Flathub), at least one Flatpak app appears in App Blocker list.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Linux-noFlatpak</span>
+            <span>System without Flatpak/Snap installed — app starts without errors, no crash from missing dirs.</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- P2.3 -->
+  <div class="task-card" id="card-P2.3">
+    <div class="task-head" onclick="toggleCard('P2.3')">
+      <button class="status-btn todo" id="sbtn-P2.3" onclick="cycleStatus(event,'P2.3')">● TODO</button>
+      <span class="task-id">P2.3</span>
+      <span class="task-title" id="title-P2.3">App.kt — guard registry orphan check with IS_WINDOWS</span>
+      <span class="pri-badge pri-high">HIGH</span>
+      <span class="expand-icon" id="icon-P2.3">▼</span>
+    </div>
+    <div class="task-body" id="body-P2.3">
+      <div class="task-tabs">
+        <div class="task-tab active" onclick="switchTab(event,'P2.3','info')">Info</div>
+        <div class="task-tab" onclick="switchTab(event,'P2.3','agent')">Agent Prompt</div>
+        <div class="task-tab" onclick="switchTab(event,'P2.3','tests')">Tests</div>
+      </div>
+      <div class="task-panel active" id="panel-P2.3-info">
+        <div class="task-desc">
+          <strong>Confirmed bug (from code read):</strong> In <code>App.kt</code> around line 196, there's a <code>LaunchedEffect</code> that calls <code>RegistryLockdown.detectOrphanedKeys()</code> with NO <code>IS_WINDOWS</code> guard. On Linux, this runs unconditionally after 4 seconds. If it returns <code>true</code>, it triggers a dialog saying <em>"FocusFlow detected that Windows Task Manager appears disabled"</em> — completely wrong on Linux. Even if <code>RegistryLockdown</code> has an internal guard and returns false, this is unnecessary JNA code running on Linux at startup.<br><br>
+          <strong>Fix:</strong> Wrap the entire <code>LaunchedEffect</code> with <code>if (IS_WINDOWS)</code> before calling <code>detectOrphanedKeys()</code>.
+        </div>
+        <div class="files-list">
+          <div class="file-chip">App.kt (line ~196 LaunchedEffect)</div>
+          <div class="file-chip">enforcement/RegistryLockdown.kt (verify internal guard)</div>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P2.3-agent">
+        <div class="agent-box">
+          <div class="agent-prompt" id="ap-P2.3">In the FocusFlow Kotlin/Compose Desktop project,
+file: src/main/kotlin/com/focusflow/App.kt
+
+CONFIRMED BUG:
+There is a LaunchedEffect block that runs 4 seconds after app start and calls
+RegistryLockdown.detectOrphanedKeys() with NO IS_WINDOWS check.
+
+Find this block — it looks approximately like:
+  LaunchedEffect(Unit) {
+      delay(4_000L)
+      val orphaned = withContext(Dispatchers.IO) {
+          val nuclearOn = try { NuclearMode.isActive } catch (_: Throwable) { true }
+          val kioskOn   = try { FocusLauncherService.isActive.value } catch (_: Throwable) { true }
+          if (nuclearOn || kioskOn) false
+          else RegistryLockdown.detectOrphanedKeys()
+      }
+      if (orphaned) showRegistryOrphanDialog = true
+  }
+
+FIX:
+Wrap the detectOrphanedKeys() call so it only runs on Windows:
+  else if (IS_WINDOWS) RegistryLockdown.detectOrphanedKeys() else false
+
+Full corrected block:
+  LaunchedEffect(Unit) {
+      delay(4_000L)
+      val orphaned = withContext(Dispatchers.IO) {
+          val nuclearOn = try { NuclearMode.isActive } catch (_: Throwable) { true }
+          val kioskOn   = try { FocusLauncherService.isActive.value } catch (_: Throwable) { true }
+          if (nuclearOn || kioskOn) false
+          else if (IS_WINDOWS) RegistryLockdown.detectOrphanedKeys()
+          else false
+      }
+      if (orphaned) showRegistryOrphanDialog = true
+  }
+
+IS_WINDOWS is imported as: import com.focusflow.IS_WINDOWS
+(Check the existing imports at the top of App.kt — IS_LINUX is already imported there,
+IS_WINDOWS should be in the same import or add it from the same package.)
+
+ALSO CHECK: The showRegistryOrphanDialog dialog that shows at line ~404. Verify its text
+says "Windows Task Manager appears disabled". Add an IS_WINDOWS guard to the entire
+dialog composable block so it cannot render on Linux:
+  if (showRegistryOrphanDialog && IS_WINDOWS) {
+      // existing dialog code
+  }
+
+VERIFY:
+1. Run app on Linux, wait 5 seconds — the "Task Manager disabled" dialog must NOT appear.
+2. Run app on Windows — the orphan check still works as before (if task manager keys are
+   stuck, the dialog still appears correctly).
+3. No compile errors — IS_WINDOWS import resolves.</div>
+          <button class="copy-btn" onclick="copyPrompt('P2.3')">Copy</button>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P2.3-tests">
+        <ul class="test-list">
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Linux</span>
+            <span>Launch app on Linux, wait 10 seconds — <strong>no</strong> "Task Manager appears disabled" dialog appears.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Win</span>
+            <span>Windows: registry orphan detection still works (can simulate by writing DisableTaskMgr=1 manually in registry, verify dialog shows).</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════ PHASE 3 ════ -->
+<div id="p3" class="section">
+  <div class="page-title">Phase 3 — Kiosk Hardening</div>
+  <div class="page-sub">Security gaps in kiosk/session enforcement on Linux.</div>
+
+  <!-- P3.1 -->
+  <div class="task-card" id="card-P3.1">
+    <div class="task-head" onclick="toggleCard('P3.1')">
+      <button class="status-btn todo" id="sbtn-P3.1" onclick="cycleStatus(event,'P3.1')">● TODO</button>
+      <span class="task-id">P3.1</span>
+      <span class="task-title" id="title-P3.1">GlobalKeyboardHook — Wayland keyboard gap (D-Bus or document)</span>
+      <span class="pri-badge pri-high">HIGH</span>
+      <span class="expand-icon" id="icon-P3.1">▼</span>
+    </div>
+    <div class="task-body" id="body-P3.1">
+      <div class="task-tabs">
+        <div class="task-tab active" onclick="switchTab(event,'P3.1','info')">Info</div>
+        <div class="task-tab" onclick="switchTab(event,'P3.1','agent')">Agent Prompt</div>
+        <div class="task-tab" onclick="switchTab(event,'P3.1','tests')">Tests</div>
+      </div>
+      <div class="task-panel active" id="panel-P3.1-info">
+        <div class="task-desc">
+          <strong>What's broken:</strong> <code>GlobalKeyboardHook</code> uses <code>XGrabKeyboard</code> on X11 — this blocks Alt+Tab and other shortcuts during kiosk sessions. On native Wayland, <code>XGrabKeyboard</code> does nothing (Wayland has no global keyboard grab API by design). There's a <code>// TODO: xdg-desktop-portal</code> comment acknowledging this. A user in kiosk mode on a Wayland session can freely Alt+Tab to any other app.<br><br>
+          <strong>Fix:</strong> Attempt <code>gdbus call --session</code> to the <code>org.freedesktop.portal.Inhibit</code> interface when <code>isWayland</code> is true. If <code>gdbus</code> isn't available, log the limitation clearly and add a warning card in <code>LinuxSetupScreen</code> when on Wayland.
+        </div>
+        <div class="files-list">
+          <div class="file-chip">enforcement/GlobalKeyboardHook.kt</div>
+          <div class="file-chip">ui/screens/LinuxSetupScreen.kt (warning card)</div>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P3.1-agent">
+        <div class="agent-box">
+          <div class="agent-prompt" id="ap-P3.1">In the FocusFlow Kotlin/Compose Desktop project,
+file: src/main/kotlin/com/focusflow/enforcement/GlobalKeyboardHook.kt
+
+PROBLEM:
+XGrabKeyboard only works on X11. When isWayland is true, keyboard grab fails silently.
+There is an existing TODO comment for this. On Wayland, kiosk keyboard enforcement
+(blocking Alt+Tab, Super key, etc.) is completely absent.
+
+isWayland is defined in WinApiBindings.kt:
+  val isWayland: Boolean
+
+FIX — two parts:
+
+PART 1: Add D-Bus Inhibit attempt when isWayland is true.
+
+In the enableLinuxHook() function (or wherever the Linux branch currently handles
+the Wayland case), add:
+
+  if (isWayland) {
+      val gdbus = ProcessBuilder("which", "gdbus").start()
+      val gdbusAvailable = gdbus.waitFor(2, java.util.concurrent.TimeUnit.SECONDS) && gdbus.exitValue() == 0
+      if (gdbusAvailable) {
+          waylandInhibitProcess = ProcessBuilder(
+              "gdbus", "call",
+              "--session",
+              "--dest", "org.freedesktop.portal.Desktop",
+              "--object-path", "/org/freedesktop/portal/desktop",
+              "--method", "org.freedesktop.portal.Inhibit.Inhibit",
+              "", "1", "{}"
+          ).redirectErrorStream(true).start()
+          EnforcementLog.info("GlobalKeyboardHook", "Wayland: D-Bus Inhibit requested via xdg-desktop-portal")
+      } else {
+          EnforcementLog.warn("GlobalKeyboardHook",
+              "Wayland session: keyboard grab unavailable (gdbus not found). " +
+              "Enforcement via process monitoring and overlay only.")
+      }
+      return  // don't attempt XGrabKeyboard on Wayland
+  }
+
+Add a field: private var waylandInhibitProcess: Process? = null
+
+In the disable() function, add cleanup:
+  waylandInhibitProcess?.destroy()
+  waylandInhibitProcess = null
+
+PART 2: Add a warning card in LinuxSetupScreen when Wayland is detected.
+
+In src/main/kotlin/com/focusflow/ui/screens/LinuxSetupScreen.kt,
+after the existing tool-status cards, add:
+
+  if (isWayland) {
+      // Warning card
+      Card(...) {
+          Row {
+              Icon(Icons.Default.Warning, tint = Warning)
+              Column {
+                  Text("Wayland session detected", fontWeight = FontWeight.Bold)
+                  Text("Keyboard shortcut blocking (Alt+Tab, Super key) is not available " +
+                       "on Wayland. Switch to an X11/Xorg session for full kiosk keyboard " +
+                       "enforcement. Process blocking and screen overlay still work normally.")
+              }
+          }
+      }
+  }
+
+VERIFY:
+1. On X11: start a kiosk session → Alt+Tab should be blocked (existing behavior, must not regress)
+2. On Wayland: start a kiosk session → gdbus command fires, EnforcementLog shows the message,
+   NO crash occurs, app continues normally
+3. On Wayland without gdbus: warning is logged, LinuxSetupScreen shows the warning card</div>
+          <button class="copy-btn" onclick="copyPrompt('P3.1')">Copy</button>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P3.1-tests">
+        <ul class="test-list">
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-x11">X11</span>
+            <span>Start kiosk session. Alt+Tab is blocked. Session ends cleanly. Keyboard grab released.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-wayland">Wayland</span>
+            <span>Start kiosk session. App does NOT crash. EnforcementLog shows "Wayland: D-Bus Inhibit requested" (or limitation warning if gdbus missing).</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-wayland">Wayland</span>
+            <span>Linux Setup screen shows the Wayland keyboard warning card when running on a Wayland session.</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- P3.2 -->
+  <div class="task-card" id="card-P3.2">
+    <div class="task-head" onclick="toggleCard('P3.2')">
+      <button class="status-btn todo" id="sbtn-P3.2" onclick="cycleStatus(event,'P3.2')">● TODO</button>
+      <span class="task-id">P3.2</span>
+      <span class="task-title" id="title-P3.2">NuclearMode — add GNOME/KDE task managers to escape list</span>
+      <span class="pri-badge pri-medium">MEDIUM</span>
+      <span class="expand-icon" id="icon-P3.2">▼</span>
+    </div>
+    <div class="task-body" id="body-P3.2">
+      <div class="task-tabs">
+        <div class="task-tab active" onclick="switchTab(event,'P3.2','info')">Info</div>
+        <div class="task-tab" onclick="switchTab(event,'P3.2','agent')">Agent Prompt</div>
+        <div class="task-tab" onclick="switchTab(event,'P3.2','tests')">Tests</div>
+      </div>
+      <div class="task-panel active" id="panel-P3.2-info">
+        <div class="task-desc">
+          <strong>What's missing:</strong> <code>NuclearMode.linuxEscapeProcesses</code> covers terminal emulators, but may not cover all GUI task managers that a user could launch to kill FocusFlow during a session. GNOME, KDE, MATE, and LXTask all have distinct system monitor binaries. Without these, a user in kiosk mode could open GNOME System Monitor and kill FocusFlow.
+        </div>
+        <div class="files-list">
+          <div class="file-chip">enforcement/NuclearMode.kt</div>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P3.2-agent">
+        <div class="agent-box">
+          <div class="agent-prompt" id="ap-P3.2">In the FocusFlow Kotlin/Compose Desktop project,
+file: src/main/kotlin/com/focusflow/enforcement/NuclearMode.kt
+
+Find the linuxEscapeProcesses list (or equivalent — the list of process names that
+get killed during an active Nuclear Mode session on Linux).
+
+Audit the list and ADD any of these entries that are NOT already present:
+  // GNOME
+  "gnome-system-monitor",
+  // KDE Plasma
+  "ksysguard",
+  "plasma-systemmonitor",
+  // XFCE
+  "xfce4-taskmanager",
+  // LXDE/LXQt
+  "lxtask",
+  "qps",
+  // MATE
+  "mate-system-monitor",
+  // Independent
+  "stacer",             // popular GUI system optimizer/monitor on Ubuntu
+  "process-viewer",
+
+Do NOT add duplicates — check the existing list first and only add what's missing.
+
+ALSO CHECK ProcessMonitor.kt for the Linux shell/system-process list (whatever variable
+corresponds to linuxSystemShells or similar). If htop, btop, bashtop are not in that
+list as processes that should be killed when running in a terminal window during a
+session, add them there too.
+
+VERIFY:
+1. During an active Nuclear Mode session on Linux, open gnome-system-monitor →
+   it should be killed within one enforcement cycle.
+2. No crash when these processes aren't running (they won't be, most of the time).
+3. Run ./gradlew compileKotlin — no compile errors from the list change.</div>
+          <button class="copy-btn" onclick="copyPrompt('P3.2')">Copy</button>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P3.2-tests">
+        <ul class="test-list">
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Linux</span>
+            <span>Start Nuclear Mode session. Open GNOME System Monitor — it must be killed within ~500ms.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Linux</span>
+            <span>Start Nuclear Mode session. Open KDE System Guard (if on KDE) — killed within ~500ms.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-auto">Auto</span>
+            <span><code>./gradlew compileKotlin</code> succeeds — no syntax errors in the list.</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- P3.3 -->
+  <div class="task-card" id="card-P3.3">
+    <div class="task-head" onclick="toggleCard('P3.3')">
+      <button class="status-btn todo" id="sbtn-P3.3" onclick="cycleStatus(event,'P3.3')">● TODO</button>
+      <span class="task-id">P3.3</span>
+      <span class="task-title" id="title-P3.3">FloatingBlockOverlay — xdotool raise on Linux</span>
+      <span class="pri-badge pri-medium">MEDIUM</span>
+      <span class="expand-icon" id="icon-P3.3">▼</span>
+    </div>
+    <div class="task-body" id="body-P3.3">
+      <div class="task-tabs">
+        <div class="task-tab active" onclick="switchTab(event,'P3.3','info')">Info</div>
+        <div class="task-tab" onclick="switchTab(event,'P3.3','agent')">Agent Prompt</div>
+        <div class="task-tab" onclick="switchTab(event,'P3.3','tests')">Tests</div>
+      </div>
+      <div class="task-panel active" id="panel-P3.3-info">
+        <div class="task-desc">
+          <strong>What's uncertain:</strong> <code>FloatingBlockOverlay.kt</code> already includes Linux (<code>!isWindows && !isLinux</code> would exclude it — but the guard says just that, so Linux IS included). However, AWT's <code>window.isAlwaysOnTop = true</code> is not guaranteed on all Linux compositors. Some will let other windows pop in front of the overlay, defeating the block. Adding an <code>xdotool windowraise</code> call after showing the window is a cheap and reliable belt-and-suspenders fix on X11/XWayland.
+        </div>
+        <div class="files-list">
+          <div class="file-chip">enforcement/FloatingBlockOverlay.kt</div>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P3.3-agent">
+        <div class="agent-box">
+          <div class="agent-prompt" id="ap-P3.3">In the FocusFlow Kotlin/Compose Desktop project,
+file: src/main/kotlin/com/focusflow/enforcement/FloatingBlockOverlay.kt
+
+PROBLEM:
+AWT window.isAlwaysOnTop = true is not reliably honored by all Linux compositors.
+On some setups the overlay can be moved behind other windows.
+
+FIX:
+After the overlay window becomes visible (after the line that sets isVisible = true),
+if isLinux is true and hasXdotool is true, attempt to raise the window with xdotool:
+
+  if (isLinux && hasXdotool) {
+      // Best-effort raise — fire and forget, no waitFor
+      try {
+          ProcessBuilder("xdotool", "search", "--name", window.title, "windowraise")
+              .redirectErrorStream(true)
+              .start()
+      } catch (_: Exception) { /* ignore */ }
+
+      // Second raise after 600ms in case compositor reorders during startup
+      Thread {
+          Thread.sleep(600)
+          try {
+              ProcessBuilder("xdotool", "search", "--name", window.title, "windowraise")
+                  .redirectErrorStream(true)
+                  .start()
+          } catch (_: Exception) { /* ignore */ }
+      }.apply { isDaemon = true; start() }
+  }
+
+isLinux, hasXdotool are in WinApiBindings.kt — import them.
+
+"window.title" should match whatever title string the overlay window uses. Check
+the existing code for how the window is created and what its title is. Use that
+exact string in the xdotool search.
+
+NOTE: This is fire-and-forget. Do NOT use waitFor(). If xdotool isn't installed
+or fails, it silently does nothing. The isAlwaysOnTop flag still applies regardless.
+
+VERIFY:
+1. On X11: trigger a block overlay during a session. The overlay stays on top
+   even if another window is brought to front.
+2. On Wayland: no crash, no hang — the xdotool call either silently fails or works
+   under XWayland.
+3. On Windows: no change to existing behavior (the isLinux guard prevents this code
+   from running).</div>
+          <button class="copy-btn" onclick="copyPrompt('P3.3')">Copy</button>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P3.3-tests">
+        <ul class="test-list">
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-x11">X11</span>
+            <span>Block a running app during a session. The overlay appears. Alt+click/drag on another window — overlay must stay on top.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-wayland">Wayland</span>
+            <span>Same test on Wayland — no crash, app continues even if xdotool call doesn't work.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Win</span>
+            <span>Windows block overlay still works normally (regression check).</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════ PHASE 4 ════ -->
+<div id="p4" class="section">
+  <div class="page-title">Phase 4 — System Integration</div>
+  <div class="page-sub">Notifications, autostart, and panel control per desktop environment.</div>
+
+  <!-- P4.1 -->
+  <div class="task-card" id="card-P4.1">
+    <div class="task-head" onclick="toggleCard('P4.1')">
+      <button class="status-btn todo" id="sbtn-P4.1" onclick="cycleStatus(event,'P4.1')">● TODO</button>
+      <span class="task-id">P4.1</span>
+      <span class="task-title" id="title-P4.1">SystemTrayManager — notify-send fallback for Wayland</span>
+      <span class="pri-badge pri-medium">MEDIUM</span>
+      <span class="expand-icon" id="icon-P4.1">▼</span>
+    </div>
+    <div class="task-body" id="body-P4.1">
+      <div class="task-tabs">
+        <div class="task-tab active" onclick="switchTab(event,'P4.1','info')">Info</div>
+        <div class="task-tab" onclick="switchTab(event,'P4.1','agent')">Agent Prompt</div>
+        <div class="task-tab" onclick="switchTab(event,'P4.1','tests')">Tests</div>
+      </div>
+      <div class="task-panel active" id="panel-P4.1-info">
+        <div class="task-desc">
+          <strong>What's broken:</strong> On native Wayland, <code>java.awt.SystemTray.isSupported()</code> returns false, so <code>trayIcon</code> is null. <code>showNotification()</code> routes ALL notifications through <code>trayIcon.displayMessage()</code> — if <code>trayIcon</code> is null, the notification is silently dropped. The user gets zero feedback during sessions (blocked app notifications, timer alerts, etc.).<br><br>
+          <code>LinuxToolsChecker</code> already probes for <code>notify-send</code> and <code>LinuxSetupScreen</code> already lists it as a dependency. It just needs to actually be called as a fallback.
+        </div>
+        <div class="files-list">
+          <div class="file-chip">services/SystemTrayManager.kt</div>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P4.1-agent">
+        <div class="agent-box">
+          <div class="agent-prompt" id="ap-P4.1">In the FocusFlow Kotlin/Compose Desktop project,
+file: src/main/kotlin/com/focusflow/services/SystemTrayManager.kt
+
+PROBLEM:
+showNotification() calls trayIcon?.displayMessage(). When trayIcon is null
+(which it is on native Wayland since SystemTray.isSupported() = false),
+notifications are silently dropped. Users get no feedback during sessions.
+
+notify-send is already probed by LinuxToolsChecker and listed in LinuxSetupScreen
+as a required dependency, but it's never called.
+
+FIX:
+Find the showNotification() function. After the trayIcon?.displayMessage() call,
+add a fallback for when trayIcon is null on Linux:
+
+  fun showNotification(title: String, message: String, type: TrayIcon.MessageType = TrayIcon.MessageType.NONE) {
+      if (trayIcon != null) {
+          trayIcon?.displayMessage(title, message, type)
+          return
+      }
+      // Fallback: notify-send for Linux/Wayland where AWT tray is unavailable
+      if (isLinux) {
+          try {
+              val urgency = when (type) {
+                  TrayIcon.MessageType.ERROR   -> "critical"
+                  TrayIcon.MessageType.WARNING -> "normal"
+                  else                         -> "low"
+              }
+              ProcessBuilder(
+                  "notify-send",
+                  "--app-name=FocusFlow",
+                  "--urgency=$urgency",
+                  "--expire-time=4000",
+                  title,
+                  message
+              ).redirectErrorStream(true).start()
+              // Fire and forget — no waitFor()
+          } catch (_: Exception) {
+              // notify-send not installed or failed — nothing we can do
+          }
+      }
+  }
+
+isLinux is importable from com.focusflow.enforcement (or WinApiBindings.kt).
+
+VERIFY:
+1. On a Wayland session (where trayIcon is null), trigger an event that sends a
+   notification (e.g. start and end a focus session, or trigger a block).
+   A desktop notification popup should appear via notify-send.
+2. On X11 (where trayIcon is available): the existing AWT tray balloon still appears
+   as normal — the notify-send path is NOT taken.
+3. On a system without notify-send installed: no crash, silent failure.
+4. Run ./gradlew compileKotlin — no compile errors.</div>
+          <button class="copy-btn" onclick="copyPrompt('P4.1')">Copy</button>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P4.1-tests">
+        <ul class="test-list">
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-wayland">Wayland</span>
+            <span>Start and end a focus session on Wayland. A desktop notification popup must appear via notify-send.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-x11">X11</span>
+            <span>Same test on X11 — AWT tray balloon still appears, notify-send path NOT used.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Linux-no-ns</span>
+            <span>Remove notify-send (or test on system without it) — app doesn't crash, just silent notification failure.</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- P4.2 -->
+  <div class="task-card" id="card-P4.2">
+    <div class="task-head" onclick="toggleCard('P4.2')">
+      <button class="status-btn todo" id="sbtn-P4.2" onclick="cycleStatus(event,'P4.2')">● TODO</button>
+      <span class="task-id">P4.2</span>
+      <span class="task-title" id="title-P4.2">WindowsStartupManager — verify resolveExePath() for AppImage/deb</span>
+      <span class="pri-badge pri-medium">MEDIUM</span>
+      <span class="expand-icon" id="icon-P4.2">▼</span>
+    </div>
+    <div class="task-body" id="body-P4.2">
+      <div class="task-tabs">
+        <div class="task-tab active" onclick="switchTab(event,'P4.2','info')">Info</div>
+        <div class="task-tab" onclick="switchTab(event,'P4.2','agent')">Agent Prompt</div>
+        <div class="task-tab" onclick="switchTab(event,'P4.2','tests')">Tests</div>
+      </div>
+      <div class="task-panel active" id="panel-P4.2-info">
+        <div class="task-desc">
+          <strong>What's uncertain:</strong> The autostart <code>.desktop</code> file's <code>Exec=</code> line needs the actual path to the FocusFlow binary. The path differs depending on install method — <code>.deb</code> installs it to <code>/usr/bin/focusflow</code> or <code>/opt/...</code>, AppImage uses wherever the user put the <code>.AppImage</code> file, and running from Gradle build gives a JVM path. If <code>resolveExePath()</code> gets this wrong, autostart silently does nothing after login.<br><br>
+          Also, the <code>.desktop</code> file template should include <code>StartupWMClass=focusflow</code> so GNOME correctly associates the running window with the launcher entry.
+        </div>
+        <div class="files-list">
+          <div class="file-chip">enforcement/WindowsStartupManager.kt</div>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P4.2-agent">
+        <div class="agent-box">
+          <div class="agent-prompt" id="ap-P4.2">In the FocusFlow Kotlin/Compose Desktop project,
+file: src/main/kotlin/com/focusflow/enforcement/WindowsStartupManager.kt
+
+TASK: Audit and fix resolveExePath() for the Linux branch.
+
+Read the current Linux branch of resolveExePath(). It needs to handle three scenarios:
+
+SCENARIO 1 — Running from .deb or .rpm install:
+  Binary is at /usr/bin/focusflow or /opt/focusflow/bin/focusflow
+  ProcessHandle.current().info().command() returns the actual binary path.
+  Use this directly.
+
+SCENARIO 2 — Running as AppImage:
+  The running process path ends in .AppImage (e.g. /home/user/FocusFlow.AppImage)
+  ProcessHandle.current().info().command() returns the AppImage path.
+  Use this directly — it IS the executable.
+
+SCENARIO 3 — Running from Gradle build directory (development):
+  ProcessHandle.current().info().command() returns a java/java.exe path.
+  In this case, look for a wrapper script named "focusflow" in the same directory
+  as the JVM binary's parent. If not found, log a warning and use the java path
+  as a best-effort fallback.
+
+Implementation:
+  private fun resolveLinuxExePath(): String {
+      val cmd = ProcessHandle.current().info().command().orElse(null) ?: return ""
+      return when {
+          cmd.endsWith(".AppImage") -> cmd   // AppImage — use as-is
+          cmd.endsWith("/java") || cmd.endsWith("/java.exe") -> {
+              // Running from Gradle — try to find the wrapper script
+              val javaDir = File(cmd).parentFile?.parentFile  // go up past bin/
+              val wrapper = File(javaDir, "focusflow")
+              if (wrapper.exists() && wrapper.canExecute()) wrapper.absolutePath
+              else cmd  // fallback to java path with a warning log
+          }
+          else -> cmd  // Installed binary
+      }
+  }
+
+ALSO: Find the .desktop file template written by enable() and add StartupWMClass if missing:
+
+The template should contain:
+  [Desktop Entry]
+  Type=Application
+  Name=FocusFlow
+  Exec=/path/to/focusflow
+  Icon=focusflow
+  StartupNotify=false
+  StartupWMClass=focusflow      <-- ADD THIS LINE if not present
+  X-GNOME-Autostart-enabled=true
+  Hidden=false
+
+StartupWMClass makes GNOME Shell correctly associate the running window with the
+autostart entry (otherwise the taskbar shows a duplicate icon).
+
+VERIFY:
+1. Enable "Start with Linux" in Settings.
+2. Check ~/.config/autostart/focusflow.desktop — Exec= line must have the correct
+   binary path (not a java path, not empty).
+3. Log out and log back in → FocusFlow must launch automatically.
+4. The .desktop file must contain StartupWMClass=focusflow.</div>
+          <button class="copy-btn" onclick="copyPrompt('P4.2')">Copy</button>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P4.2-tests">
+        <ul class="test-list">
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Linux</span>
+            <span>Enable autostart in Settings. Check <code>~/.config/autostart/focusflow.desktop</code> — <code>Exec=</code> must be the real binary path, not a JVM path.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Linux (deb)</span>
+            <span>After <code>.deb</code> install: enable autostart → log out → log back in → FocusFlow launches.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Linux</span>
+            <span><code>StartupWMClass=focusflow</code> is present in the written <code>.desktop</code> file.</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- P4.3 -->
+  <div class="task-card" id="card-P4.3">
+    <div class="task-head" onclick="toggleCard('P4.3')">
+      <button class="status-btn todo" id="sbtn-P4.3" onclick="cycleStatus(event,'P4.3')">● TODO</button>
+      <span class="task-id">P4.3</span>
+      <span class="task-title" id="title-P4.3">FocusLauncherService — GNOME/KDE panel hide DE detection</span>
+      <span class="pri-badge pri-medium">MEDIUM</span>
+      <span class="expand-icon" id="icon-P4.3">▼</span>
+    </div>
+    <div class="task-body" id="body-P4.3">
+      <div class="task-tabs">
+        <div class="task-tab active" onclick="switchTab(event,'P4.3','info')">Info</div>
+        <div class="task-tab" onclick="switchTab(event,'P4.3','agent')">Agent Prompt</div>
+        <div class="task-tab" onclick="switchTab(event,'P4.3','tests')">Tests</div>
+      </div>
+      <div class="task-panel active" id="panel-P4.3-info">
+        <div class="task-desc">
+          <strong>What's broken:</strong> The kiosk panel hide uses <code>xdotool search --class panel</code>. This works on XFCE and LXPanel. On GNOME Shell and KDE Plasma, panels are compositor-integrated — they are not separate X11 windows, so <code>xdotool</code> can't find or hide them. The xdotool call silently fails and the panel stays visible, giving users a taskbar to click out of the kiosk session.<br><br>
+          <strong>Fix:</strong> Detect the DE via <code>XDG_CURRENT_DESKTOP</code> and log the limitation clearly for GNOME/KDE rather than silently failing. For non-GNOME/KDE, keep the xdotool approach.
+        </div>
+        <div class="files-list">
+          <div class="file-chip">services/FocusLauncherService.kt</div>
+          <div class="file-chip">ui/screens/LinuxSetupScreen.kt (DE note)</div>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P4.3-agent">
+        <div class="agent-box">
+          <div class="agent-prompt" id="ap-P4.3">In the FocusFlow Kotlin/Compose Desktop project,
+file: src/main/kotlin/com/focusflow/services/FocusLauncherService.kt
+
+PROBLEM:
+The kiosk mode panel-hide code uses xdotool search --class panel.
+This works on XFCE/LXPanel on X11.
+On GNOME Shell and KDE Plasma, panels are compositor-integrated — they have
+no separate X11 window. xdotool finds nothing and silently fails.
+Users on GNOME/KDE can still see the taskbar and click to open other apps.
+
+FIX:
+Find the hidePanels() function (or equivalent). Before the xdotool calls, add DE detection:
+
+  val de = System.getenv("XDG_CURRENT_DESKTOP")?.lowercase().orEmpty()
+
+  when {
+      de.contains("gnome") -> {
+          EnforcementLog.warn(
+              "FocusLauncherService",
+              "GNOME Shell detected — panel hiding not supported (panel is compositor-integrated). " +
+              "Kiosk enforcement via overlay and process monitoring only."
+          )
+          // Do NOT attempt xdotool — it will find nothing and the warning above
+          // makes the limitation explicit in the log.
+      }
+      de.contains("kde") || de.contains("plasma") -> {
+          EnforcementLog.warn(
+              "FocusLauncherService",
+              "KDE Plasma detected — panel hiding not supported. " +
+              "Kiosk enforcement via overlay and process monitoring only."
+          )
+      }
+      else -> {
+          // Existing xdotool approach for XFCE, LXPanel, Openbox, etc.
+          // Keep ALL existing code here unchanged.
+      }
+  }
+
+Do the same in emergencyRestoreWindows() / restorePanels() — add the same DE check so
+the restore path is also DE-aware (on GNOME/KDE there's nothing to restore, skip).
+
+ALSO: In LinuxSetupScreen.kt, add a note somewhere visible:
+  "Panel hiding during Focus Launcher sessions works best on XFCE/LXPanel 
+   in an X11 session. GNOME and KDE users: kiosk enforcement uses overlay 
+   and process blocking instead."
+
+VERIFY:
+1. On GNOME: start a Focus Launcher kiosk session → EnforcementLog shows the GNOME warning.
+   The panel stays visible (expected) but FocusFlow does not crash or hang.
+2. On XFCE/X11: start a kiosk session → panel hides as before (regression check).
+3. On GNOME: end the session → emergencyRestoreWindows() runs without errors.</div>
+          <button class="copy-btn" onclick="copyPrompt('P4.3')">Copy</button>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P4.3-tests">
+        <ul class="test-list">
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">GNOME</span>
+            <span>Start kiosk session. EnforcementLog shows GNOME warning. No crash. Session ends cleanly.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-x11">XFCE/X11</span>
+            <span>Start kiosk session. Panel hides as before. End session — panel restores.</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════ PHASE 5 ════ -->
+<div id="p5" class="section">
+  <div class="page-title">Phase 5 — Polish</div>
+  <div class="page-sub">UI text, crash cleanup guard, and CI setup.</div>
+
+  <!-- P5.1 -->
+  <div class="task-card" id="card-P5.1">
+    <div class="task-head" onclick="toggleCard('P5.1')">
+      <button class="status-btn todo" id="sbtn-P5.1" onclick="cycleStatus(event,'P5.1')">● TODO</button>
+      <span class="task-id">P5.1</span>
+      <span class="task-title" id="title-P5.1">VpnNetworkScreen — replace Windows-only text on Linux</span>
+      <span class="pri-badge pri-low">LOW</span>
+      <span class="expand-icon" id="icon-P5.1">▼</span>
+    </div>
+    <div class="task-body" id="body-P5.1">
+      <div class="task-tabs">
+        <div class="task-tab active" onclick="switchTab(event,'P5.1','info')">Info</div>
+        <div class="task-tab" onclick="switchTab(event,'P5.1','agent')">Agent Prompt</div>
+        <div class="task-tab" onclick="switchTab(event,'P5.1','tests')">Tests</div>
+      </div>
+      <div class="task-panel active" id="panel-P5.1-info">
+        <div class="task-desc">
+          <strong>What's wrong:</strong> <code>VpnNetworkScreen.kt</code> contains several hardcoded strings referencing Windows concepts: <em>"Windows hosts file (requires admin)"</em>, <em>"Windows Firewall rules"</em>, <em>"Re-launch FocusFlow as Administrator"</em>. Linux users see these strings even though on Linux it's <code>/etc/hosts</code> + <code>iptables</code> + <code>pkexec</code>. Cosmetic but misleading.
+        </div>
+        <div class="files-list">
+          <div class="file-chip">ui/screens/VpnNetworkScreen.kt</div>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P5.1-agent">
+        <div class="agent-box">
+          <div class="agent-prompt" id="ap-P5.1">In the FocusFlow Kotlin/Compose Desktop project,
+file: src/main/kotlin/com/focusflow/ui/screens/VpnNetworkScreen.kt
+
+PROBLEM: Several UI strings are Windows-specific and show on Linux users unchanged.
+
+Find and update these strings to be platform-aware. Import isWindows and isLinux
+from com.focusflow.enforcement if not already imported.
+
+STRINGS TO UPDATE:
+
+1. "Windows hosts file (requires admin)" →
+   "${if (isWindows) "Windows hosts file" else "/etc/hosts"} (requires ${if (isWindows) "admin rights" else "pkexec"})"
+
+2. "Windows Firewall rules" →
+   "${if (isWindows) "Windows Firewall rules" else "iptables rules"}"
+
+3. The description string that says both VPN Shield and Network Cutoff Rules require
+   administrator privileges and reference "Windows hosts file" and "Windows Firewall rules":
+   Replace Windows-specific terms with conditional versions as above.
+
+4. Look for any button or section labeled "Re-launch as Administrator" or similar.
+   If it exists, wrap it with: if (isWindows) { ... }
+   On Linux this button does nothing useful (no UAC equivalent), so hide it.
+
+5. Any reference to "netsh" or Windows Firewall — wrap with isWindows.
+
+VERIFY:
+1. Open VPN/Network screen on Linux — no text should say "Windows", "admin rights",
+   or "Windows Firewall". Should say "/etc/hosts", "pkexec", "iptables" instead.
+2. Open VPN/Network screen on Windows — original text still shows unchanged.
+3. ./gradlew compileKotlin succeeds.</div>
+          <button class="copy-btn" onclick="copyPrompt('P5.1')">Copy</button>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P5.1-tests">
+        <ul class="test-list">
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Linux</span>
+            <span>Open VPN/Network screen. Search visible text for "Windows" — none should appear.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Win</span>
+            <span>Same screen on Windows — all original text unchanged.</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- P5.2 -->
+  <div class="task-card" id="card-P5.2">
+    <div class="task-head" onclick="toggleCard('P5.2')">
+      <button class="status-btn todo" id="sbtn-P5.2" onclick="cycleStatus(event,'P5.2')">● TODO</button>
+      <span class="task-id">P5.2</span>
+      <span class="task-title" id="title-P5.2">SettingsScreen — Linux-aware enforcement description</span>
+      <span class="pri-badge pri-low">LOW</span>
+      <span class="expand-icon" id="icon-P5.2">▼</span>
+    </div>
+    <div class="task-body" id="body-P5.2">
+      <div class="task-tabs">
+        <div class="task-tab active" onclick="switchTab(event,'P5.2','info')">Info</div>
+        <div class="task-tab" onclick="switchTab(event,'P5.2','agent')">Agent Prompt</div>
+        <div class="task-tab" onclick="switchTab(event,'P5.2','tests')">Tests</div>
+      </div>
+      <div class="task-panel active" id="panel-P5.2-info">
+        <div class="task-desc">
+          <strong>What's wrong:</strong> Line ~999 in <code>SettingsScreen.kt</code> has a hardcoded string: <em>"Enforcement: JNA Win32 + WinEventHook + Nuclear Mode + Windows Firewall"</em>. This debug/info text is shown to Linux users verbatim. Also line ~184 says <em>"WinEventHook inactive — polling fallback only"</em> for Linux, which is technically correct but could say something more informative about xdotool.
+        </div>
+        <div class="files-list">
+          <div class="file-chip">ui/screens/SettingsScreen.kt (~line 999, ~line 184)</div>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P5.2-agent">
+        <div class="agent-box">
+          <div class="agent-prompt" id="ap-P5.2">In the FocusFlow Kotlin/Compose Desktop project,
+file: src/main/kotlin/com/focusflow/ui/screens/SettingsScreen.kt
+
+FIX 1 — line ~999, hardcoded enforcement description:
+
+Find this line:
+  Text("Enforcement: JNA Win32 + WinEventHook + Nuclear Mode + Windows Firewall", ...)
+
+Replace with:
+  val enforcementDesc = when {
+      isWindows -> "Enforcement: JNA Win32 + WinEventHook + Nuclear Mode + Windows Firewall"
+      isLinux   -> "Enforcement: ProcessHandle + xdotool poller + Nuclear Mode + iptables"
+      else      -> "Enforcement: ProcessHandle (cross-platform)"
+  }
+  Text(enforcementDesc, ...)
+
+FIX 2 — line ~167-184, enforcement section subtitle for Linux:
+
+Find this block:
+  subtitle = if (isWindows) "Active — 500ms polling + instant WinEventHook"
+             else "Inactive — only enforced on Windows",
+
+The else branch is currently shown for Linux but "Inactive — only enforced on Windows"
+is wrong — Linux DOES enforce via xdotool polling. Update:
+
+  subtitle = when {
+      isWindows -> "Active — 500ms polling + instant WinEventHook"
+      isLinux   -> "Active — 500ms xdotool polling${if (hasXdotool) "" else " (xdotool not found)"}"
+      else      -> "Inactive — unsupported platform"
+  }
+
+And the icon/tint nearby should also change for Linux:
+  (currently: if (isWindows) CheckCircle else Warning with Warning tint)
+  Change to: if (isWindows || isLinux) CheckCircle/Success else Warning/Warning
+
+This gives Linux users a green checkmark showing enforcement IS active.
+
+hasXdotool is importable from WinApiBindings.kt (com.focusflow.enforcement).
+
+VERIFY:
+1. Open Settings on Linux → enforcement card shows green checkmark and
+   "Active — 500ms xdotool polling" (or warning if xdotool missing)
+2. The debug text at the bottom shows "ProcessHandle + xdotool poller + Nuclear Mode + iptables"
+3. On Windows: no change to existing behavior.</div>
+          <button class="copy-btn" onclick="copyPrompt('P5.2')">Copy</button>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P5.2-tests">
+        <ul class="test-list">
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Linux</span>
+            <span>Open Settings. Enforcement card shows green ✓ and "Active — 500ms xdotool polling". Bottom debug text says "ProcessHandle + xdotool + iptables".</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Linux-no-xdotool</span>
+            <span>xdotool not installed — enforcement subtitle shows the "xdotool not found" warning.</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- P5.3 -->
+  <div class="task-card" id="card-P5.3">
+    <div class="task-head" onclick="toggleCard('P5.3')">
+      <button class="status-btn todo" id="sbtn-P5.3" onclick="cycleStatus(event,'P5.3')">● TODO</button>
+      <span class="task-id">P5.3</span>
+      <span class="task-title" id="title-P5.3">CrashReporter — verify safetyCleanup() on Linux</span>
+      <span class="pri-badge pri-low">LOW</span>
+      <span class="expand-icon" id="icon-P5.3">▼</span>
+    </div>
+    <div class="task-body" id="body-P5.3">
+      <div class="task-tabs">
+        <div class="task-tab active" onclick="switchTab(event,'P5.3','info')">Info</div>
+        <div class="task-tab" onclick="switchTab(event,'P5.3','agent')">Agent Prompt</div>
+        <div class="task-tab" onclick="switchTab(event,'P5.3','tests')">Tests</div>
+      </div>
+      <div class="task-panel active" id="panel-P5.3-info">
+        <div class="task-desc">
+          <strong>What to verify:</strong> <code>CrashReporter.safetyCleanup()</code> directly calls <code>RegistryLockdown.disable()</code> (confirmed from code read). The comment says "Goal: leave Windows in a usable state." On Linux, <code>RegistryLockdown.disable()</code> should have an <code>if (!isWindows) return</code> guard internally — verify that. If it does, the call is harmless but wasteful. Either way, add an explicit comment in <code>safetyCleanup()</code> to document this is safe on Linux.
+        </div>
+        <div class="files-list">
+          <div class="file-chip">services/CrashReporter.kt (safetyCleanup)</div>
+          <div class="file-chip">enforcement/RegistryLockdown.kt (verify internal guard)</div>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P5.3-agent">
+        <div class="agent-box">
+          <div class="agent-prompt" id="ap-P5.3">In the FocusFlow Kotlin/Compose Desktop project:
+
+TASK: Verify and document cross-platform safety of CrashReporter.safetyCleanup()
+
+FILE 1: src/main/kotlin/com/focusflow/services/CrashReporter.kt
+Find the safetyCleanup() private function. It calls:
+  try { RegistryLockdown.disable() } catch (_: Throwable) {}
+
+FILE 2: src/main/kotlin/com/focusflow/enforcement/RegistryLockdown.kt
+Check every public function in this file. Each one MUST start with:
+  if (!isWindows) return
+(or equivalent: "if (isWindows) { ... } else return")
+
+If ANY function in RegistryLockdown.kt does NOT have this guard, ADD it.
+The guard must be the first statement in the function body.
+
+Back in CrashReporter.safetyCleanup(), add a comment above the RegistryLockdown call:
+  // RegistryLockdown is internally guarded — no-op on Linux. Safe to call on all platforms.
+  try { RegistryLockdown.disable() } catch (_: Throwable) {}
+
+ALSO check FocusLauncherService.emergencyRestoreWindows() — it is also called in
+safetyCleanup(). Verify it has a Linux-safe path (either no-op guard or a proper
+Linux restore path).
+
+VERIFY:
+1. Read RegistryLockdown.kt — every public function must start with if (!isWindows) return.
+2. Run app on Linux, simulate a crash (throw from a coroutine, or call safetyCleanup()
+   directly in a test) — no JNA crash, no RegistryLockdown-related exception in logs.
+3. ./gradlew test on Linux — all existing tests pass.</div>
+          <button class="copy-btn" onclick="copyPrompt('P5.3')">Copy</button>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P5.3-tests">
+        <ul class="test-list">
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-auto">Auto</span>
+            <span><code>./gradlew test</code> on Linux — all existing tests pass, no JNA exceptions in output.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-both">Linux</span>
+            <span>Manually call safetyCleanup via a debug entry point or verify via log — no exception thrown on Linux.</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- P5.4 -->
+  <div class="task-card" id="card-P5.4">
+    <div class="task-head" onclick="toggleCard('P5.4')">
+      <button class="status-btn todo" id="sbtn-P5.4" onclick="cycleStatus(event,'P5.4')">● TODO</button>
+      <span class="task-id">P5.4</span>
+      <span class="task-title" id="title-P5.4">CI — GitHub Actions Linux build + test step</span>
+      <span class="pri-badge pri-low">LOW</span>
+      <span class="expand-icon" id="icon-P5.4">▼</span>
+    </div>
+    <div class="task-body" id="body-P5.4">
+      <div class="task-tabs">
+        <div class="task-tab active" onclick="switchTab(event,'P5.4','info')">Info</div>
+        <div class="task-tab" onclick="switchTab(event,'P5.4','agent')">Agent Prompt</div>
+        <div class="task-tab" onclick="switchTab(event,'P5.4','tests')">Tests</div>
+      </div>
+      <div class="task-panel active" id="panel-P5.4-info">
+        <div class="task-desc">
+          <strong>What's missing:</strong> The three existing Linux test files (<code>NetworkBlockerLinuxTest</code>, <code>WatchdogInstallerTest</code>, <code>WinApiBindingsLinuxTest</code>) use <code>assumeTrue(isLinux)</code> — they only run on Linux. There's no CI step that actually runs them. Without a Linux CI runner, these tests never execute and regressions go undetected.
+        </div>
+        <div class="files-list">
+          <div class="file-chip">.github/workflows/build-linux.yml (create)</div>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P5.4-agent">
+        <div class="agent-box">
+          <div class="agent-prompt" id="ap-P5.4">In the FocusFlow Kotlin/Compose Desktop project:
+
+Create .github/workflows/build-linux.yml with this content:
+
+name: Linux Build & Test
+on:
+  push:
+    branches: [ main, develop, linux-migration ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 19
+        uses: actions/setup-java@v4
+        with:
+          java-version: '19'
+          distribution: 'temurin'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xdotool wmctrl libnotify-bin
+
+      - name: Run Linux tests
+        run: ./gradlew test
+
+      - name: Build Deb package
+        run: ./gradlew packageDeb
+
+      - name: Upload .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: focusflow-linux-deb
+          path: build/compose/binaries/main/deb/*.deb
+          if-no-files-found: error
+
+NOTE: The build.gradle.kts test task already uses:
+  onlyIf { !System.getProperty("os.name","").lowercase().contains("windows") }
+So Linux tests will run automatically on ubuntu-latest.
+
+ALSO: If there is an existing Windows CI workflow (e.g. .github/workflows/build.yml),
+check if it runs tests. If it does, make sure it won't try to run the Linux tests by
+verifying that the assumeTrue(isLinux) guards in each Linux test class are correct
+(they already are based on code review — but double-check).
+
+VERIFY:
+1. Push a commit and check the Actions tab — "Linux Build & Test" workflow must appear.
+2. The workflow must complete: test task runs, packageDeb task produces a .deb file,
+   artifact is uploaded.
+3. If any Linux test fails, the workflow fails and blocks the PR.</div>
+          <button class="copy-btn" onclick="copyPrompt('P5.4')">Copy</button>
+        </div>
+      </div>
+      <div class="task-panel" id="panel-P5.4-tests">
+        <ul class="test-list">
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-auto">CI</span>
+            <span>Push a branch → GitHub Actions "Linux Build & Test" appears and passes on ubuntu-latest.</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-auto">CI</span>
+            <span>All three Linux test classes run (confirmed in CI test output — not just skipped).</span>
+          </li>
+          <li class="test-item">
+            <div class="test-cb" onclick="toggleTestCb(this)"></div>
+            <span class="test-env env-auto">CI</span>
+            <span><code>.deb</code> artifact is uploaded and downloadable from the Actions run.</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════ TESTS ════ -->
+<div id="tests" class="section">
+  <div class="page-title">Manual Test Checklist</div>
+  <div class="page-sub">Full end-to-end tests. Run these after all phases are done, on real Linux hardware.</div>
+
+  <div class="test-section-header">Environment Setup (do once)</div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">Set up X11 test machine</div>
+      <div class="big-test-desc">Ubuntu 22.04 or Fedora 38 with XFCE or LXQt. Install: <code>sudo apt install xdotool wmctrl libnotify-bin</code>. Log in to an Xorg/X11 session (not Wayland).</div>
+    </div>
+  </div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">Set up Wayland test machine (or VM)</div>
+      <div class="big-test-desc">Ubuntu 22.04+ with GNOME Wayland session. Log out and back in selecting "GNOME" (Wayland). Verify with <code>echo $WAYLAND_DISPLAY</code> — must not be empty.</div>
+    </div>
+  </div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">Build and install the .deb package</div>
+      <div class="big-test-desc">Run <code>./gradlew packageDeb</code>. Install: <code>sudo apt install ./build/compose/binaries/main/deb/focusflow*.deb</code>. Launch with <code>focusflow</code> from terminal. Verify app starts and shows correct window icon.</div>
+    </div>
+  </div>
+
+  <div class="test-section-header">Phase 1 — Build</div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">Package builds without errors</div>
+      <div class="big-test-desc"><code>./gradlew packageDeb packageRpm</code> completes. No "file not found" errors. <code>.deb</code> and <code>.rpm</code> appear in <code>build/compose/binaries/main/</code>.</div>
+    </div>
+  </div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">App window shows correct icon</div>
+      <div class="big-test-desc">Launch app. Title bar and taskbar entry show the FocusFlow icon, not a generic coffee-cup Java icon.</div>
+    </div>
+  </div>
+
+  <div class="test-section-header">Phase 2 — Core Blocking</div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">App Blocker shows real app icons</div>
+      <div class="big-test-desc">Open App Blocker screen. Firefox, Chrome, VLC, Telegram show their actual app icons. No two apps share a generic icon.</div>
+    </div>
+  </div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">App blocking actually kills the process</div>
+      <div class="big-test-desc">Block Firefox in App Blocker. Start a Focus session. Launch Firefox. FocusFlow must kill it within ~500ms and show the block overlay. End session — Firefox launches normally again.</div>
+    </div>
+  </div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">No "Windows Task Manager disabled" dialog on startup</div>
+      <div class="big-test-desc">Launch app on Linux. Wait 10 seconds. The dialog about "Task Manager appears disabled" must never appear.</div>
+    </div>
+  </div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">Flatpak apps appear in list (if Flatpak installed)</div>
+      <div class="big-test-desc">If Flatpak is installed, open App Blocker — at least one Flatpak app (e.g. Flathub apps) should appear in the list.</div>
+    </div>
+  </div>
+
+  <div class="test-section-header">Phase 3 — Kiosk Hardening</div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">X11: keyboard shortcuts blocked during kiosk</div>
+      <div class="big-test-desc">On X11 session: start a Focus Launcher kiosk. Press Alt+Tab repeatedly — the focus must not leave FocusFlow. Press Super key — system launcher must not open.</div>
+    </div>
+  </div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">Wayland: no crash from keyboard hook</div>
+      <div class="big-test-desc">On Wayland session: start a kiosk. App must NOT crash. EnforcementLog must show the Wayland keyboard limitation message. App continues enforcing via overlay + process kills.</div>
+    </div>
+  </div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">GNOME System Monitor killed during Nuclear Mode</div>
+      <div class="big-test-desc">Start Nuclear Mode session. Open GNOME System Monitor from the app grid. It must be killed within ~1 second.</div>
+    </div>
+  </div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">Block overlay stays on top (X11)</div>
+      <div class="big-test-desc">Trigger a block overlay. Click on a window behind it, or open a new app — the overlay must stay in front of everything. Wait 2 seconds — it must not have slipped behind.</div>
+    </div>
+  </div>
+
+  <div class="test-section-header">Phase 4 — System Integration</div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">Wayland: notifications appear via notify-send</div>
+      <div class="big-test-desc">On Wayland (where AWT tray is unavailable): start and end a focus session. A desktop notification popup must appear showing session start/end messages.</div>
+    </div>
+  </div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">Autostart works after login (deb install)</div>
+      <div class="big-test-desc">Enable "Start with Linux" in Settings. Verify <code>~/.config/autostart/focusflow.desktop</code> exists with correct <code>Exec=</code> path. Log out and back in — FocusFlow must launch automatically.</div>
+    </div>
+  </div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">GNOME: kiosk session starts without crash</div>
+      <div class="big-test-desc">On GNOME (Wayland or X11): start Focus Launcher kiosk. EnforcementLog shows "GNOME Shell: panel hiding not supported". Session runs and ends cleanly. No hang.</div>
+    </div>
+  </div>
+
+  <div class="test-section-header">Phase 5 — Polish</div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">VPN/Network screen shows Linux text</div>
+      <div class="big-test-desc">Open VPN/Network screen on Linux. Visible text must say "/etc/hosts", "pkexec", "iptables". No "Windows Firewall" or "Windows hosts file" text anywhere.</div>
+    </div>
+  </div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">Settings screen: enforcement shows green on Linux</div>
+      <div class="big-test-desc">Open Settings on Linux. Enforcement section shows green checkmark and "Active — 500ms xdotool polling". Debug text at bottom says "ProcessHandle + xdotool poller + Nuclear Mode + iptables".</div>
+    </div>
+  </div>
+
+  <div class="test-section-header">Windows Regression (always run after any change)</div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">Windows build still succeeds</div>
+      <div class="big-test-desc"><code>./gradlew packageMsi</code> on Windows completes without errors. App launches, all Windows features work as before.</div>
+    </div>
+  </div>
+  <div class="big-test-item"><div class="big-test-cb" onclick="toggleBigCb(this)"></div>
+    <div class="big-test-right">
+      <div class="big-test-title">Windows: block enforcement still works</div>
+      <div class="big-test-desc">On Windows: block an app, start session, launch that app → FocusFlow kills it and shows overlay. No regression from any Linux changes.</div>
+    </div>
+  </div>
+</div>
+
+</main>
+</div>
+
+<script>
+// ── STATE ─────────────────────────────────────────────────────────
+const TASKS = ['P1.1','P1.2','P2.1','P2.2','P2.3','P3.1','P3.2','P3.3','P4.1','P4.2','P4.3','P5.1','P5.2','P5.3','P5.4'];
+const PHASE_TASKS = { p1:['P1.1','P1.2'], p2:['P2.1','P2.2','P2.3'], p3:['P3.1','P3.2','P3.3'], p4:['P4.1','P4.2','P4.3'], p5:['P5.1','P5.2','P5.3','P5.4'] };
+let state = {};
+
+function loadState() {
+  try { state = JSON.parse(localStorage.getItem('ff-linux-state') || '{}'); } catch(e){ state={}; }
+}
+function saveState() {
+  try { localStorage.setItem('ff-linux-state', JSON.stringify(state)); } catch(e){}
+}
+function getStatus(id) { return state[id] || 'todo'; }
+
+// ── NAVIGATION ─────────────────────────────────────────────────────
+function showSection(id, el) {
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  el.classList.add('active');
+}
+
+// ── TASK CARD ──────────────────────────────────────────────────────
+function toggleCard(id) {
+  const body = document.getElementById('body-'+id);
+  const icon = document.getElementById('icon-'+id);
+  const isOpen = body.classList.contains('open');
+  // close all others first
+  document.querySelectorAll('.task-body.open').forEach(b=>{
+    b.classList.remove('open');
+    const i = b.id.replace('body-','');
+    const ic = document.getElementById('icon-'+i);
+    if(ic) ic.classList.remove('open');
+  });
+  if (!isOpen) { body.classList.add('open'); icon.classList.add('open'); }
+}
+
+// ── STATUS CYCLE ───────────────────────────────────────────────────
+const statuses = ['todo','doing','done'];
+const labels = { todo:'● TODO', doing:'◐ DOING', done:'✓ DONE' };
+
+function cycleStatus(e, id) {
+  e.stopPropagation();
+  const cur = getStatus(id);
+  const next = statuses[(statuses.indexOf(cur)+1)%3];
+  state[id] = next;
+  saveState();
+  updateTaskCard(id);
+  updateDashboard();
+}
+
+function updateTaskCard(id) {
+  const st = getStatus(id);
+  const btn = document.getElementById('sbtn-'+id);
+  const title = document.getElementById('title-'+id);
+  const card = document.getElementById('card-'+id);
+  btn.className = 'status-btn '+st;
+  btn.textContent = labels[st];
+  if(st==='done') { title.classList.add('done'); card.classList.add('done'); }
+  else { title.classList.remove('done'); card.classList.remove('done'); }
+}
+
+// ── TABS ───────────────────────────────────────────────────────────
+function switchTab(e, id, tab) {
+  e.stopPropagation();
+  const tabs = e.target.parentElement.querySelectorAll('.task-tab');
+  tabs.forEach(t=>t.classList.remove('active'));
+  e.target.classList.add('active');
+  const body = document.getElementById('body-'+id);
+  body.querySelectorAll('.task-panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('panel-'+id+'-'+tab).classList.add('active');
+}
+
+// ── COPY ───────────────────────────────────────────────────────────
+function copyPrompt(id) {
+  const text = document.getElementById('ap-'+id).textContent;
+  navigator.clipboard.writeText(text).then(()=>{
+    const btn = event.target;
+    btn.textContent='Copied!'; btn.classList.add('copied');
+    setTimeout(()=>{ btn.textContent='Copy'; btn.classList.remove('copied'); },1800);
+  }).catch(()=>{
+    const ta=document.createElement('textarea'); ta.value=text;
+    ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+    const btn = event.target;
+    btn.textContent='Copied!'; btn.classList.add('copied');
+    setTimeout(()=>{ btn.textContent='Copy'; btn.classList.remove('copied'); },1800);
+  });
+}
+
+// ── TEST CHECKBOXES ────────────────────────────────────────────────
+function toggleTestCb(el) {
+  el.classList.toggle('checked');
+  saveCbState();
+}
+function toggleBigCb(el) {
+  el.classList.toggle('checked');
+  saveCbState();
+}
+
+let cbState = {};
+function saveCbState() {
+  const cbs = document.querySelectorAll('.test-cb, .big-test-cb');
+  const s = [];
+  cbs.forEach((cb,i)=> s.push(cb.classList.contains('checked')?1:0));
+  try { localStorage.setItem('ff-linux-cbs', JSON.stringify(s)); } catch(e){}
+}
+function loadCbState() {
+  try {
+    const s = JSON.parse(localStorage.getItem('ff-linux-cbs')||'[]');
+    const cbs = document.querySelectorAll('.test-cb, .big-test-cb');
+    cbs.forEach((cb,i)=>{ if(s[i]) cb.classList.add('checked'); });
+  } catch(e){}
+}
+
+// ── DASHBOARD ──────────────────────────────────────────────────────
+function updateDashboard() {
+  let done=0,doing=0,todo=0;
+  TASKS.forEach(id=>{
+    const s=getStatus(id);
+    if(s==='done') done++;
+    else if(s==='doing') doing++;
+    else todo++;
+  });
+  document.getElementById('stat-done').textContent=done;
+  document.getElementById('stat-doing').textContent=doing;
+  document.getElementById('stat-todo').textContent=todo;
+  document.getElementById('stat-total').textContent=TASKS.length;
+  document.getElementById('prog-bar').style.width=(done/TASKS.length*100).toFixed(1)+'%';
+  // phase badges
+  Object.entries(PHASE_TASKS).forEach(([phase,tasks])=>{
+    const remaining = tasks.filter(t=>getStatus(t)!=='done').length;
+    const badge = document.getElementById('badge-'+phase);
+    if(badge) badge.textContent = remaining===0?'✓':remaining;
+    // phase dash cards
+    const phNum = phase.replace('p','');
+    const dl = document.getElementById('dl'+phNum);
+    if(dl) { const d=tasks.filter(t=>getStatus(t)==='done').length; dl.textContent=d+' / '+tasks.length; }
+  });
+}
+
+function updateNavBadges() {
+  Object.entries(PHASE_TASKS).forEach(([phase,tasks])=>{
+    const remaining = tasks.filter(t=>getStatus(t)!=='done').length;
+    const badge = document.getElementById('badge-'+phase);
+    if(badge) { badge.textContent = remaining===0?'✓':remaining; }
+  });
+}
+
+// ── INIT ───────────────────────────────────────────────────────────
+loadState();
+TASKS.forEach(id=>updateTaskCard(id));
+updateDashboard();
+loadCbState();
+</script>
+</body>
+</html>

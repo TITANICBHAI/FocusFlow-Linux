@@ -1018,9 +1018,12 @@ private fun PermissionsPage() {
                 OnboardingPermRow(
                     icon = Icons.Default.AdminPanelSettings,
                     iconTint = Error,
-                    title = "Run as Administrator",
-                    subtitle = "Required for process kill, firewall rules & Nuclear Mode",
-                    badge = if (isAdmin) "✓ Already running as admin" else "Needed for full blocking",
+                    title = if (isWindows) "Run as Administrator" else "Linux enforcement permissions",
+                    subtitle = if (isWindows)
+                        "Required for process kill, firewall rules & Nuclear Mode"
+                    else
+                        "Hosts blocking needs writable /etc/hosts; firewall attempts may request pkexec authorization",
+                    badge = if (isAdmin) "✓ Process access available" else "Review Linux Setup",
                     badgeGranted = isAdmin
                 ) {
                     if (!isAdmin && isWindows) {
@@ -1036,16 +1039,16 @@ private fun PermissionsPage() {
                     }
                 }
 
-                // ── Windows Defender Exclusion ────────────────────────────────
-                OnboardingPermRow(
-                    icon = Icons.Default.Security,
-                    iconTint = Warning,
-                    title = "Windows Defender Exclusion",
-                    subtitle = "Stops Defender from flagging FocusFlow when it kills blocked processes",
-                    badge = "Recommended",
-                    badgeGranted = null
-                ) {
-                    if (isWindows) {
+                if (isWindows) {
+                    // ── Windows Defender Exclusion ────────────────────────────────
+                    OnboardingPermRow(
+                        icon = Icons.Default.Security,
+                        iconTint = Warning,
+                        title = "Windows Defender Exclusion",
+                        subtitle = "Stops Defender from flagging FocusFlow when it kills blocked processes",
+                        badge = "Recommended",
+                        badgeGranted = null
+                    ) {
                         OutlinedButton(
                             onClick = { openSettingsUrl("ms-settings:windowsdefender") },
                             shape = RoundedCornerShape(8.dp),
@@ -1076,16 +1079,16 @@ private fun PermissionsPage() {
                     }
                 }
 
-                // ── Focus Assist ──────────────────────────────────────────────
-                OnboardingPermRow(
-                    icon = Icons.Default.DoNotDisturb,
-                    iconTint = Warning,
-                    title = "Disable Focus Assist (Do Not Disturb)",
-                    subtitle = "Windows DND silences FocusFlow's session & block alerts",
-                    badge = "Optional",
-                    badgeGranted = null
-                ) {
-                    if (isWindows) {
+                if (isWindows) {
+                    // ── Focus Assist ──────────────────────────────────────────────
+                    OnboardingPermRow(
+                        icon = Icons.Default.DoNotDisturb,
+                        iconTint = Warning,
+                        title = "Disable Focus Assist (Do Not Disturb)",
+                        subtitle = "Windows DND silences FocusFlow's session & block alerts",
+                        badge = "Optional",
+                        badgeGranted = null
+                    ) {
                         OutlinedButton(
                             onClick = { openSettingsUrl("ms-settings:quiethours") },
                             shape = RoundedCornerShape(8.dp),
@@ -1096,16 +1099,16 @@ private fun PermissionsPage() {
                     }
                 }
 
-                // ── Windows Firewall ──────────────────────────────────────────
-                OnboardingPermRow(
-                    icon = Icons.Default.Wifi,
-                    iconTint = Purple80,
-                    title = "Windows Firewall Rules",
-                    subtitle = "Verify outbound block rules FocusFlow adds during network blocking",
-                    badge = "Optional",
-                    badgeGranted = null
-                ) {
-                    if (isWindows) {
+                if (isWindows) {
+                    // ── Windows Firewall ──────────────────────────────────────────
+                    OnboardingPermRow(
+                        icon = Icons.Default.Wifi,
+                        iconTint = Purple80,
+                        title = "Windows Firewall Rules",
+                        subtitle = "Verify outbound block rules FocusFlow adds during network blocking",
+                        badge = "Optional",
+                        badgeGranted = null
+                    ) {
                         OutlinedButton(
                             onClick = { runShellCommand("cmd", "/c", "start", "wf.msc") },
                             shape = RoundedCornerShape(8.dp),

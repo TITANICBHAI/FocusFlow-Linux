@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.focusflow.enforcement.NuclearMode
+import com.focusflow.enforcement.isLinux
 import com.focusflow.services.NuclearPin
 import com.focusflow.ui.components.FfVerticalScrollbar
 import com.focusflow.ui.components.NuclearPinGateDialog
@@ -142,6 +143,8 @@ fun NuclearModeScreen() {
                         Text(
                             if (nuclearActive)
                                 "Monitoring ${NuclearMode.escapeProcessCount} escape routes every 500 ms"
+                            else if (isLinux)
+                                "Enable to block terminals, system monitors and other configured user escape processes"
                             else
                                 "Enable to block Task Manager, terminals, registry editors and ${NuclearMode.escapeProcessCount - 3} more",
                             style = MaterialTheme.typography.bodySmall,

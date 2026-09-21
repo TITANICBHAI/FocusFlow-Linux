@@ -63,8 +63,8 @@ Linux session or a privileged enforcement test.
   Implement and test a constrained `pkexec` or equivalent helper for atomic Linux hosts-file writes. Verify cancellation, failure reporting, unblock, shutdown cleanup, and resolver behavior. The current code checks writability but does not itself elevate the write.
 - [ ] **P6.2 — Make Linux firewall state truthful**
   Do not report `NetworkBlocker.addRule()` as successful before the asynchronous `iptables` operation is verified. Expose pending/failed state, use bounded subprocesses, and verify tagged rule cleanup.
-- [ ] **P6.3 — Remove remaining UI-thread Linux probes**
-  Add `iptables` to `LinuxToolsChecker.checkAll()` and remove the synchronous `LinuxToolsChecker.isInstalled("iptables")` call from `LinuxSetupScreen`.
+- [x] **P6.3 — Remove remaining UI-thread Linux probes**
+  Added `iptables` to the shared async Linux tool probe and removed the synchronous `LinuxToolsChecker.isInstalled("iptables")` call from `LinuxSetupScreen`.
 - [ ] **P6.4 — Add subprocess timeouts and failure diagnostics**
   Cover `pkexec`, `iptables`, `nslookup`, `resolvectl`, `xdotool`, `wmctrl`, `systemctl`, and notification calls. A cancelled prompt or broken desktop session must not hang enforcement or shutdown.
 - [ ] **P6.5 — Validate foreground detection by session type**
@@ -77,14 +77,16 @@ Linux session or a privileged enforcement test.
   Test real hosts/firewall blocking, cleanup after force-kill, watchdog/autostart lifecycle, resolver variants, and cancelled authentication in disposable Linux environments. Keep unit tests non-destructive.
 - [ ] **P6.9 — Add shell/input safety tests**
   Cover process names, domain names, desktop-file `Exec=` values, paths with spaces, and shell metacharacters. Verify no user-controlled value reaches an unsafe shell command.
-- [ ] **P6.10 — Linux UI honesty and guidance**
-  Audit and update Linux Setup status/warnings, Settings enforcement status,
-  VPN/Network permissions and resolver copy, Wayland limitations,
-  package/autostart guidance, and Linux startup guards. Keep Windows registry
-  and Task Manager messaging out of Linux. Acceptance requires asynchronous
-  tool probes, accurate current-state copy, a targeted compile/test, and an
-  explicit note that real hosts/iptables success remains unverified until its
-  implementation is fixed.
+- [x] **P6.10 — Linux UI honesty and guidance**
+  Linux Setup now probes all listed tools asynchronously, shows actionable
+  missing-tool states, and explains the current hosts/iptables limits. Settings
+  reports session-dependent foreground, keyboard, network, and autostart
+  guarantees. VPN/Network copy covers permissions and resolver caveats.
+  Wayland limitations and package/AppImage/development guidance are explicit.
+  Linux onboarding no longer shows Windows-only Defender, Focus Assist, or
+  Firewall guidance, and Linux startup/UI copy avoids Windows registry and
+  Task Manager claims. `compileKotlin` and `test` pass; real hosts/iptables
+  success remains unverified.
 
 ## Manual test checklist
 

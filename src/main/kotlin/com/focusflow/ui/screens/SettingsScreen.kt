@@ -166,7 +166,10 @@ fun SettingsScreen() {
                     label = strings.settingsProcessMonitor,
                     subtitle = when {
                         isWindows -> "Active — 500ms polling + instant WinEventHook"
-                        isLinux -> "Active — 500ms xdotool polling${if (hasXdotool) "" else " (xdotool not found)"}"
+                        isLinux && hasXdotool ->
+                            "Active — ProcessHandle monitoring + xdotool foreground polling"
+                        isLinux ->
+                            "Active — ProcessHandle monitoring; xdotool not found, foreground-title rules are unavailable"
                         else -> "Unavailable on this platform"
                     },
                     trailing = {
@@ -185,16 +188,24 @@ fun SettingsScreen() {
                     subtitle = when {
                         isWindows && hookActive ->
                             "WinEventHook active — zero-delay foreground detection"
+                        isLinux && isWayland ->
+                            "Reduced on native Wayland — the active foreground window cannot be proven reliably"
+                        isLinux && hasXdotool ->
+                            "Linux foreground polling — xdotool lookup; no instant event hook"
                         isLinux ->
-                            "Linux foreground polling — xdotool/wmctrl fallback"
+                            "Unavailable — install xdotool in an X11 session for foreground-title rules"
                         else ->
                             "WinEventHook inactive — polling fallback only"
                     },
                     trailing = {
                         Icon(
-                            if (hookActive || isLinux) Icons.Default.FlashOn else Icons.Default.FlashOff,
+                            if (hookActive || (isLinux && !isWayland && hasXdotool))
+                                Icons.Default.FlashOn
+                            else Icons.Default.FlashOff,
                             null,
-                            tint = if (hookActive || isLinux) Success else OnSurface2
+                            tint = if (hookActive || (isLinux && !isWayland && hasXdotool))
+                                Success
+                            else Warning
                         )
                     }
                 )
@@ -222,6 +233,17 @@ fun SettingsScreen() {
                                     Success
                                 else Warning
                             )
+                        }
+                    )
+                }
+
+                if (isLinux) {
+                    HorizontalDivider(color = Surface3, modifier = Modifier.padding(vertical = 8.dp))
+                    SettingRow(
+                        label = "Linux network enforcement",
+                        subtitle = "Partial — hosts blocking requires a writable /etc/hosts; iptables rules are attempted but not runtime-verified",
+                        trailing = {
+                            Icon(Icons.Default.Warning, null, tint = Warning)
                         }
                     )
                 }
@@ -428,7 +450,7 @@ fun SettingsScreen() {
                     },
                     subtitle = when {
                         isWindows && startWithWin  -> "FocusFlow launches at login (HKCU\\Run)"
-                        isLinux   && startWithWin  -> "FocusFlow launches at login (~/.config/autostart)"
+                        isLinux   && startWithWin  -> "FocusFlow launches at login (~/.config/autostart); keep the chosen package/AppImage path stable"
                         isWindows || isLinux       -> "FocusFlow does not start automatically"
                         else                       -> "Not supported on this platform"
                     },
@@ -992,6 +1014,17 @@ fun SettingsScreen() {
                             color = OnSurface2
                         )
                     }
+                    if (isLinux) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "For .deb/.rpm installs, the packaged launcher is the stable choice. " +
+                                "For an AppImage, enable this only after moving it to its final location. " +
+                                "Development runs may generate an autostart entry pointing at a JVM fallback; " +
+                                "that entry is not a packaged-install guarantee.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnSurface2
+                        )
+                    }
                 }
             }
         }
@@ -1034,7 +1067,7 @@ fun SettingsScreen() {
                 Text(
                     when {
                         isWindows -> "Enforcement: JNA Win32 + WinEventHook + Nuclear Mode + Windows Firewall"
-                        isLinux -> "Enforcement: ProcessHandle + xdotool polling + Nuclear Mode + iptables/hosts"
+                        isLinux -> "Enforcement: ProcessHandle + session-dependent foreground polling + Nuclear Mode; hosts/iptables are partial"
                         else -> "Enforcement: platform features unavailable"
                     },
                     style = MaterialTheme.typography.bodySmall,
@@ -1071,7 +1104,11 @@ fun SettingsScreen() {
                             color = if (nuclearActive) Error else OnSurface
                         )
                         Text(
-                            "Kills Task Manager, regedit, cmd, PowerShell, Process Explorer when detected — no escape",
+                            if (isLinux)
+                                "Kills configured user escape processes such as terminals and system monitors. " +
+                                    "There is no cross-desktop equivalent to Windows registry Task Manager lockdown."
+                            else
+                                "Kills Task Manager, regedit, cmd, PowerShell, Process Explorer when detected — no escape",
                             style = MaterialTheme.typography.bodySmall,
                             color = OnSurface2
                         )

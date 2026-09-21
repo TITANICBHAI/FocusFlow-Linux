@@ -30,7 +30,9 @@ import kotlinx.coroutines.withContext
  *
  * Shows the user which packages and permissions are needed for full
  * enforcement:
- *   - pkexec (for iptables firewall rules and /etc/hosts writes)
+ *   - pkexec (for attempted privileged firewall operations)
+ *   - writable /etc/hosts (the current Linux hosts path does not elevate its write)
+ *   - iptables (for attempted firewall rules)
  *   - xdotool (for panel hide/show during Focus Launcher kiosk)
  *   - notify-send (libnotify-bin for desktop notifications)
  *   - systemd user units (for watchdog timer auto-restart)
@@ -48,6 +50,7 @@ fun LinuxSetupScreen() {
     var wmctrlOk     by remember { mutableStateOf<Boolean?>(null) }
     var pkexecOk     by remember { mutableStateOf<Boolean?>(null) }
     var notifySendOk by remember { mutableStateOf<Boolean?>(null) }
+    var iptablesOk   by remember { mutableStateOf<Boolean?>(null) }
 
     LaunchedEffect(Unit) {
         if (isLinux) {
@@ -57,6 +60,7 @@ fun LinuxSetupScreen() {
                 wmctrlOk     = results["wmctrl"]?.installed
                 pkexecOk     = results["pkexec"]?.installed
                 notifySendOk = results["notify-send"]?.installed
+                iptablesOk   = results["iptables"]?.installed
             }
         }
     }
@@ -113,10 +117,11 @@ fun LinuxSetupScreen() {
                     Text(
                         if (isWayland) {
                             "Running on native Wayland — reduced keyboard shortcut protection; " +
-                                "process blocking and overlay enforcement remain active."
+                                "foreground-window and panel guarantees are also reduced. " +
+                                "Process blocking and overlay attempts remain active."
                         } else {
                             "Running on Linux/X11 — global keyboard grab is available during kiosk mode. " +
-                                "Install the tools below for full capability."
+                                "Foreground and panel behavior still depends on the optional X11 tools below."
                         },
                         fontSize = 12.sp,
                         color = Success
@@ -158,12 +163,12 @@ fun LinuxSetupScreen() {
 
             Spacer(Modifier.height(8.dp))
 
-            // 1. pkexec (policykit) — required for firewall + hosts
+            // 1. pkexec (policykit) — used for attempted firewall operations
             PermissionSetupCard(
                 icon = Icons.Default.Shield,
                 iconTint = Error,
                 title = "pkexec (PolicyKit)",
-                needed = "Root access for iptables firewall rules and /etc/hosts writes.",
+                needed = "Used when FocusFlow attempts privileged iptables operations. It does not currently elevate /etc/hosts writes.",
                 howTo = """
                     On Ubuntu/Debian:
                     \tsudo apt install policykit-1
@@ -173,29 +178,32 @@ fun LinuxSetupScreen() {
                     \tsudo pacman -S polkit
                     Verify:
                     \tpkexec echo ok
-                    If you see a password prompt and then 'ok', pkexec is ready.
+                    If you see a password prompt and then 'ok', pkexec is available.
+                    Hosts-file blocking still requires /etc/hosts to be writable by
+                    the running user until the privileged write path is implemented.
                 """.trimIndent(),
                 required = true,
                 installed = pkexecOk,
                 copyCommand = "sudo apt install policykit-1"
             )
 
-            // 2. iptables — required for NuclearMode firewall
+            // 2. iptables — used for attempted firewall operations
             PermissionSetupCard(
                 icon = Icons.Default.Lock,
                 iconTint = Error,
                 title = "iptables",
-                needed = "Network-level blocking for domains during Nuclear Mode.",
+                needed = "Required before FocusFlow can attempt tagged Linux firewall rules. Rule success is not reported as verified yet.",
                 howTo = """
                     iptables is usually installed by default.
                     Verify:
                             sudo iptables -L
                     If 'command not found':
                             sudo apt install iptables
-                    FocusFlow will use pkexec to add DROP rules.
+                    FocusFlow attempts REJECT rules through pkexec or a direct
+                    iptables call, then reports failure when the operation cannot run.
                 """.trimIndent(),
                 required = true,
-                installed = remember { if (isLinux) LinuxToolsChecker.isInstalled("iptables") else null },
+                installed = iptablesOk,
                 copyCommand = "sudo apt install iptables"
             )
 
@@ -281,6 +289,68 @@ fun LinuxSetupScreen() {
                 required = false
             )
 
+            if (isWayland) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Warning.copy(alpha = 0.10f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(Icons.Default.Warning, null, tint = Warning, modifier = Modifier.size(20.dp))
+                        Column {
+                            Text(
+                                "Wayland session: reduced kiosk guarantees",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                                color = Warning
+                            )
+                            Text(
+                                "Native Wayland does not provide FocusFlow with a global keyboard grab. " +
+                                    "Foreground-window identification may be unavailable, overlays cannot be guaranteed " +
+                                    "above compositor-managed windows, and GNOME/KDE panel hiding is not supported. " +
+                                    "Process monitoring and overlay attempts remain active. Use an X11 session for the " +
+                                    "strongest supported kiosk behavior.",
+                                fontSize = 12.sp,
+                                color = OnSurface2,
+                                lineHeight = 17.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Surface2)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        "Installation and autostart",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        color = OnSurface
+                    )
+                    Text(
+                        "Installed .deb/.rpm packages normally provide a stable launcher. " +
+                            "For an AppImage, keep the file in its final location before enabling autostart; " +
+                            "moving it later can invalidate the generated desktop entry. " +
+                            "Development runs use the current JVM/launcher command and are not a substitute for a " +
+                            "packaged install. Enable autostart from Settings after choosing the install mode you will keep.",
+                        fontSize = 12.sp,
+                        color = OnSurface2,
+                        lineHeight = 17.sp
+                    )
+                }
+            }
+
             Spacer(Modifier.height(16.dp))
 
             // Privacy note
@@ -303,7 +373,9 @@ fun LinuxSetupScreen() {
                             color = OnSurface
                         )
                         Text(
-                            "Root/sudo required for firewall and hosts blocking. FocusFlow uses pkexec (PolicyKit) which prompts for your password once. No data leaves your machine.",
+                            "Linux firewall attempts may request PolicyKit authorization. The current hosts-file path " +
+                                "only succeeds when /etc/hosts is writable, and firewall success still needs runtime " +
+                                "verification. No data leaves your machine.",
                             fontSize = 12.sp,
                             color = OnSurface2,
                             lineHeight = 17.sp

@@ -1,0 +1,12 @@
+Phase 6 — Release-readiness hardening
+These items were added after a source/workflow/package audit on 2026-09-21. They are intentionally open: static inspection is not a substitute for a real Linux session or a privileged enforcement test.
+
+ P6.1 — Make /etc/hosts privilege handling real and safe Implement and test a constrained pkexec or equivalent helper for atomic Linux hosts-file writes. Verify cancellation, failure reporting, unblock, shutdown cleanup, and resolver behavior. The current code checks writability but does not itself elevate the write.
+ P6.2 — Make Linux firewall state truthful Do not report NetworkBlocker.addRule() as successful before the asynchronous iptables operation is verified. Expose pending/failed state, use bounded subprocesses, and verify tagged rule cleanup.
+ P6.3 — Remove remaining UI-thread Linux probes Add iptables to LinuxToolsChecker.checkAll() and remove the synchronous LinuxToolsChecker.isInstalled("iptables") call from LinuxSetupScreen.
+ P6.4 — Add subprocess timeouts and failure diagnostics Cover pkexec, iptables, nslookup, resolvectl, xdotool, wmctrl, systemctl, and notification calls. A cancelled prompt or broken desktop session must not hang enforcement or shutdown.
+ P6.5 — Validate foreground detection by session type Test X11, XWayland, and native Wayland separately. The current Wayland wmctrl -lp fallback must not be treated as proof of the active window.
+ P6.6 — Close strict CI/package gates Fail CI when required .deb/.rpm artifacts, dependency metadata, or AppImage output are missing. Validate version, architecture, desktop entry, icon, dependencies, and package contents.
+ P6.7 — Make release installers reproducible and verifiable Align install.sh and AUR URLs with the actual release repository, add checksum/signature verification, clean up failed downloads, make repeated installs safe, replace AUR placeholders, and remove sha256sums=('SKIP').
+ P6.8 — Add privileged and recovery integration tests Test real hosts/firewall blocking, cleanup after force-kill, watchdog/autostart lifecycle, resolver variants, and cancelled authentication in disposable Linux environments. Keep unit tests non-destructive.
+ P6.9 — Add shell/input safety tests Cover process names, domain names, desktop-file Exec= values, paths with spaces, and shell metacharacters. Verify no user-controlled value reaches an unsafe shell command.

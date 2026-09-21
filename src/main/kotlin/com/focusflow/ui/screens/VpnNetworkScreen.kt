@@ -85,7 +85,10 @@ fun VpnNetworkScreen() {
         scope.launch {
             snackbarHostState.showSnackbar(
                 message = if (isLinux) {
-                    "$context needs PolicyKit authorization. Make sure pkexec is installed and try again."
+                    if (context.contains("Hosts", ignoreCase = true))
+                        "$context could not run: the current Linux hosts path requires /etc/hosts to be writable and does not elevate through pkexec yet."
+                    else
+                        "$context needs a privileged Linux operation. Make sure pkexec and iptables are installed; rule success still requires runtime verification."
                 } else {
                     "$context requires administrator privileges. Re-launch FocusFlow as Administrator."
                 },
@@ -312,6 +315,10 @@ fun VpnNetworkScreen() {
                 color = Warning
             ) {
                 Text(
+                if (isLinux)
+                    "Type a domain to block via /etc/hosts, or a keyword to attempt an iptables cutoff for a matching foreground app. " +
+                        "Native Wayland may not provide a reliable foreground-window identity."
+                else
                     "Type a domain to block via hosts file, or a keyword to cut network access for any app whose window title matches — optionally restricted to one specific app.",
                     color = OnSurface2,
                     style = MaterialTheme.typography.bodySmall
@@ -381,12 +388,12 @@ fun VpnNetworkScreen() {
                         Text(
                             if (newMode == NetworkRuleMode.DOMAIN)
                                 if (isLinux)
-                                    "Blocks the domain via /etc/hosts (requires pkexec). App-specific rules also use iptables when available."
+                                    "Attempts to block the domain via /etc/hosts. The current Linux path requires that file to be writable; pkexec does not yet elevate the hosts write. App-specific rules attempt iptables and must be verified at runtime."
                                 else
                                     "Blocks the domain via the Windows hosts file (requires admin). If app-specific is enabled, also adds a firewall rule for that app only."
                             else
                                 if (isLinux)
-                                    "When the foreground window title contains this keyword, FocusFlow cuts network access with iptables — without killing the process."
+                                    "When a supported foreground-window lookup matches this keyword, FocusFlow attempts an iptables cutoff without killing the process. Native Wayland may not identify the active window reliably."
                                 else
                                     "When the foreground window title contains this keyword, FocusFlow cuts network for the matching app via Windows Firewall — without killing the process.",
                             color = OnSurface2,
@@ -406,10 +413,17 @@ fun VpnNetworkScreen() {
                             Text(
                                 when {
                                     appSpecific && newMode == NetworkRuleMode.DOMAIN ->
-                                        "Domain blocked globally via hosts file; firewall rule also added for this app"
+                                        if (isLinux)
+                                            "Hosts write and app firewall rule are attempted; check the result notification and system state"
+                                        else
+                                            "Domain blocked globally via hosts file; firewall rule also added for this app"
                                     appSpecific -> "Rule applies only to the app below"
-                                    newMode == NetworkRuleMode.DOMAIN -> "Rule blocks domain system-wide via hosts file"
-                                    else -> "Rule matches any foreground app"
+                                    newMode == NetworkRuleMode.DOMAIN ->
+                                        if (isLinux) "Rule attempts a system-wide /etc/hosts block"
+                                        else "Rule blocks domain system-wide via hosts file"
+                                    else ->
+                                        if (isLinux) "Rule attempts an iptables cutoff for a matching foreground app"
+                                        else "Rule matches any foreground app"
                                 },
                                 color = OnSurface2, style = MaterialTheme.typography.bodySmall
                             )
@@ -574,7 +588,9 @@ fun VpnNetworkScreen() {
                 Icon(Icons.Default.Info, null, tint = Purple80, modifier = Modifier.size(18.dp))
                 Text(
                     if (isLinux)
-                        "VPN Shield and Network Cutoff Rules use /etc/hosts and iptables. FocusFlow requests elevated access through pkexec; no Windows administrator rights are required."
+                        "Linux uses /etc/hosts and iptables. The hosts path currently succeeds only when /etc/hosts is writable; " +
+                            "iptables operations may request pkexec but are not treated as verified until the rule is confirmed. " +
+                            "Resolver caches and DNS-over-HTTPS can keep a site reachable after a hosts change."
                     else
                         "Both VPN Shield and Network Cutoff Rules require FocusFlow to run with administrator privileges. Domain blocks modify the Windows hosts file; keyword cutoffs and VPN blocks use Windows Firewall rules.",
                     color = OnSurface2,

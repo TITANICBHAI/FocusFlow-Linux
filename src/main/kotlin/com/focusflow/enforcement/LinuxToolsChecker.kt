@@ -47,5 +47,10 @@ object LinuxToolsChecker {
             installed   = isInstalled("notify-send"),
             installHint = "sudo apt install libnotify-bin   # or: sudo dnf install libnotify"
         ),
+        ToolStatus(
+            name        = "iptables",
+            installed   = isInstalled("iptables"),
+            installHint = "sudo apt install iptables        # or: sudo dnf install iptables   # or: sudo pacman -S iptables"
+        ),
     )
 }

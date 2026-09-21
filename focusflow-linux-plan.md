@@ -6,9 +6,9 @@
 
 ## Quick answer to your workflow question
 
-**Do NOT replace Windows code. Add Linux branches alongside it.**
+**Do NOT replace Windows code during the temporary dual-platform period. Add Linux branches alongside it.**
 
-The codebase already does this correctly — `if (isWindows)` / `if (isLinux)` guards are everywhere. Keep that pattern through the whole migration. The Windows app is live on the Store; you cannot break it. The only things you delete are the wrong files listed in Phase 1 below. Full Windows cleanup only happens if you ever decide to drop Windows entirely — that is not this migration.
+The codebase already does this correctly — `if (isWindows)` / `if (isLinux)` guards are everywhere. Keep that pattern through Linux release hardening so the current Windows release remains usable. The long-term direction is Linux-only, but removing Windows paths is a separate post-readiness migration with its own compatibility, data, packaging, and release plan. Do not mix that removal into individual Linux tasks.
 
 ---
 

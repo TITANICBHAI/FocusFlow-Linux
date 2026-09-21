@@ -16,7 +16,14 @@ Three workflows build on every push to `main`:
 - AppImage is created via a manual `appimagetool` fallback if Compose Desktop's built-in step produces nothing
 - `.deb` and `.rpm` Requires/Depends fields are injected post-build (xdotool, wmctrl)
 
-## Next major workstream: Linux migration
+## Product direction and next major workstream
+
+FocusFlow is temporarily dual-platform: Windows behavior must remain working
+during the Linux migration, but the long-term product direction is Linux-only.
+Do not add new Windows-specific features unless they are required to keep the
+temporary Windows release stable. Once Linux reaches release readiness, handle
+Windows removal as a separate deliberate cleanup phase with a migration plan,
+not as part of individual Linux changes.
 
 The forward development plan is the Linux migration. Keep the production Windows path intact and add Linux behavior beside it using platform guards. The source-of-truth documents are:
 

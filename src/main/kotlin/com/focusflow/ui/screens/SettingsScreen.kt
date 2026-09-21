@@ -191,6 +191,33 @@ fun SettingsScreen() {
                     }
                 )
 
+                if (isLinux) {
+                    val keyboardMode = remember { GlobalKeyboardHook.linuxKeyboardMode() }
+                    HorizontalDivider(color = Surface3, modifier = Modifier.padding(vertical = 8.dp))
+                    SettingRow(
+                        label = "Keyboard escape protection",
+                        subtitle = when (keyboardMode) {
+                            GlobalKeyboardHook.LinuxKeyboardMode.X11_GLOBAL_GRAB ->
+                                "X11 global keyboard grab is available during kiosk mode"
+                            GlobalKeyboardHook.LinuxKeyboardMode.WAYLAND_REDUCED ->
+                                "Reduced on native Wayland — global shortcut suppression is unavailable; process blocking and overlay protection remain active"
+                            GlobalKeyboardHook.LinuxKeyboardMode.UNAVAILABLE ->
+                                "Unavailable without a display — process blocking and overlay protection remain active"
+                        },
+                        trailing = {
+                            Icon(
+                                if (keyboardMode == GlobalKeyboardHook.LinuxKeyboardMode.X11_GLOBAL_GRAB)
+                                    Icons.Default.CheckCircle
+                                else Icons.Default.Warning,
+                                null,
+                                tint = if (keyboardMode == GlobalKeyboardHook.LinuxKeyboardMode.X11_GLOBAL_GRAB)
+                                    Success
+                                else Warning
+                            )
+                        }
+                    )
+                }
+
                 HorizontalDivider(color = Surface3, modifier = Modifier.padding(vertical = 8.dp))
 
                 SettingRow(

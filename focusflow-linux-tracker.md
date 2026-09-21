@@ -10,8 +10,8 @@ Keep the Windows implementation working. Add Linux branches alongside existing W
 
 ## Phase 1 — Build blockers
 
-- [ ] **P1.1 — Add missing `focusflow.png` resource**
-  The source resource now exists and is copied into build resources unchanged. `packageDeb` still needs to be rerun in an environment with `fakeroot`; the current environment reports that tool as missing.
+- [x] **P1.1 — Add missing `focusflow.png` resource**
+  The source resource is a valid copy of `focusflow_256.png`, is copied into build resources unchanged, and `packageDeb` completed successfully with the packaged `FocusFlow.png` icon present.
 - [x] **P1.2 — Delete stray React/video files from the repo**
   Remove the unrelated `src/App.tsx`, `src/main.tsx`, `src/index.css`, and `src/components/video/` files after confirming they are not used by the Kotlin/Gradle build.
 
@@ -26,8 +26,8 @@ Keep the Windows implementation working. Add Linux branches alongside existing W
 
 ## Phase 3 — Kiosk hardening
 
-- [ ] **P3.1 — `GlobalKeyboardHook`: close the Wayland keyboard gap**  
-  Evaluate D-Bus `Inhibit` for supported Wayland environments; otherwise document the reduced keyboard enforcement clearly and retain process/overlay enforcement.
+- [x] **P3.1 — `GlobalKeyboardHook`: close the Wayland keyboard gap**
+  Native Wayland is explicitly reported as reduced protection because portal Inhibit does not block global keyboard delivery and GlobalShortcuts does not suppress compositor escape keys. X11 retains the real global grab; process blocking and the overlay remain active on Wayland.
 - [ ] **P3.2 — `NuclearMode`: add GNOME/KDE task managers to the escape list**  
   Cover common Linux system monitors and terminal tools without duplicating existing entries.
 - [ ] **P3.3 — `FloatingBlockOverlay`: raise on Linux**  

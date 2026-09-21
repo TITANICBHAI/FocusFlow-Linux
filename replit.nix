@@ -1,5 +1,6 @@
 {pkgs}: {
   deps = [
+    pkgs.fakeroot
     pkgs.twitter-color-emoji
     pkgs.noto-fonts-cjk-sans
     pkgs.freetype

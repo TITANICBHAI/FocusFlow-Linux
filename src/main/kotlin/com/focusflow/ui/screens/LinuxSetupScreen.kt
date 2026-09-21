@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.focusflow.enforcement.isLinux
+import com.focusflow.enforcement.isWayland
 import com.focusflow.enforcement.LinuxToolsChecker
 import com.focusflow.ui.components.AdminBanner
 import com.focusflow.ui.components.PermissionSetupCard
@@ -110,7 +111,13 @@ fun LinuxSetupScreen() {
                 ) {
                     Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Success, modifier = Modifier.size(16.dp))
                     Text(
-                        "Running on Linux — partial enforcement available. Install the tools below for full capability.",
+                        if (isWayland) {
+                            "Running on native Wayland — reduced keyboard shortcut protection; " +
+                                "process blocking and overlay enforcement remain active."
+                        } else {
+                            "Running on Linux/X11 — global keyboard grab is available during kiosk mode. " +
+                                "Install the tools below for full capability."
+                        },
                         fontSize = 12.sp,
                         color = Success
                     )

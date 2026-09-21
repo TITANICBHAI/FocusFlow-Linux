@@ -30,33 +30,29 @@ the full contents of every Markdown file into chat.
 
 ## Current project position
 
-P1.2 and Phase 2 are complete. P1.1's source resource is also present and
-verified, but its Debian package acceptance check is still open because the
-current environment does not have `fakeroot`. The next action is to retry that
-package check when the tool is available, then continue with P3.1.
+P1.1, P1.2, Phase 2, and P3.1 are complete. The source icon is packaged
+successfully in the Debian artifact. Native Wayland is documented as reduced
+keyboard protection because no supported compositor-independent global grab is
+available. The next task is P3.2.
 
 The attached JPEG was not copied unchanged. `focusflow.png` uses the existing
 valid `focusflow_256.png` source, and the original resource remains preserved.
 
 ## Ready-to-paste prompt for the next action
 
-Use this when starting the P1.1 packaging closure:
+Use this when starting P3.2:
 
 ```text
 Continue the FocusFlow Linux migration. Read AGENT_START_HERE.md,
 AGENT_PRE_WORK_PROMPT.md, FOCUSFLOW_LINUX_AGENT_PROMPT.md, and
 focusflow-linux-handoff.md before editing.
 
-Work only on the remaining P1.1 acceptance check. The source
-src/main/resources/focusflow.png already exists and is a valid copy of
-src/main/resources/focusflow_256.png. Do not replace either icon and do not
-change Windows behavior.
-
-Retry `bash ./gradlew packageDeb --no-daemon` when the Linux packaging tool
-fakeroot is available. If it is unavailable, record that exact blocker and do
-not mark P1.1 complete. Update focusflow-linux-tracker.md only when the
-acceptance check passes, and update focusflow-linux-handoff.md with the result
-and next task.
+Work only on P3.2: audit Linux escape processes for common GNOME, KDE, XFCE,
+and terminal tools. Read the current NuclearMode list before editing, add only
+missing safe-to-kill user tools, and never add compositors, display servers,
+D-Bus infrastructure, input stacks, or other system-critical processes.
+Preserve Windows behavior, run targeted checks, and update the tracker and
+focusflow-linux-handoff.md only with verified results.
 ```
 
 ## Git check policy

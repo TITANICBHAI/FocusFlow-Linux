@@ -50,6 +50,12 @@ import com.sun.jna.win32.W32APIOptions
  */
 object GlobalKeyboardHook {
 
+    enum class LinuxKeyboardMode {
+        X11_GLOBAL_GRAB,
+        WAYLAND_REDUCED,
+        UNAVAILABLE
+    }
+
     // ── Hook constants ────────────────────────────────────────────────────────
     private const val WH_KEYBOARD_LL = 13
     private const val HC_ACTION      = 0
@@ -132,9 +138,27 @@ object GlobalKeyboardHook {
     // Only active when DISPLAY is set (X11 session); no-ops silently on Wayland.
     @Volatile private var x11Display:   JnaX11.Display? = null
     @Volatile private var x11GrabActive: Boolean = false
+    @Volatile private var waylandWarningLogged: Boolean = false
 
     /** True while the hook is installed and active. */
     val isActive: Boolean get() = hookHandle != null || x11GrabActive
+
+    /**
+     * Reports the capability available in the current Linux session.
+     *
+     * Native Wayland intentionally reports reduced protection. The standard
+     * desktop portal Inhibit API controls idle/logout/suspend behavior, not
+     * global keyboard delivery, and GlobalShortcuts registers shortcuts rather
+     * than suppressing compositor escape keys. Calling either API here would
+     * create a false kiosk guarantee and would not work consistently across
+     * GNOME, KDE, and other compositors.
+     */
+    fun linuxKeyboardMode(): LinuxKeyboardMode = when {
+        !isLinux -> LinuxKeyboardMode.UNAVAILABLE
+        isWayland -> LinuxKeyboardMode.WAYLAND_REDUCED
+        System.getenv("DISPLAY").isNullOrBlank() -> LinuxKeyboardMode.UNAVAILABLE
+        else -> LinuxKeyboardMode.X11_GLOBAL_GRAB
+    }
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -145,13 +169,16 @@ object GlobalKeyboardHook {
      */
     @Synchronized fun enable() {
         if (running) return
-        // Linux kiosk: no low-level keyboard hook equivalent unless we inject
-        // into the X11 server.  Mitigation relies on the fullscreen overlay
-        // (FrameManager.showLockScreen) which suppresses window manager shortcuts.
-        // NuclearMode.kt also kills terminal emulators launched via external means.
-        // TODO: If xdg-desktop-portal or kiosk-shell is available, integrate
-        //       session-level keyboard lock (xprop + EWMH client list filtering).
         if (isLinux) {
+            if (isWayland && !waylandWarningLogged) {
+                EnforcementLog.warn(
+                    "GlobalKeyboardHook",
+                    "Native Wayland does not provide a supported global keyboard grab; " +
+                        "keyboard escape protection is reduced. Process blocking and the " +
+                        "FocusFlow overlay remain active."
+                )
+                waylandWarningLogged = true
+            }
             enableLinuxX11Hook()   // XGrabKeyboard on X11; no-op on Wayland
             running = true
             return
@@ -263,13 +290,14 @@ object GlobalKeyboardHook {
      * compositor, Super to the panel, etc.) are redirected to us and discarded
      * because we never forward them.
      *
-     * Only called when DISPLAY is set (X11 session).  On Wayland (no DISPLAY,
-     * or XWayland without a proper root-grab path) this is a silent no-op;
-     * the fullscreen Compose overlay remains the only mitigation there.
+     * Only called for a non-Wayland session with DISPLAY set. Native Wayland
+     * has no supported compositor-independent root grab; the fullscreen
+     * Compose overlay plus process enforcement remain the mitigation there.
      */
     private fun enableLinuxX11Hook() {
+        if (isWayland) return
         val displayEnv = System.getenv("DISPLAY")
-        if (displayEnv.isNullOrBlank()) return   // Wayland / headless — skip
+        if (displayEnv.isNullOrBlank()) return   // headless — skip
         try {
             val x11  = JnaX11.INSTANCE
             val disp = x11.XOpenDisplay(displayEnv) ?: return

@@ -61,18 +61,22 @@ object NuclearMode {
         "gnome-terminal", "gnome-terminal-server", "konsole", "xfce4-terminal",
         "xterm", "uxterm", "terminator", "terminology", "mate-terminal",
         "lxterminal", "qterminal", "tilix", "alacritty", "kitty",
-        "sakura", "tilda", "guake", "rxvt",
+        "sakura", "tilda", "guake", "rxvt", "urxvt",
+        "kgx", "ptyxis", "foot", "wezterm", "cool-retro-term",
+        "deepin-terminal", "st", "yakuake",
         // Shells — user-launched shells are the primary escape vector
         "bash", "zsh", "sh", "dash", "fish", "ksh", "csh", "tcsh",
+        "nu", "nushell",
         // System monitors — can kill FocusFlow processes
         "gnome-system-monitor", "ksysguard", "kdesystemguard",
+        "plasma-systemmonitor", "mate-system-monitor",
         "htop", "btop", "top", "glances",
         // Config editors — can undo FocusFlow settings
         "dconf-editor", "gconf-editor",
         // Task/process management
         "procman", "lxtask", "xfce4-taskmanager",
         // Run command dialogs — can launch anything
-        "gnome-run", "krunner", "xfce4-appfinder",
+        "gnome-run", "krunner", "xfce4-appfinder", "rofi", "dmenu",
         // Package managers — could install bypass tools
         "gnome-software", "discover", "pamac-manager", "synaptic",
         "aptitude", "dpkg"

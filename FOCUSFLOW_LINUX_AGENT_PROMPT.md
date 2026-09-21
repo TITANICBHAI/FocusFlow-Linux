@@ -77,6 +77,10 @@ before making a change because another agent may have moved an item forward.
   export directories.
 - `P2.3` the registry orphan check and Windows-only dialog are guarded by
   `IS_WINDOWS`.
+- `P1.1` now has a source `focusflow.png` resource, and `packageDeb` has been
+  verified successfully with the packaged Linux icon present.
+- `P3.1` now reports native Wayland as reduced keyboard protection, logs the
+  limitation, and explains it in Linux-facing UI while retaining the X11 grab.
 
 ### Confirmed still missing or incomplete at the time of this prompt
 
@@ -95,9 +99,8 @@ before making a change because another agent may have moved an item forward.
 - `App.kt` currently runs the registry orphan check without an outer
   `IS_WINDOWS` guard. The Linux path must not invoke the Windows registry
   diagnostic or show its Windows-specific dialog.
-- `GlobalKeyboardHook` intentionally no-ops the grab on native Wayland. Decide
-  whether a safe supported inhibition mechanism can be added; otherwise make the
-  limitation clear in the product and logs without claiming full kiosk security.
+- `GlobalKeyboardHook` intentionally does not claim a native Wayland keyboard
+  grab. The remaining kiosk work is process coverage and overlay behavior.
 - `FloatingBlockOverlay` raises/focuses its AWT window but has no Linux
   `xdotool windowraise` best-effort path.
 - `SystemTrayManager.showNotification()` only uses the AWT tray icon. It has no

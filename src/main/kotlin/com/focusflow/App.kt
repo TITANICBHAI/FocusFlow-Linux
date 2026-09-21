@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import com.focusflow.data.Database
 import com.focusflow.data.models.Screen
 import com.focusflow.data.models.Task
+import com.focusflow.IS_WINDOWS
 import com.focusflow.enforcement.AppBlocker
 import com.focusflow.enforcement.NetworkBlocker
 import com.focusflow.enforcement.NuclearMode
@@ -197,7 +198,7 @@ fun App() {
             val nuclearOn = try { NuclearMode.isActive } catch (_: Throwable) { true }
             val kioskOn   = try { FocusLauncherService.isActive.value } catch (_: Throwable) { true }
             if (nuclearOn || kioskOn) false
-            else RegistryLockdown.detectOrphanedKeys()
+            else if (IS_WINDOWS) RegistryLockdown.detectOrphanedKeys() else false
         }
         if (orphaned) showRegistryOrphanDialog = true
     }
@@ -401,7 +402,7 @@ fun App() {
             )
         }
 
-        if (showRegistryOrphanDialog) {
+        if (showRegistryOrphanDialog && IS_WINDOWS) {
             AlertDialog(
                 onDismissRequest = { showRegistryOrphanDialog = false },
                 containerColor   = Surface2,

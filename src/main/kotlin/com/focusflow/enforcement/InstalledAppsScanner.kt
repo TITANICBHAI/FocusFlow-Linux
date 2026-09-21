@@ -8,7 +8,11 @@ data class ScannedApp(
     val processName: String,
     val displayName: String,
     val isRunning: Boolean,
-    val exePath: String? = null
+    val exePath: String? = null,
+    /** Original desktop-file Exec= value, retained for diagnostics and launchers. */
+    val execCommand: String? = null,
+    /** Source .desktop file used to discover this Linux application. */
+    val desktopFilePath: String? = null
 )
 
 object InstalledAppsScanner {
@@ -130,6 +134,8 @@ object InstalledAppsScanner {
      * Used by AppIcon to resolve real icons without re-scanning.
      */
     private val exePathCache = ConcurrentHashMap<String, String>()
+    private val desktopFileCache = ConcurrentHashMap<String, String>()
+    private val execCommandCache = ConcurrentHashMap<String, String>()
 
     /** Installed-apps registry scan — lazily populated, cached for the session. */
     private val installedCache = mutableListOf<ScannedApp>()
@@ -145,10 +151,27 @@ object InstalledAppsScanner {
                     // Use orElse(null) on a single call to avoid the TOCTOU race where
                     // isPresent() returns true but the process exits before get() is called,
                     // causing NoSuchElementException on the second command() invocation.
-                    val cmd = ph.info().command().orElse(null) ?: return@mapNotNull null
-                    val exe = java.io.File(cmd).name.lowercase()
+                    val info = ph.info()
+                    val cmd = info.command().orElse(null) ?: return@mapNotNull null
+                    val commandLine = info.commandLine().orElse("")
+                    val commandName = java.io.File(cmd).name.lowercase()
+                    // Flatpak's host process is reported as "flatpak" by
+                    // ProcessHandle.command(), while its command line contains
+                    // the app ID. Use the same normalization as desktop files
+                    // so installed and running entries share a process key.
+                    val exe = if (isLinux && commandName == "flatpak") {
+                        normalizeLinuxExec(commandLine)?.processName ?: commandName
+                    } else {
+                        commandName
+                    }
                     val display = curated[exe] ?: friendlyName(exe)
-                    ScannedApp(exe, display, isRunning = true, exePath = cmd)
+                    ScannedApp(
+                        processName = exe,
+                        displayName = display,
+                        isRunning = true,
+                        exePath = cmd,
+                        execCommand = commandLine.takeIf { it.isNotBlank() }
+                    )
                 }
                 .filter { app ->
                     app.processName.isNotBlank() &&
@@ -200,6 +223,34 @@ object InstalledAppsScanner {
     /** Look up the exe path for a process name using the cache built by any prior scan. */
     fun getExePathFor(processName: String): String? =
         exePathCache[processName.lowercase()]
+
+    /** Returns the Linux desktop file associated with a normalized process name. */
+    fun getDesktopFileForProcess(processName: String): String? =
+        desktopFileCache[processName.trim().lowercase()]
+
+    /**
+     * Resolve a desktop file from the executable path passed to the icon loader.
+     * The optional process name is useful for launchers such as Flatpak, whose
+     * Exec= binary is "flatpak" while the actual app process has another name.
+     */
+    fun getDesktopFileForExecutable(
+        exePath: String,
+        processName: String? = null
+    ): String? {
+        if (isLinux && !installedScanned) {
+            try { getInstalledApps() } catch (_: Exception) {}
+        }
+        val processKey = processName?.trim()?.lowercase()
+        if (!processKey.isNullOrBlank()) {
+            desktopFileCache[processKey]?.let { return it }
+        }
+        val executableKey = java.io.File(exePath).name.lowercase()
+        return desktopFileCache[executableKey]
+    }
+
+    /** Returns the original Linux Exec= command for diagnostics or launchers. */
+    fun getExecCommandFor(processName: String): String? =
+        execCommandCache[processName.trim().lowercase()]
 
     fun friendlyNameFor(processName: String): String =
         curated[processName.lowercase()] ?: friendlyName(processName.lowercase())
@@ -282,36 +333,179 @@ object InstalledAppsScanner {
      */
     private fun scanLinuxDesktopFiles(): List<ScannedApp> {
         val result = mutableMapOf<String, ScannedApp>()
+        val home = System.getProperty("user.home")
         val dirs = listOf(
             java.io.File("/usr/share/applications"),
-            java.io.File(System.getProperty("user.home") + "/.local/share/applications")
-        )
+            java.io.File("$home/.local/share/applications"),
+            java.io.File("$home/.local/share/flatpak/exports/share/applications"),
+            java.io.File("/var/lib/flatpak/exports/share/applications"),
+            java.io.File("/var/lib/snapd/desktop/applications")
+        ).filter { it.isDirectory }
         for (dir in dirs) {
-            val files = try { dir.listFiles() } catch (e: Exception) { null } ?: continue
+            val files = try {
+                dir.listFiles()
+                    ?.filter { it.isFile && it.extension.equals("desktop", ignoreCase = true) }
+                    ?.sortedBy { it.name }
+            } catch (_: Exception) { null } ?: continue
             for (f in files) {
-                if (f.extension?.lowercase() != "desktop") continue
                 try {
-                    var name: String? = null
-                    var exec: String? = null
-                    f.forEachLine { line ->
-                        if (line.startsWith("Name=")) name = line.removePrefix("Name=").trim()
-                        else if (line.startsWith("Exec=")) exec = line.removePrefix("Exec=").trim()
-                    }
-                    val n = name ?: continue
-                    val e = exec?.substringBefore(" ") ?: continue
-                    val procName = e.substringAfterLast("/").lowercase().takeIf { it.isNotBlank() } ?: continue
+                    val entry = parseLinuxDesktopFile(f) ?: continue
+                    val normalized = normalizeLinuxExec(entry.exec) ?: continue
+                    val procName = normalized.processName
                     if (procName in systemIgnore) continue
                     if (procName in result) continue
 
-                    val display = curated[procName] ?: n
-                    val app = ScannedApp(procName, display, isRunning = false, exePath = e)
+                    val display = curated[procName] ?: entry.name
+                    val app = ScannedApp(
+                        processName    = procName,
+                        displayName    = display,
+                        isRunning      = false,
+                        exePath        = normalized.command,
+                        execCommand    = normalized.fullCommand,
+                        desktopFilePath = f.absolutePath
+                    )
                     result[procName] = app
-                    exePathCache.putIfAbsent(procName, e)
+                    exePathCache.putIfAbsent(procName, normalized.command)
+                    desktopFileCache[procName] = f.absolutePath
+                    execCommandCache[procName] = normalized.fullCommand
+
+                    // A normal binary can be looked up by its executable basename.
+                    // Do not cache "flatpak" itself because many desktop files use
+                    // that launcher and would overwrite one another.
+                    val commandName = java.io.File(normalized.command).name.lowercase()
+                    if (commandName != "flatpak" && commandName != "env") {
+                        desktopFileCache.putIfAbsent(commandName, f.absolutePath)
+                    }
                 } catch (e2: Exception) { /* skip malformed desktop file */ }
             }
         }
         return result.values.sortedBy { it.displayName }
     }
+
+    private data class LinuxDesktopEntry(
+        val name: String,
+        val exec: String
+    )
+
+    private data class NormalizedLinuxExec(
+        val processName: String,
+        val command: String,
+        val fullCommand: String
+    )
+
+    private fun parseLinuxDesktopFile(file: java.io.File): LinuxDesktopEntry? {
+        var name: String? = null
+        var exec: String? = null
+        var inDesktopEntry = true
+        file.forEachLine { line ->
+            val trimmed = line.trim()
+            if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+                inDesktopEntry = trimmed == "[Desktop Entry]"
+            } else if (inDesktopEntry && !trimmed.startsWith("#")) {
+                when {
+                    trimmed.startsWith("Name=") && name == null ->
+                        name = trimmed.removePrefix("Name=").trim()
+                    trimmed.startsWith("Exec=") && exec == null ->
+                        exec = trimmed.removePrefix("Exec=").trim()
+                }
+            }
+        }
+        val displayName = name?.takeIf { it.isNotBlank() } ?: return null
+        val command = exec?.takeIf { it.isNotBlank() } ?: return null
+        return LinuxDesktopEntry(displayName, command)
+    }
+
+    /**
+     * Normalize a desktop-file Exec= command to the process name seen by
+     * ProcessHandle and the Linux foreground poller, while retaining the
+     * original command in ScannedApp.execCommand.
+     */
+    private fun normalizeLinuxExec(exec: String): NormalizedLinuxExec? {
+        val tokens = tokenizeDesktopExec(exec)
+            .filterNot { it.startsWith("%") }
+        if (tokens.isEmpty()) return null
+
+        var index = 0
+        var command = tokens[index]
+        var commandName = java.io.File(command).name.lowercase()
+
+        if (commandName == "env") {
+            index++
+            while (index < tokens.size) {
+                val token = tokens[index]
+                if (token == "--" || token == "-i") {
+                    index++
+                    continue
+                }
+                if (token.contains("=") && !token.startsWith("=")) {
+                    index++
+                    continue
+                }
+                break
+            }
+            if (index >= tokens.size) return null
+            command = tokens[index]
+            commandName = java.io.File(command).name.lowercase()
+        }
+
+        if (commandName == "flatpak") {
+            val appId = tokens.drop(index + 1)
+                .dropWhile { it == "run" || it.startsWith("-") }
+                .firstOrNull()
+                ?.takeIf { it.isNotBlank() }
+            val flatpakName = appId?.let(::flatpakProcessName) ?: return null
+            return NormalizedLinuxExec(flatpakName, command, exec)
+        }
+
+        val processName = commandName.takeIf { it.isNotBlank() } ?: return null
+        return NormalizedLinuxExec(processName, command, exec)
+    }
+
+    private fun flatpakProcessName(appId: String): String {
+        val parts = appId.split('.').filter { it.isNotBlank() }
+        if (parts.isEmpty()) return appId.lowercase()
+        return if (parts.size >= 3 && parts.last().equals("desktop", ignoreCase = true)) {
+            parts.drop(1).joinToString("-")
+        } else {
+            parts.last()
+        }.lowercase()
+    }
+
+    /** Tokenize the quoted/escaped command grammar used by desktop Exec= values. */
+    private fun tokenizeDesktopExec(value: String): List<String> {
+        val tokens = mutableListOf<String>()
+        val current = StringBuilder()
+        var quote: Char? = null
+        var escaped = false
+
+        fun flush() {
+            if (current.isNotEmpty()) {
+                tokens += current.toString()
+                current.clear()
+            }
+        }
+
+        for (char in value) {
+            when {
+                escaped -> {
+                    current.append(char)
+                    escaped = false
+                }
+                char == '\\' && quote != '\'' -> escaped = true
+                quote != null && char == quote -> quote = null
+                quote == null && (char == '\'' || char == '"') -> quote = char
+                quote == null && char.isWhitespace() -> flush()
+                else -> current.append(char)
+            }
+        }
+        if (escaped) current.append('\\')
+        flush()
+        return tokens
+    }
+
+    /** Exposed to the Linux unit tests without making parser internals public. */
+    internal fun normalizeLinuxExecForTesting(exec: String): String? =
+        normalizeLinuxExec(exec)?.processName
 
     private fun friendlyName(exe: String): String =
         exe.substringBeforeLast(".")

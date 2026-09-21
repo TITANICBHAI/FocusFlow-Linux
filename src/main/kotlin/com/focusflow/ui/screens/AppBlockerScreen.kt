@@ -121,7 +121,7 @@ fun AppIcon(
     LaunchedEffect(resolvedPath) {
         if (resolvedPath != null) {
             iconBitmap = withContext(Dispatchers.IO) {
-                AppIconExtractor.extractIcon(resolvedPath)
+                AppIconExtractor.extractIcon(resolvedPath, key)
             }
         }
     }

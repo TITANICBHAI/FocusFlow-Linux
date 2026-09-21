@@ -30,33 +30,33 @@ the full contents of every Markdown file into chat.
 
 ## Current project position
 
-The documentation and handoff system is ready, but no Linux implementation
-task has been completed yet. The next task is:
+P1.2 and Phase 2 are complete. P1.1's source resource is also present and
+verified, but its Debian package acceptance check is still open because the
+current environment does not have `fakeroot`. The next action is to retry that
+package check when the tool is available, then continue with P3.1.
 
-**P1.1 — Add `src/main/resources/focusflow.png`**
+The attached JPEG was not copied unchanged. `focusflow.png` uses the existing
+valid `focusflow_256.png` source, and the original resource remains preserved.
 
-The attached icon can be considered as a source, but the agent must inspect the
-existing `focusflow_256.png` first. The package resource must be a correct PNG;
-do not copy the JPEG unchanged. Preserve the existing resource.
+## Ready-to-paste prompt for the next action
 
-## Ready-to-paste prompt for the current task
-
-Use this when starting P1.1:
+Use this when starting the P1.1 packaging closure:
 
 ```text
 Continue the FocusFlow Linux migration. Read AGENT_START_HERE.md,
 AGENT_PRE_WORK_PROMPT.md, FOCUSFLOW_LINUX_AGENT_PROMPT.md, and
 focusflow-linux-handoff.md before editing.
 
-Work only on P1.1: add the missing source resource
-src/main/resources/focusflow.png. Inspect the existing
-src/main/resources/focusflow_256.png and the attached icon before choosing the
-source. The result must be a valid PNG suitable for the Linux package and
-runtime. Preserve the original resources and do not change Windows behavior.
+Work only on the remaining P1.1 acceptance check. The source
+src/main/resources/focusflow.png already exists and is a valid copy of
+src/main/resources/focusflow_256.png. Do not replace either icon and do not
+change Windows behavior.
 
-Verify the relevant resource/package path, update focusflow-linux-tracker.md
-only if the acceptance checks pass, and update focusflow-linux-handoff.md with
-the files changed, verification, blockers, and next task.
+Retry `bash ./gradlew packageDeb --no-daemon` when the Linux packaging tool
+fakeroot is available. If it is unavailable, record that exact blocker and do
+not mark P1.1 complete. Update focusflow-linux-tracker.md only when the
+acceptance check passes, and update focusflow-linux-handoff.md with the result
+and next task.
 ```
 
 ## Git check policy

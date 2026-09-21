@@ -10,18 +10,18 @@ Keep the Windows implementation working. Add Linux branches alongside existing W
 
 ## Phase 1 — Build blockers
 
-- [ ] **P1.1 — Add missing `focusflow.png` resource**  
-  Copy `src/main/resources/focusflow_256.png` to `src/main/resources/focusflow.png` without removing the original. Verify `packageDeb` and the Linux runtime icon.
-- [ ] **P1.2 — Delete stray React/video files from the repo**  
+- [ ] **P1.1 — Add missing `focusflow.png` resource**
+  The source resource now exists and is copied into build resources unchanged. `packageDeb` still needs to be rerun in an environment with `fakeroot`; the current environment reports that tool as missing.
+- [x] **P1.2 — Delete stray React/video files from the repo**
   Remove the unrelated `src/App.tsx`, `src/main.tsx`, `src/index.css`, and `src/components/video/` files after confirming they are not used by the Kotlin/Gradle build.
 
 ## Phase 2 — Core blocking
 
-- [ ] **P2.1 — `AppIconExtractor`: XDG icon lookup on Linux**  
+- [x] **P2.1 — `AppIconExtractor`: XDG icon lookup on Linux**
   Parse the `.desktop` file `Icon=` value, support absolute paths and XDG theme locations, and perform disk reads on `Dispatchers.IO`.
-- [ ] **P2.2 — `InstalledAppsScanner`: `Exec=` stripping and Flatpak/Snap directories**  
+- [x] **P2.2 — `InstalledAppsScanner`: `Exec=` stripping and Flatpak/Snap directories**
   Store a normalized executable name for matching, retain the full command for diagnostics, and scan user/system Flatpak and Snap application directories when they exist.
-- [ ] **P2.3 — `App.kt`: guard registry orphan check with `IS_WINDOWS`**  
+- [x] **P2.3 — `App.kt`: guard registry orphan check with `IS_WINDOWS`**
   Prevent the Windows registry diagnostic and its Windows-specific dialog from running on Linux.
 
 ## Phase 3 — Kiosk hardening

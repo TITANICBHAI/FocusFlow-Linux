@@ -370,7 +370,7 @@ private fun AppTile(app: FocusLauncherApp) {
     LaunchedEffect(app.exePath) {
         if (app.exePath != null) {
             icon = withContext(Dispatchers.IO) {
-                AppIconExtractor.extractIcon(app.exePath)
+                AppIconExtractor.extractIcon(app.exePath, app.processName)
             }
         }
     }

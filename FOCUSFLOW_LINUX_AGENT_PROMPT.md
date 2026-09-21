@@ -66,14 +66,23 @@ before making a change because another agent may have moved an item forward.
 - `OsBanner` is already suppressed on Windows and has a Linux branch. Do not
   assume the wording is complete just because the guard exists.
 
+### Completed in the current worktree
+
+- `P1.2` root React/video files were confirmed unused by the Kotlin/Gradle build
+  and removed without touching `artifacts/mockup-sandbox`.
+- `P2.1` XDG icon lookup now reads Linux `.desktop` metadata and standard icon
+  locations, with the existing FileSystemView fallback.
+- `P2.2` Linux desktop scanning now retains full `Exec=` commands, normalizes
+  quoted/env/ordinary/Flatpak launchers, and includes existing Flatpak/Snap
+  export directories.
+- `P2.3` the registry orphan check and Windows-only dialog are guarded by
+  `IS_WINDOWS`.
+
 ### Confirmed still missing or incomplete at the time of this prompt
 
-- `src/main/resources/focusflow.png` is absent, while `build.gradle.kts` and
-  Linux runtime code refer to it. The Linux CI currently generates one during CI,
-  but the source tree still lacks the resource.
-- Unrelated React/video files are still present under `src/`:
-  `src/App.tsx`, `src/main.tsx`, `src/index.css`, and
-  `src/components/video/`. Confirm they are unused before deleting them.
+- `src/main/resources/focusflow.png` is now present and copied into build
+  resources, but local `packageDeb` verification is blocked because `fakeroot`
+  is not installed.
 - `AppIconExtractor` currently uses Swing `FileSystemView` on non-Windows
   platforms; it does not perform XDG `.desktop` icon lookup.
 - `InstalledAppsScanner.scanLinuxDesktopFiles()` currently scans only

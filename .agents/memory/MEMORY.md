@@ -11,3 +11,4 @@
 - [FocusFlow Linux migration](focusflow-linux-migration.md) — Linux is the next workstream; use the root plan and trackers while preserving all working Windows paths.
 - [FocusFlow Replit desktop verification](focusflow-replit-desktop-verification.md) — Use system Gradle and workflow logs; the VNC desktop workflow does not expose the browser preview port.
 - [Linux release-readiness tests](linux-release-readiness-tests.md) — Privileged hosts/firewall checks must be opt-in and disposable; keep the default suite non-destructive.
+- [GitHub artifact executable permissions](github-artifact-permissions.md) — Artifact upload/download may drop executable modes; restore them before validation or release packaging.

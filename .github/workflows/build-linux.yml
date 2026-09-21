@@ -257,6 +257,9 @@ jobs:
           name: focusflow-appimage
           path: build/compose/binaries/main/appImage
 
+      - name: Restore AppImage executable permission
+        run: chmod +x build/compose/binaries/main/appImage/*.AppImage
+
       - name: Validate package metadata and payloads
         run: |
           chmod +x scripts/validate-linux-packages.sh

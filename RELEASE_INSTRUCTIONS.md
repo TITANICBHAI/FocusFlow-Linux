@@ -102,7 +102,7 @@ Minimal `PKGBUILD` template (put in a new `aur/` folder in this repo for referen
 
 ```bash
 pkgname=focusflow-bin
-pkgver=1.1.6
+pkgver=2.0.1
 pkgrel=1
 pkgdesc="Focus & productivity app with real app blocking"
 arch=('x86_64')

@@ -1061,7 +1061,7 @@ fun SettingsScreen() {
 
         item {
             SectionCard(title = strings.settingsAbout) {
-                Text("FocusFlow JVM v1.1.6", color = OnSurface)
+                Text("FocusFlow JVM v2.0.1", color = OnSurface)
                 Spacer(Modifier.height(4.dp))
                 Text("Kotlin 1.9.22 + Compose Multiplatform Desktop 1.6.1", style = MaterialTheme.typography.bodySmall, color = OnSurface2)
                 Text(

@@ -1,6 +1,6 @@
 # Maintainer: FocusFlow contributors
 pkgname=focusflow-bin
-pkgver=1.1.6
+pkgver=2.0.1
 pkgrel=1
 pkgdesc="Focus and productivity app with real app blocking (binary AppImage release)"
 arch=('x86_64')

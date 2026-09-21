@@ -29,7 +29,7 @@ paru -S focusflow-bin
    cp /path/to/this/repo/aur/PKGBUILD .
    cp /path/to/this/repo/aur/.SRCINFO .
    git add PKGBUILD .SRCINFO
-   git commit -m "Initial release v1.1.6"
+   git commit -m "Initial release v2.0.1"
    git push
    ```
 

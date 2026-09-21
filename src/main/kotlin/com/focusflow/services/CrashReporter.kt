@@ -55,7 +55,7 @@ object CrashReporter {
     const val SUPPORT_EMAIL = "support@tbtechs.dev"
 
     /** Single source of truth for the app version string. */
-    const val APP_VERSION = "1.1.6"
+    const val APP_VERSION = "2.0.1"
 
     // ── Constants ─────────────────────────────────────────────────────────────
 

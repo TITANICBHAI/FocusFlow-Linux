@@ -36,7 +36,7 @@ parts:
     plugin: dump
     source: .
     build-packages:
-      - openjdk-19-jdk-headless
+      - openjdk-17-jdk-headless
       - libfuse2
       - libgtk-3-0
       - libx11-6
@@ -47,7 +47,7 @@ parts:
     override-build: |
       set -eu
       chmod +x gradlew
-      ./gradlew createDistributable --no-daemon
+      ./gradlew createDistributable --no-daemon -Pfocusflow.java.version=17
       APP_DIR="$(find build/compose/binaries/main/app -mindepth 1 -maxdepth 1 -type d -print -quit)"
       test -n "$APP_DIR"
       cp -a "$APP_DIR"/. "$SNAPCRAFT_PART_INSTALL"/

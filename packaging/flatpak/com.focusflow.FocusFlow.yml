@@ -2,6 +2,8 @@ app-id: com.focusflow.FocusFlow
 runtime: org.freedesktop.Platform
 runtime-version: "24.08"
 sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.openjdk17
 command: focusflow
 
 # These are the least permissions needed for a desktop build. Linux
@@ -23,9 +25,12 @@ modules:
     build-options:
       build-args:
         - --share=network
+      append-path: /usr/lib/sdk/openjdk17/bin
+      env:
+        JAVA_HOME: /usr/lib/sdk/openjdk17/jvm/openjdk-17
     build-commands:
       - chmod +x gradlew
-      - ./gradlew createDistributable --no-daemon
+      - ./gradlew createDistributable --no-daemon -Pfocusflow.java.version=17
       - APP_DIR="$(find build/compose/binaries/main/app -mindepth 1 -maxdepth 1 -type d -print -quit)" && test -n "$APP_DIR"
       - APP_DIR="$(find build/compose/binaries/main/app -mindepth 1 -maxdepth 1 -type d -print -quit)" && install -d /app/lib/focusflow && cp -a "$APP_DIR"/. /app/lib/focusflow/
       - APP_LAUNCHER="$(find /app/lib/focusflow -maxdepth 3 -type f -name FocusFlow -executable -print -quit)" && test -n "$APP_LAUNCHER" && install -d /app/bin && printf '#!/bin/sh\nexec "%s" "$@"\n' "$APP_LAUNCHER" > /app/bin/focusflow && chmod +x /app/bin/focusflow

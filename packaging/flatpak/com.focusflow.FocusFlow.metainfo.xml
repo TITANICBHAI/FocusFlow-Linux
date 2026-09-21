@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.focusflow.FocusFlow</id>
+  <name>FocusFlow</name>
+  <summary>Deep focus sessions with real local app blocking</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-or-later</project_license>
+  <developer id="dev.tbtechs">
+    <name>TBTechs</name>
+  </developer>
+  <description>
+    <p>
+      FocusFlow is a local-first focus timer and distraction blocker for Linux.
+      It combines focus sessions, task planning, schedules, application
+      blocking, website blocking, allowances, notes, habits, and reports.
+    </p>
+    <p>
+      Enforcement depends on the desktop session and the permissions granted
+      by the operating system. X11, XWayland, and native Wayland are tested as
+      separate environments.
+    </p>
+  </description>
+  <launchable type="desktop-id">com.focusflow.FocusFlow.desktop</launchable>
+  <provides>
+    <binary>focusflow</binary>
+  </provides>
+  <url type="homepage">https://github.com/TITANICBHAI/FocusFlow-Linux</url>
+  <url type="bugtracker">https://github.com/TITANICBHAI/FocusFlow-Linux/issues</url>
+  <url type="vcs-browser">https://github.com/TITANICBHAI/FocusFlow-Linux</url>
+  <releases>
+    <release version="2.0.1" date="2026-09-21">
+      <description>
+        <p>Linux packaging, enforcement, desktop-session, and release-readiness improvements.</p>
+      </description>
+    </release>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

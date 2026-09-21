@@ -84,6 +84,11 @@ The release workflow publishes:
 - Debian/Ubuntu `.deb`
 - Fedora/RPM `.rpm`
 - Portable `.AppImage`
+- Flatpak bundle for local installation and Flathub review
+- Snap bundle for local installation and Snap Store review
+- AUR recipe archive
+- COPR/OBS RPM recipe archive
+- Launchpad source-package artifacts
 - `install.sh`
 - `SHA256SUMS`
 
@@ -93,12 +98,32 @@ The release workflow publishes:
 2. Update the application version shown in the UI and crash reporter.
 3. Update the changelog and packaging metadata.
 4. Push to `main`.
-5. Wait for **Build Linux Packages** and **Linux Smoke Tests** to pass.
-6. Run **Publish Linux Release** with the successful build run ID.
+5. Wait for **Build Linux Packages**, **Build Linux Distribution Channels**,
+   and **Linux Smoke Tests** to pass.
+6. Run **Publish Linux Release** with the successful native build run ID and
+   distribution-channels run ID.
 7. Verify the tag, release notes, asset names, and checksums.
 
 Direct downloads are the fallback for every distribution and remain important
 even after Flathub or Snap publication.
+
+### What CI covers
+
+The repository separates native package builds from community-channel builds
+so a Flathub or Snap toolchain problem does not hide a broken `.deb`, `.rpm`,
+or AppImage:
+
+- `.github/workflows/build-linux.yml` builds and validates native Linux
+  packages.
+- `.github/workflows/build-linux-channels.yml` builds the Flatpak and Snap
+  bundles and prepares AUR, COPR/OBS, and Launchpad artifacts.
+- `.github/workflows/release.yml` downloads both workflow outputs and attaches
+  them to the GitHub release.
+
+The channel workflow prepares artifacts; it does not impersonate a publisher.
+Flathub and Snap still require store review, AUR/COPR/OBS require repository
+accounts, and Launchpad requires a GPG-signed upload. Official distribution
+repositories require human maintainers and review.
 
 ## 2. Flathub: the main graphical Linux store
 

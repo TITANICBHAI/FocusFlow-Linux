@@ -1,0 +1,16 @@
+Source: focusflow
+Section: utils
+Priority: optional
+Maintainer: TBTechs <support@tbtechs.dev>
+Build-Depends: debhelper-compat (= 13), default-jdk-headless, unzip
+Standards-Version: 4.7.0
+Homepage: https://github.com/TITANICBHAI/FocusFlow-Linux
+Rules-Requires-Root: no
+
+Package: focusflow
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}, xdotool, wmctrl
+Description: Focus and productivity app with real app blocking
+ FocusFlow is a local-first focus timer and distraction blocker.
+ It combines focus sessions, task planning, schedules, application blocking,
+ website blocking, allowances, notes, habits, and reports.

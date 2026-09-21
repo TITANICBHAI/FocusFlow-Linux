@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=FocusFlow
+Comment=Deep focus sessions with real local app blocking
+Exec=focusflow
+Icon=com.focusflow.FocusFlow
+Terminal=false
+Type=Application
+Categories=Utility;Productivity;
+Keywords=focus;productivity;blocker;pomodoro;
+StartupWMClass=FocusFlow

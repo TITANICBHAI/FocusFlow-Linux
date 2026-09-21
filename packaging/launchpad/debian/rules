@@ -1,0 +1,19 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	chmod +x gradlew
+	./gradlew packageDeb --no-daemon
+
+override_dh_auto_install:
+	mkdir -p debian/focusflow
+	DEB=$$(find build/compose/binaries/main/deb -maxdepth 1 -name '*.deb' -print -quit); \
+	test -n "$$DEB"; \
+	dpkg-deb -x "$$DEB" debian/focusflow
+
+override_dh_auto_clean:
+	./gradlew clean --no-daemon || true

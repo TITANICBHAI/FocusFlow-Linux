@@ -1,0 +1,60 @@
+name: focusflow
+base: core24
+version: "2.0.1"
+summary: Deep focus sessions with real local app blocking
+description: |
+  FocusFlow is a local-first focus timer and distraction blocker.
+  It combines focus sessions, task planning, schedules, application blocking,
+  website blocking, allowances, notes, habits, and reports.
+
+  Linux enforcement depends on the desktop session and permissions granted by
+  the operating system. X11, XWayland, and native Wayland are treated as
+  separate support cases.
+grade: stable
+confinement: classic
+architectures:
+  - build-on: amd64
+
+apps:
+  focusflow:
+    command: bin/focusflow
+    desktop: usr/share/applications/com.focusflow.FocusFlow.desktop
+    plugs:
+      - desktop
+      - desktop-legacy
+      - home
+      - network
+      - network-bind
+      - opengl
+      - wayland
+      - x11
+
+parts:
+  focusflow:
+    plugin: dump
+    source: .
+    build-packages:
+      - openjdk-19-jdk-headless
+      - libfuse2
+      - libgtk-3-0
+      - libx11-6
+      - libxext6
+      - libxi6
+      - libxrender1
+      - libxtst6
+    override-build: |
+      set -eu
+      chmod +x gradlew
+      ./gradlew createDistributable --no-daemon
+      APP_DIR="$(find build/compose/binaries/main/app -mindepth 1 -maxdepth 1 -type d -print -quit)"
+      test -n "$APP_DIR"
+      cp -a "$APP_DIR"/. "$SNAPCRAFT_PART_INSTALL"/
+      APP_LAUNCHER="$(find "$SNAPCRAFT_PART_INSTALL" -maxdepth 3 -type f -name FocusFlow -executable -print -quit)"
+      test -n "$APP_LAUNCHER"
+      install -d "$SNAPCRAFT_PART_INSTALL/bin"
+      printf '#!/bin/sh\nexec "%s" "$@"\n' "$APP_LAUNCHER" > "$SNAPCRAFT_PART_INSTALL/bin/focusflow"
+      chmod +x "$SNAPCRAFT_PART_INSTALL/bin/focusflow"
+      install -Dm644 packaging/flatpak/com.focusflow.FocusFlow.desktop \
+        "$SNAPCRAFT_PART_INSTALL/usr/share/applications/com.focusflow.FocusFlow.desktop"
+      install -Dm644 src/main/resources/focusflow_256.png \
+        "$SNAPCRAFT_PART_INSTALL/usr/share/icons/hicolor/256x256/apps/com.focusflow.FocusFlow.png"

@@ -1,0 +1,11 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: focusflow
+Source: https://github.com/TITANICBHAI/FocusFlow-Linux
+
+Files: *
+Copyright: 2025-2026 TBTechs
+License: GPL-2+
+
+License: GPL-2+
+ The full GNU General Public License version 2 is provided in the
+ LICENSE file in the upstream source tree.

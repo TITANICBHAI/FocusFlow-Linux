@@ -7,6 +7,10 @@ on:
         description: "Build Linux Packages workflow run ID (blank uses latest successful run)"
         required: false
         default: ""
+      channels_run_id:
+        description: "Linux distribution channels workflow run ID (blank uses latest successful run)"
+        required: false
+        default: ""
       prerelease:
         description: "Mark as pre-release?"
         type: boolean
@@ -58,6 +62,33 @@ jobs:
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
           echo "Using Linux build run $RUN_ID"
 
+      - name: Resolve distribution channels run
+        id: channels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_CHANNELS_RUN_ID: ${{ inputs.channels_run_id }}
+        run: |
+          if [ -n "$INPUT_CHANNELS_RUN_ID" ]; then
+            [[ "$INPUT_CHANNELS_RUN_ID" =~ ^[0-9]+$ ]] || {
+              echo "::error::channels_run_id must be numeric."
+              exit 1
+            }
+            RUN_ID="$INPUT_CHANNELS_RUN_ID"
+          else
+            RUN_ID="$(gh run list \
+              --workflow build-linux-channels.yml \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId')"
+          fi
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "::error::No successful Linux distribution channels run was found."
+            exit 1
+          fi
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "Using distribution channels run $RUN_ID"
+
       - name: Download Debian artifact
         uses: actions/download-artifact@v4
         with:
@@ -85,6 +116,51 @@ jobs:
           run-id: ${{ steps.build.outputs.run_id }}
           merge-multiple: true
 
+      - name: Download Flatpak artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: focusflow-flatpak
+          path: dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ steps.channels.outputs.run_id }}
+          merge-multiple: true
+
+      - name: Download Snap artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: focusflow-snap
+          path: dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ steps.channels.outputs.run_id }}
+          merge-multiple: true
+
+      - name: Download AUR recipe artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: focusflow-aur
+          path: dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ steps.channels.outputs.run_id }}
+          merge-multiple: true
+
+      - name: Download COPR and OBS recipe artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: focusflow-copr-obs
+          path: dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ steps.channels.outputs.run_id }}
+          merge-multiple: true
+
+      - name: Download Launchpad source artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: focusflow-launchpad
+          path: dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ steps.channels.outputs.run_id }}
+          merge-multiple: true
+
       - name: Verify release artifacts
         env:
           EXPECTED_VERSION: ${{ steps.version.outputs.version }}
@@ -93,10 +169,22 @@ jobs:
           debs=(dist/*.deb)
           rpms=(dist/*.rpm)
           appimages=(dist/*.AppImage)
+          flatpaks=(dist/*.flatpak)
+          snaps=(dist/*.snap)
+          aur_recipes=(dist/*-aur.tar.gz)
+          copr_obs_recipes=(dist/*-copr-obs.tar.gz)
+          launchpad_sources=(dist/*.dsc)
           [[ ${#debs[@]} -eq 1 ]] || { echo "::error::Expected one .deb."; exit 1; }
           [[ ${#rpms[@]} -eq 1 ]] || { echo "::error::Expected one .rpm."; exit 1; }
           [[ ${#appimages[@]} -eq 1 ]] || { echo "::error::Expected one AppImage."; exit 1; }
-          for file in "${debs[0]}" "${rpms[0]}" "${appimages[0]}"; do
+          [[ ${#flatpaks[@]} -eq 1 ]] || { echo "::error::Expected one Flatpak."; exit 1; }
+          [[ ${#snaps[@]} -eq 1 ]] || { echo "::error::Expected one Snap."; exit 1; }
+          [[ ${#aur_recipes[@]} -eq 1 ]] || { echo "::error::Expected one AUR recipe archive."; exit 1; }
+          [[ ${#copr_obs_recipes[@]} -eq 1 ]] || { echo "::error::Expected one COPR/OBS recipe archive."; exit 1; }
+          [[ ${#launchpad_sources[@]} -eq 1 ]] || { echo "::error::Expected one Launchpad source descriptor."; exit 1; }
+          for file in "${debs[0]}" "${rpms[0]}" "${appimages[0]}" \
+                      "${flatpaks[0]}" "${snaps[0]}" "${aur_recipes[0]}" \
+                      "${copr_obs_recipes[0]}" "${launchpad_sources[0]}"; do
             [[ "$(basename "$file")" == *"$EXPECTED_VERSION"* ]] || {
               echo "::error::Artifact does not contain version $EXPECTED_VERSION: $file"
               exit 1
@@ -114,7 +202,8 @@ jobs:
           cp install.sh dist/install.sh
           (
             cd dist
-            sha256sum *.deb *.rpm *.AppImage install.sh > SHA256SUMS
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' \
+              | sort | xargs sha256sum > SHA256SUMS
           )
           cat > release-notes.md <<EOF
           # FocusFlow v${VERSION}
@@ -126,6 +215,13 @@ jobs:
           | Debian/Ubuntu | \`$(basename "$DEB")\` |
           | Fedora/RPM | \`$(basename "$RPM")\` |
           | Portable AppImage | \`$(basename "$APPIMAGE")\` |
+          | Flatpak bundle | \`$(basename "$(find dist -maxdepth 1 -name '*.flatpak' -print -quit)")\` |
+          | Snap bundle | \`$(basename "$(find dist -maxdepth 1 -name '*.snap' -print -quit)")\` |
+
+          The release also includes AUR, COPR/OBS, and Launchpad recipe
+          archives. Those channels still require their own publisher accounts,
+          signing keys, and/or maintainer review before they become official
+          store or repository listings.
 
           The release includes \`install.sh\` and \`SHA256SUMS\`.
           EOF
@@ -166,6 +262,14 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/*.AppImage
+            dist/*.flatpak
+            dist/*.snap
+            dist/*-aur.tar.gz
+            dist/*-copr-obs.tar.gz
+            dist/*.dsc
+            dist/*.debian.tar.*
+            dist/*.orig.tar.*
+            dist/*.buildinfo
             dist/install.sh
             dist/SHA256SUMS
           fail_on_unmatched_files: true

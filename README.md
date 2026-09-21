@@ -28,6 +28,8 @@ The current release is **v2.0.1**:
 | Debian / Ubuntu | [`focusflow_2.0.1_amd64.deb`](https://github.com/TITANICBHAI/FocusFlow-Linux/releases/tag/v2.0.1) | Installs as a native Debian package |
 | Fedora / RPM-based systems | [`focusflow-2.0.1-1.x86_64.rpm`](https://github.com/TITANICBHAI/FocusFlow-Linux/releases/tag/v2.0.1) | Native RPM package |
 | Any x86_64 Linux | [`FocusFlow-2.0.1-x86_64.AppImage`](https://github.com/TITANICBHAI/FocusFlow-Linux/releases/tag/v2.0.1) | Portable; no system installation required |
+| Flatpak-capable desktops | `FocusFlow-2.0.1.flatpak` | Bundle included while Flathub review is pending |
+| Snap-capable desktops | `focusflow_2.0.1_amd64.snap` | Bundle included while Snap Store review is pending |
 | Other distributions | [`install.sh`](https://github.com/TITANICBHAI/FocusFlow-Linux/releases/tag/v2.0.1) | Installer and checksum are attached to the release |
 
 Download only from the [GitHub release page](https://github.com/TITANICBHAI/FocusFlow-Linux/releases/tag/v2.0.1)

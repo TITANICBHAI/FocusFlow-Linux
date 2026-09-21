@@ -74,9 +74,9 @@ Linux session or a privileged enforcement test.
 - [x] **P6.7 — Make release installers reproducible and verifiable**
   `install.sh` and AUR metadata now target `TITANICBHAI/FocusFlow-Linux`, verify the exact release asset against `SHA256SUMS`, clean temporary downloads on every exit path, and use idempotent installation paths. The release workflow publishes `SHA256SUMS`; AUR replaces `SKIP` with a version-pinned manifest check.
 - [ ] **P6.8 — Add privileged and recovery integration tests**
-  Test real hosts/firewall blocking, cleanup after force-kill, watchdog/autostart lifecycle, resolver variants, and cancelled authentication in disposable Linux environments. Keep unit tests non-destructive.
-- [ ] **P6.9 — Add shell/input safety tests**
-  Cover process names, domain names, desktop-file `Exec=` values, paths with spaces, and shell metacharacters. Verify no user-controlled value reaches an unsafe shell command.
+  Added non-destructive lifecycle, resolver, timeout, and opt-in real hosts/firewall tests in `LinuxReleaseReadinessIntegrationTest.kt`. The real privileged checks still require a disposable Linux environment with `FOCUSFLOW_RUN_PRIVILEGED_TESTS=1`; do not check this item until those checks run.
+- [x] **P6.9 — Add shell/input safety tests**
+  Added `LinuxShellInputSafetyTest.kt` covering process names, domains, desktop-file `Exec=` values, paths with spaces, shell metacharacters, atomic hosts writes, autostart quoting, and watchdog command boundaries. Linux desktop executable normalization now rejects unsafe executable tokens and uses direct argument handling.
 - [x] **P6.10 — Linux UI honesty and guidance**
   Linux Setup now probes all listed tools asynchronously, shows actionable
   missing-tool states, and explains the current hosts/iptables limits. Settings

@@ -36,17 +36,7 @@ object WindowsStartupManager {
     fun enable() {
         if (isLinux) {
             try {
-                val parent = linuxDesktopFile.parentFile
-                if (!parent.exists()) parent.mkdirs()
-                linuxDesktopFile.writeText(
-                    "[Desktop Entry]\n" +
-                    "Type=Application\n" +
-                    "Name=FocusFlow\n" +
-                    "Exec=${desktopExec(resolveExePath())}\n" +
-                    "StartupWMClass=focusflow\n" +
-                    "Terminal=false\n" +
-                    "X-GNOME-Autostart-enabled=true\n"
-                )
+                writeLinuxAutostartFile(linuxDesktopFile, resolveExePath())
             } catch (_: Exception) { /* skip silently if cannot write */ }
             return
         }
@@ -133,10 +123,73 @@ object WindowsStartupManager {
         return "FocusFlow.exe"
     }
 
-    private fun desktopExec(command: String): String =
-        command.split(" ").joinToString(" ") { token ->
-            if (token.isEmpty() || token.startsWith("-") || token.contains("=")) token
-            else if (token.any { it.isWhitespace() }) "'${token.replace("'", "'\\''")}'"
-            else token
+    private fun writeLinuxAutostartFile(file: File, command: String) {
+        file.parentFile?.let { if (!it.exists()) it.mkdirs() }
+        file.writeText(
+            "[Desktop Entry]\n" +
+                "Type=Application\n" +
+                "Name=FocusFlow\n" +
+                "Exec=${desktopExec(command)}\n" +
+                "StartupWMClass=focusflow\n" +
+                "Terminal=false\n" +
+                "X-GNOME-Autostart-enabled=true\n"
+        )
+    }
+
+    /**
+     * Tokenize and quote a Linux desktop Exec= value without invoking a shell.
+     * The old implementation split on spaces before checking for whitespace,
+     * so an executable path such as "/opt/Focus Flow/focusflow" was emitted as
+     * two unrelated tokens.
+     */
+    private fun desktopExec(command: String): String {
+        // resolveExePath() normally returns a single existing executable path,
+        // which may itself contain spaces. Treat that as one token before
+        // falling back to parsing a multi-token command such as `java -jar`.
+        val tokens = if (File(command).isFile) listOf(command) else tokenizeDesktopCommand(command)
+        return tokens.joinToString(" ") { token ->
+            if (token.isNotEmpty() && token.all { it.isLetterOrDigit() || it in "._+-%/:=@," }) {
+                token
+            } else {
+                "\"${token.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+            }
         }
+    }
+
+    private fun tokenizeDesktopCommand(value: String): List<String> {
+        val tokens = mutableListOf<String>()
+        val current = StringBuilder()
+        var quote: Char? = null
+        var escaped = false
+
+        fun flush() {
+            if (current.isNotEmpty()) {
+                tokens += current.toString()
+                current.clear()
+            }
+        }
+
+        value.forEach { char ->
+            when {
+                escaped -> {
+                    current.append(char)
+                    escaped = false
+                }
+                char == '\\' && quote != '\'' -> escaped = true
+                quote != null && char == quote -> quote = null
+                quote == null && (char == '\'' || char == '"') -> quote = char
+                quote == null && char.isWhitespace() -> flush()
+                else -> current.append(char)
+            }
+        }
+        if (escaped) current.append('\\')
+        flush()
+        return tokens
+    }
+
+    /** Test-only hooks keep lifecycle tests on disposable paths. */
+    internal fun writeLinuxAutostartFileForTesting(file: File, command: String) =
+        writeLinuxAutostartFile(file, command)
+
+    internal fun desktopExecForTesting(command: String): String = desktopExec(command)
 }

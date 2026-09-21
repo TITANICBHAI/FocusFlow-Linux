@@ -10,3 +10,4 @@
 - [Bug fixes audit round 8 — comprehensive diagnostic](bug-fixes-audit-2026-06-05-round8.md) — 3 functional bugs fixed: session taskId never passed to FocusSessionService.start() (all 3 paths), deleteWithUndo optimistic-removal UX, keyword count hardcoded 0 in enforcement panel. ProcessMonitor, SessionPin, GlobalPin, Settings, Dashboard all confirmed clean.
 - [FocusFlow Linux migration](focusflow-linux-migration.md) — Linux is the next workstream; use the root plan and trackers while preserving all working Windows paths.
 - [FocusFlow Replit desktop verification](focusflow-replit-desktop-verification.md) — Use system Gradle and workflow logs; the VNC desktop workflow does not expose the browser preview port.
+- [Linux release-readiness tests](linux-release-readiness-tests.md) — Privileged hosts/firewall checks must be opt-in and disposable; keep the default suite non-destructive.

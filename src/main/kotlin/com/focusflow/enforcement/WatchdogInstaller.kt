@@ -77,37 +77,11 @@ object WatchdogInstaller {
                 }.getOrNull()
                 ?: return  // can't determine exe path — skip watchdog silently
 
-            // Reconstruct the full ExecStart line, quoting any argument that contains spaces
+            // Reconstruct the full ExecStart line using systemd's direct-exec
+            // syntax. No user-controlled value is passed through a shell.
             val args = info.arguments().map { it.toList() }.orElse(emptyList())
-            val quotedArgs = args.joinToString(" ") { arg ->
-                if (arg.any { it == ' ' || it == '"' || it == '\\' })
-                    "\"${arg.replace("\\", "\\\\").replace("\"", "\\\"")}\""
-                else arg
-            }
-            val execStartLine = if (quotedArgs.isNotEmpty()) "$cmd $quotedArgs" else cmd
-
-            File(systemdDir, "focusflow-watchdog.service").writeText(
-                "[Unit]\n" +
-                "Description=FocusFlow Watchdog\n" +
-                "[Service]\n" +
-                "Type=oneshot\n" +
-                // ExecStartPre: exit 0 (proceed to start) only when FocusFlow is NOT running.
-                // '! pgrep' → exits 1 if process found (abort), 0 if not found (continue).
-                // Previously this was inverted and would spawn a duplicate on every tick.
-                "ExecStartPre=/bin/sh -c '! pgrep -f focusflow > /dev/null'\n" +
-                "ExecStart=$execStartLine\n" +
-                "Restart=no\n"
-            )
-
-            File(systemdDir, "focusflow-watchdog.timer").writeText(
-                "[Unit]\n" +
-                "Description=FocusFlow Watchdog Timer\n" +
-                "[Timer]\n" +
-                "OnBootSec=1min\n" +
-                "OnUnitActiveSec=2min\n" +
-                "[Install]\n" +
-                "WantedBy=default.target\n"
-            )
+            writeLinuxUnits(systemdDir, cmd, args)
+            val execStartLine = linuxExecStartLine(cmd, args)
 
             ProcessBuilder("systemctl", "--user", "daemon-reload").start().waitFor()
             ProcessBuilder("systemctl", "--user", "enable", "focusflow-watchdog.timer").start().waitFor()
@@ -139,6 +113,54 @@ object WatchdogInstaller {
             EnforcementLog.warn("WatchdogInstaller", "Failed to register $TASK_NAME", e)
         }
     }
+
+    private fun quoteSystemdExecArg(value: String): String {
+        if (value.isNotEmpty() && value.all {
+                it.isLetterOrDigit() || it in "._+-%/:=@,"
+            }) {
+            return value
+        }
+        return "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+    }
+
+    private fun linuxExecStartLine(command: String, args: List<String>): String =
+        (listOf(command) + args).joinToString(" ", transform = ::quoteSystemdExecArg)
+
+    private fun linuxServiceUnit(command: String, args: List<String>): String =
+        "[Unit]\n" +
+            "Description=FocusFlow Watchdog\n" +
+            "[Service]\n" +
+            "Type=oneshot\n" +
+            // Exit 0 (proceed to start) only when FocusFlow is NOT running.
+            // The command is fixed; the generated ExecStart uses direct argv.
+            "ExecStartPre=/bin/sh -c '! pgrep -f focusflow > /dev/null'\n" +
+            "ExecStart=${linuxExecStartLine(command, args)}\n" +
+            "Restart=no\n"
+
+    private fun linuxTimerUnit(): String =
+        "[Unit]\n" +
+            "Description=FocusFlow Watchdog Timer\n" +
+            "[Timer]\n" +
+            "OnBootSec=1min\n" +
+            "OnUnitActiveSec=2min\n" +
+            "[Install]\n" +
+            "WantedBy=default.target\n"
+
+    private fun writeLinuxUnits(directory: File, command: String, args: List<String>) {
+        directory.mkdirs()
+        File(directory, "focusflow-watchdog.service").writeText(linuxServiceUnit(command, args))
+        File(directory, "focusflow-watchdog.timer").writeText(linuxTimerUnit())
+    }
+
+    /** Test-only hooks keep watchdog lifecycle tests on disposable paths. */
+    internal fun writeLinuxUnitsForTesting(
+        directory: File,
+        command: String,
+        args: List<String> = emptyList()
+    ) = writeLinuxUnits(directory, command, args)
+
+    internal fun linuxServiceUnitForTesting(command: String, args: List<String> = emptyList()): String =
+        linuxServiceUnit(command, args)
 
     /**
      * Installs a logon-triggered scheduled task that restores the Windows taskbar.

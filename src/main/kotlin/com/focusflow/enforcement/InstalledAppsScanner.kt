@@ -17,6 +17,13 @@ data class ScannedApp(
 
 object InstalledAppsScanner {
 
+    /**
+     * Linux desktop files are input, not trusted command lines. Keep the
+     * normalized executable name within the character set used by ordinary
+     * process names before it can be passed to a launcher or matcher.
+     */
+    private val SAFE_LINUX_PROCESS_NAME = Regex("^[a-z0-9][a-z0-9_.+-]*$")
+
     private val windowsCurated = mapOf(
         "chrome.exe"            to "Google Chrome",
         "firefox.exe"           to "Mozilla Firefox",
@@ -448,16 +455,26 @@ object InstalledAppsScanner {
             commandName = java.io.File(command).name.lowercase()
         }
 
+        // A desktop Exec= file is parsed without a shell, but reject shell
+        // metacharacters in the executable token before it is used for process
+        // matching or launching. Arguments remain data and are not normalized
+        // into executable names.
+        if (command.any { it in ";|&$`()<>!\n\r" }) return null
+
         if (commandName == "flatpak") {
             val appId = tokens.drop(index + 1)
                 .dropWhile { it == "run" || it.startsWith("-") }
                 .firstOrNull()
                 ?.takeIf { it.isNotBlank() }
-            val flatpakName = appId?.let(::flatpakProcessName) ?: return null
+            val flatpakName = appId?.let(::flatpakProcessName)
+                ?.takeIf { SAFE_LINUX_PROCESS_NAME.matches(it) }
+                ?: return null
             return NormalizedLinuxExec(flatpakName, command, exec)
         }
 
-        val processName = commandName.takeIf { it.isNotBlank() } ?: return null
+        val processName = commandName
+            .takeIf { SAFE_LINUX_PROCESS_NAME.matches(it) }
+            ?: return null
         return NormalizedLinuxExec(processName, command, exec)
     }
 

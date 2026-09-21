@@ -231,8 +231,7 @@ object HostsBlocker {
                 timeoutMs = 10_000L
             )
             if (!result.succeeded) return false
-            // nslookup output contains "Address:  127.0.0.1" when the hosts entry is active
-            result.output.contains("127.0.0.1")
+            resolverOutputConfirmsLoopback(result.output)
         } catch (_: Exception) { false }
     }
 
@@ -369,6 +368,29 @@ object HostsBlocker {
     }
 
     internal fun isSafeDomain(domain: String): Boolean = normalizeDomain(domain) != null
+
+    /**
+     * nslookup output differs slightly between resolver implementations. Keep
+     * the acceptance check narrow enough to require an address field while
+     * accepting both "Address: 127.0.0.1" and "Address: 127.0.0.1#53".
+     */
+    internal fun resolverOutputConfirmsLoopbackForTesting(output: String): Boolean =
+        resolverOutputConfirmsLoopback(output)
+
+    private fun resolverOutputConfirmsLoopback(output: String): Boolean =
+        Regex("(?im)^\\s*address:\\s*127\\.0\\.0\\.1(?:#\\d+)?\\s*$").containsMatchIn(output)
+
+    /** Render the exact FocusFlow entries without touching the real hosts file. */
+    internal fun expectedEntriesForTesting(domain: String): String? {
+        val root = normalizeDomain(domain) ?: return null
+        return SUBDOMAINS.joinToString("") { prefix ->
+            "127.0.0.1  $prefix$root  $MARKER\n"
+        }
+    }
+
+    /** Exercise the same atomic writer against a caller-owned disposable file. */
+    internal fun atomicWriteHostsForTesting(hostsFile: File, content: String) =
+        atomicWriteHosts(hostsFile, content)
 
     private fun normalizeDomain(domain: String): String? {
         val root = domain.trim().lowercase().removePrefix("www.")

@@ -69,7 +69,7 @@ The workflow will:
 - Copy the one-liner install command and test it in a shell (or WSL2):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TITANICBHAI/FocusFlow-jvm-Test/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/TITANICBHAI/FocusFlow-Linux/main/install.sh | bash
 ```
 
 ---
@@ -106,11 +106,11 @@ pkgver=1.1.6
 pkgrel=1
 pkgdesc="Focus & productivity app with real app blocking"
 arch=('x86_64')
-url="https://github.com/TITANICBHAI/FocusFlow-jvm-Test"
+url="https://github.com/TITANICBHAI/FocusFlow-Linux"
 license=('custom')
 depends=('xdotool' 'wmctrl')
-source=("focusflow-${pkgver}.AppImage::https://github.com/TITANICBHAI/FocusFlow-jvm-Test/releases/download/v${pkgver}/focusflow-${pkgver}-x86_64.AppImage")
-sha256sums=('SKIP')   # replace with actual sha256 of the AppImage
+source=("focusflow-${pkgver}.AppImage::https://github.com/TITANICBHAI/FocusFlow-Linux/releases/download/v${pkgver}/FocusFlow-${pkgver}-x86_64.AppImage")
+# The PKGBUILD verifies this version-pinned asset against the release SHA256SUMS manifest.
 
 package() {
   install -Dm755 "focusflow-${pkgver}.AppImage" "$pkgdir/usr/bin/focusflow"

@@ -37,13 +37,11 @@ paru -S focusflow-bin
 
 ## Updating for a new release
 
-1. Bump `pkgver` in `PKGBUILD` and `.SRCINFO` to the new version
-2. Update the `source=` URL in both files with the new version number
-3. Compute the new sha256sum and replace `SKIP`:
-   ```bash
-   curl -sL https://github.com/TITANICBHAI/FocusFlow-jvm-Test/releases/download/vX.Y.Z/FocusFlow-X.Y.Z-x86_64.AppImage \
-     | sha256sum | cut -d' ' -f1
-   ```
+1. Bump `pkgver` in `PKGBUILD` and `.SRCINFO` to the new version.
+2. Update the versioned `source=` URLs in both files.
+3. Confirm the release contains both the AppImage and `SHA256SUMS`. The
+   `prepare()` function verifies the AppImage against that manifest before
+   package creation; it intentionally does not disable integrity checking.
 4. Push to the AUR:
    ```bash
    cd aur-focusflow
@@ -61,3 +59,5 @@ makepkg -si
 ```
 
 This builds and installs the package locally without needing to push to the AUR first.
+The versioned GitHub release must already exist and publish its `SHA256SUMS`
+manifest; a missing or mismatched entry stops the build.

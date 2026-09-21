@@ -32,10 +32,12 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          # rpm-build is not available on Ubuntu 24.04; install rpm (includes rpm2cpio)
-          # and attempt rpmbuild tools separately as best-effort.
-          sudo apt-get install -y rpm fuse libfuse2 imagemagick squashfs-tools file
-          sudo apt-get install -y rpm-build 2>/dev/null || true
+          # rpm includes rpm2cpio; cpio is needed to repack and validate payloads.
+          sudo apt-get install -y rpm cpio fuse libfuse2 imagemagick squashfs-tools file
+          command -v rpmbuild >/dev/null 2>&1 || {
+            echo "::error::rpmbuild is required to produce the validated RPM."
+            exit 1
+          }
 
       - name: Generate PNG icon (focusflow.png)
         run: |
@@ -48,6 +50,9 @@ jobs:
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
+
+      - name: Grant execute permission for Linux package validator
+        run: chmod +x scripts/validate-linux-packages.sh
 
       - name: Build Linux distribution
         env:
@@ -78,8 +83,8 @@ jobs:
           fi
 
           if [ -z "$APP_DIR" ]; then
-            echo "⚠  No app directory found under build/compose/binaries/main/app/ — cannot create AppImage."
-            exit 0
+            echo "::error::No app directory found under build/compose/binaries/main/app/ — cannot create AppImage."
+            exit 1
           fi
 
           echo "App directory: $APP_DIR"
@@ -93,7 +98,8 @@ jobs:
 
           # Build a minimal AppDir from what Compose Desktop produced
           APPDIR="/tmp/FocusFlow.AppDir"
-          cp -r "$APP_DIR" "$APPDIR"
+          rm -rf "$APPDIR"
+          cp -a "$APP_DIR" "$APPDIR"
 
           # Desktop entry (required by appimagetool)
           # Only registered XDG categories allowed; Productivity is not in the spec.
@@ -108,20 +114,22 @@ jobs:
           DESKTOP
 
           # Icon (256 px PNG)
-          cp src/main/resources/focusflow.png "$APPDIR/focusflow.png" 2>/dev/null || true
+          cp src/main/resources/focusflow.png "$APPDIR/focusflow.png"
 
           # AppRun symlink to the actual launcher
           LAUNCHER=$(find "$APPDIR" -maxdepth 2 -name "FocusFlow" -type f | head -1)
           if [ -n "$LAUNCHER" ]; then
             ln -sf "$(realpath --relative-to="$APPDIR" "$LAUNCHER")" "$APPDIR/AppRun" 2>/dev/null \
               || cp "$LAUNCHER" "$APPDIR/AppRun"
+           else
+            echo "::error::Could not find the FocusFlow launcher in the Compose app directory."
+            exit 1
           fi
 
           mkdir -p "$APPIMAGE_OUT"
           ARCH=x86_64 /tmp/appimagetool "$APPDIR" \
-            "$APPIMAGE_OUT/FocusFlow-${VERSION}-x86_64.AppImage" \
-            && echo "✔  AppImage created." \
-            || echo "⚠  appimagetool failed — AppImage will not be uploaded."
+            "$APPIMAGE_OUT/FocusFlow-${VERSION}-x86_64.AppImage"
+          echo "✔  AppImage created."
 
       # ── Inject package dependencies into the .deb ──────────────────────────
       # Compose Desktop 1.6.x doesn't expose a packageDependencies DSL property
@@ -176,7 +184,7 @@ jobs:
       - name: Inject Requires into .rpm (xdotool, wmctrl)
         run: |
           RPM=$(ls build/compose/binaries/main/rpm/*.rpm 2>/dev/null | head -1)
-          if [ -z "$RPM" ]; then echo "No RPM found, skipping."; exit 0; fi
+          if [ -z "$RPM" ]; then echo "::error::No RPM found."; exit 1; fi
           RPM_ABS=$(realpath "$RPM")
           RPM_DIR=$(dirname "$RPM_ABS")
           echo "Patching Requires in: $RPM_ABS"
@@ -225,9 +233,14 @@ jobs:
           rpmbuild -bb \
             --define "_rpmdir ${RPM_DIR}" \
             --define "_build_name_fmt %%{NAME}-%%{VERSION}-%%{RELEASE}.%%{ARCH}.rpm" \
-            "$SPEC" 2>&1 \
-            && echo "✔  RPM Requires patched." \
-            || echo "⚠  rpmbuild failed — RPM will not auto-install xdotool/wmctrl"
+             "$SPEC"
+           echo "✔  RPM Requires patched."
+
+      - name: Validate Linux package metadata and contents
+        run: |
+          VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' build.gradle.kts | head -1)
+          test -n "$VERSION" || { echo "::error::Could not read project version."; exit 1; }
+          scripts/validate-linux-packages.sh build/compose/binaries/main "$VERSION"
 
       - name: Upload Deb artifact
         uses: actions/upload-artifact@v4.6.2
@@ -248,4 +261,4 @@ jobs:
         with:
           name: focusflow-appimage
           path: build/compose/binaries/main/appImage/*.AppImage
-          if-no-files-found: warn
+          if-no-files-found: error

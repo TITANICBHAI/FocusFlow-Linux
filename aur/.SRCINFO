@@ -8,10 +8,11 @@ pkgbase = focusflow-bin
 	depends = xdotool
 	depends = wmctrl
 	depends = libnotify
+	makedepends = curl
 	optdepends = polkit: needed for iptables-based network blocking (optional)
 	provides = focusflow
 	conflicts = focusflow
-	source = focusflow-1.1.6.AppImage::https://github.com/TITANICBHAI/FocusFlow-jvm-Test/releases/download/v1.1.6/FocusFlow-1.1.6-x86_64.AppImage
-	sha256sums = SKIP
+	source = focusflow-1.1.6.AppImage::https://github.com/TITANICBHAI/FocusFlow-Linux/releases/download/v1.1.6/FocusFlow-1.1.6-x86_64.AppImage
+	source = SHA256SUMS::https://github.com/TITANICBHAI/FocusFlow-Linux/releases/download/v1.1.6/SHA256SUMS
 
 pkgname = focusflow-bin

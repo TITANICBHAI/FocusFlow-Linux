@@ -258,13 +258,28 @@ object NetworkBlocker {
                     return@Thread
                 }
                 if (blocked.contains(ip)) {
-                    addedIps += ip
-                    continue
+                    if (verifyLinuxRuleExists(ip, lower)) {
+                        addedIps += ip
+                        continue
+                    }
+                    blocked.remove(ip)
                 }
                 val added = linuxIptablesExec("-A", ip, lower)
-                if (!added.success || !verifyLinuxRuleExists(ip, lower)) {
+                if (!added.success) {
                     removeLinuxIps(lower, addedIps)
                     blocked.removeAll(addedIps)
+                    linuxRuleStates[lower] = LinuxRuleState.FAILED
+                    linuxRuleMessages[lower] =
+                        "iptables rule was not verified: ${added.detail}"
+                    return@Thread
+                }
+                // Include the current IP in rollback as soon as -A succeeds.
+                // If verification fails, leaving this rule behind would create
+                // an untracked block that cleanup could miss.
+                val attemptedIps = addedIps + ip
+                if (!verifyLinuxRuleExists(ip, lower)) {
+                    removeLinuxIps(lower, attemptedIps)
+                    blocked.removeAll(attemptedIps)
                     linuxRuleStates[lower] = LinuxRuleState.FAILED
                     linuxRuleMessages[lower] =
                         "iptables rule was not verified: ${added.detail}"
@@ -404,7 +419,10 @@ object NetworkBlocker {
      */
     private fun listTaggedLinuxRules(tagFilter: String? = null): Set<Pair<String, String>> {
         val result = runLinuxCommand(listOf("iptables", "-S", "OUTPUT"))
-        if (!result.success) return emptySet()
+        if (!result.success) {
+            EnforcementLog.warn("NetworkBlocker", "Unable to inspect tagged Linux firewall rules: ${result.detail}")
+            return emptySet()
+        }
         val addressPattern = Regex("""\s-d\s+(\S+)""")
         val commentPattern = Regex("""--comment\s+"?([^"\s]+)""")
         return result.detail.lineSequence().mapNotNull { line ->
@@ -422,22 +440,17 @@ object NetworkBlocker {
         var last = LinuxCommandResult(false, "command did not run")
         for (candidate in listOf(listOf("pkexec") + command, command)) {
             val result = try {
-                val proc = ProcessBuilder(candidate)
-                    .redirectErrorStream(true)
-                    .start()
-                if (!proc.waitFor(LINUX_COMMAND_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)) {
-                    proc.destroyForcibly()
-                    LinuxCommandResult(false, "timed out after ${LINUX_COMMAND_TIMEOUT_SECONDS}s")
+                val bounded = BoundedProcess.run(
+                    candidate,
+                    timeoutMs = LINUX_COMMAND_TIMEOUT_SECONDS * 1_000L
+                )
+                if (bounded.succeeded) {
+                    LinuxCommandResult(true, bounded.output.trim())
                 } else {
-                    val output = proc.inputStream.bufferedReader().readText().trim()
-                    if (proc.exitValue() == 0) {
-                        LinuxCommandResult(true, output)
-                    } else {
-                        LinuxCommandResult(
-                            false,
-                            if (output.isBlank()) "exit=${proc.exitValue()}" else output.take(300)
-                        )
-                    }
+                    val detail = bounded.error
+                        ?: bounded.output.trim().takeIf { it.isNotBlank() }
+                        ?: "exit=${bounded.exitCode}"
+                    LinuxCommandResult(false, detail.take(300))
                 }
             } catch (e: Exception) {
                 LinuxCommandResult(false, e.message ?: e.javaClass.simpleName)

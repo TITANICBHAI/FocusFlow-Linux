@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # FocusFlow Linux installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/TITANICBHAI/FocusFlow-jvm-Test/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/TITANICBHAI/FocusFlow-Linux/main/install.sh | bash
 set -euo pipefail
 
-REPO="TITANICBHAI/FocusFlow-jvm-Test"
+REPO="TITANICBHAI/FocusFlow-Linux"
 INSTALL_DIR="$HOME/.local/share/focusflow"
 BIN_DIR="$HOME/.local/bin"
 DESKTOP_DIR="$HOME/.local/share/applications"
@@ -17,6 +17,7 @@ die()   { echo -e "\033[1;31m[focusflow]\033[0m $*" >&2; exit 1; }
 need() { command -v "$1" &>/dev/null || die "Required tool not found: $1. Please install it first."; }
 need curl
 need grep
+need sha256sum
 
 # ── Detect distro ──────────────────────────────────────────────────────────────
 PKG_TYPE=""
@@ -53,11 +54,31 @@ esac
 [ -z "$ASSET_URL" ] && die "No $PKG_TYPE asset found in release $VERSION. Try again after the release assets are uploaded."
 
 FILENAME=$(basename "$ASSET_URL")
-TMPFILE="/tmp/$FILENAME"
+TMPDIR=$(mktemp -d "${TMPDIR:-/tmp}/focusflow-install.XXXXXX")
+TMPFILE="$TMPDIR/$FILENAME"
+CHECKSUM_FILE="$TMPDIR/SHA256SUMS"
+cleanup() {
+  rm -rf "$TMPDIR"
+}
+trap cleanup EXIT
 
 # ── Download ───────────────────────────────────────────────────────────────────
 info "Downloading $FILENAME..."
 curl -fsSL --progress-bar -o "$TMPFILE" "$ASSET_URL"
+
+# ── Verify release checksum ─────────────────────────────────────────────────────
+CHECKSUM_URL="https://github.com/$REPO/releases/download/$VERSION/SHA256SUMS"
+info "Verifying SHA-256 checksum..."
+curl -fsSL -o "$CHECKSUM_FILE" "$CHECKSUM_URL" \
+  || die "Release $VERSION has no downloadable SHA256SUMS manifest."
+EXPECTED_CHECKSUM=$(awk -v file="$FILENAME" '
+  $2 == file || $2 == "*" file { print $1; exit }
+' "$CHECKSUM_FILE")
+[ -n "$EXPECTED_CHECKSUM" ] \
+  || die "SHA256SUMS does not contain an entry for $FILENAME."
+printf '%s  %s\n' "$EXPECTED_CHECKSUM" "$TMPFILE" | sha256sum -c - \
+  || die "Checksum verification failed for $FILENAME."
+ok "Checksum verified."
 
 # ── Install ────────────────────────────────────────────────────────────────────
 case "$PKG_TYPE" in
@@ -71,15 +92,14 @@ case "$PKG_TYPE" in
     if command -v dnf &>/dev/null; then
       sudo dnf install -y "$TMPFILE"
     else
-      sudo rpm -U --force "$TMPFILE"
+      sudo rpm -U --replacepkgs "$TMPFILE"
     fi
     ok "FocusFlow $VERSION installed. Run: focusflow"
     ;;
   appimage)
     info "Installing AppImage to $INSTALL_DIR ..."
     mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$DESKTOP_DIR"
-    cp "$TMPFILE" "$INSTALL_DIR/FocusFlow.AppImage"
-    chmod +x "$INSTALL_DIR/FocusFlow.AppImage"
+    install -m 0755 "$TMPFILE" "$INSTALL_DIR/FocusFlow.AppImage"
 
     # Launcher shim
     cat > "$BIN_DIR/focusflow" <<SHIM
@@ -93,7 +113,7 @@ SHIM
 [Desktop Entry]
 Name=FocusFlow
 Comment=Focus & productivity app with real app blocking
-Exec=$INSTALL_DIR/FocusFlow.AppImage
+Exec="$BIN_DIR/focusflow"
 Icon=$INSTALL_DIR/focusflow.png
 Type=Application
 Categories=Utility;
@@ -101,11 +121,17 @@ StartupNotify=true
 DESKTOP
     chmod +x "$DESKTOP_DIR/focusflow.desktop"
 
-    # Try to extract icon from AppImage for the desktop entry
-    if "$INSTALL_DIR/FocusFlow.AppImage" --appimage-extract usr/share/pixmaps/focusflow.png &>/dev/null; then
-      cp squashfs-root/usr/share/pixmaps/focusflow.png "$INSTALL_DIR/focusflow.png" 2>/dev/null || true
-      rm -rf squashfs-root
+    # Extract the validated icon into the XDG icon path used above. Keep the
+    # extraction in the temporary directory so repeated installs leave no
+    # squashfs-root debris in the caller's working directory.
+    if ! (cd "$TMPDIR" && APPIMAGE_EXTRACT_AND_RUN=1 \
+      "$INSTALL_DIR/FocusFlow.AppImage" --appimage-extract >/dev/null); then
+      die "Could not extract the FocusFlow icon from the AppImage."
     fi
+    ICON_SOURCE=$(find "$TMPDIR/squashfs-root" -type f \
+      \( -iname 'focusflow.png' -o -iname 'focusflow.svg' \) -print -quit)
+    [ -n "$ICON_SOURCE" ] || die "The AppImage does not contain a FocusFlow icon."
+    install -m 0644 "$ICON_SOURCE" "$INSTALL_DIR/focusflow.png"
 
     # Add ~/.local/bin to PATH hint
     if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
@@ -124,9 +150,6 @@ if [ "$PKG_TYPE" = "appimage" ]; then
   echo ""
   info "Optional tools for full feature coverage:"
   command -v xdotool  &>/dev/null || warn "  xdotool missing  → install: sudo apt install xdotool   (window focus detection on X11)"
-  command -v wmctrl   &>/dev/null || warn "  wmctrl missing   → install: sudo apt install wmctrl    (Wayland fallback)"
   command -v notify-send &>/dev/null || warn "  notify-send missing → install: sudo apt install libnotify-bin (desktop notifications)"
 fi
-
-rm -f "$TMPFILE"
 ok "Done."

@@ -77,6 +77,7 @@ object WinEventHook {
     private var linuxPollThread: Thread? = null
     private var linuxCallback: ((String, Long) -> Unit)? = null
     @Volatile private var linuxForegroundProcess: Pair<String, Long>? = null
+    @Volatile private var linuxForegroundWarningLogged = false
 
     /**
      * HWND of the FocusFlow window, captured the first time our own PID appears
@@ -249,8 +250,8 @@ object WinEventHook {
 
     /**
      * Start a coroutine-based poller for Linux foreground detection.
-     * On X11: uses xdotool getactivewindow getwindowpid.
-     * On Wayland: xdotool may not work — falls back to /proc polling.
+     * On X11/XWayland: uses xdotool getactivewindow getwindowpid.
+     * On native Wayland: does not claim a client-verifiable active window.
      * Polls every 500ms.
      */
     private fun startLinuxPoller(onForegroundChange: (processName: String, pid: Long) -> Unit) {
@@ -291,60 +292,71 @@ object WinEventHook {
     /**
      * Get the foreground process name and PID on Linux.
      *
-     * On X11: uses `activewindow getactivewindow getwindowname` to get window
-     *         title, then `xdotool getactivewindow getwindupid` for PID.
-     * On Wayland: xdotool may not work — falls back to parsing
-     *   /proc entries for the most recently active window via
-     *   the EWHM _NET_ACTIVE_WINDOW property (requires wmctrl).
+     * On X11/XWayland: uses xdotool first, then xprop's
+     * _NET_ACTIVE_WINDOW/_NET_WM_PID properties.
+     * On native Wayland: returns null rather than treating an arbitrary
+     * wmctrl window-list entry as the active window.
      *
      * @return Pair(processName, pid) or null if detection fails.
      */
     fun getLinuxForegroundProcess(): Pair<String, Long>? {
         if (!isLinux) return null
+        if (isNativeWayland) {
+            if (!linuxForegroundWarningLogged) {
+                linuxForegroundWarningLogged = true
+                EnforcementLog.warn(
+                    "WinEventHook",
+                    "Native Wayland does not expose a client-verifiable active window; " +
+                        "foreground keyword enforcement is unavailable, while process blocking remains active."
+                )
+            }
+            return null
+        }
+        if (!isX11 && !isXWayland) return null
 
         // Attempt 1: xdotool (works on X11 and XWayland)
         if (hasXdotool) {
-            try {
-                val pidProc = java.lang.ProcessBuilder("xdotool", "getactivewindow", "getwindowpid")
-                    .redirectErrorStream(true).start()
-                val pidStr = pidProc.inputStream.bufferedReader().readText().trim()
-                pidProc.waitFor()
-                val pid = pidStr.toLongOrNull()
-                if (pid != null && pid > 0) {
-                    val ph = java.lang.ProcessHandle.of(pid).orElse(null)
-                    val name = ph?.info()?.command()?.orElse(null)
-                        ?.substringAfterLast('/')?.lowercase()
-                    if (name != null) return Pair(name, pid)
-                }
-            } catch (_: Exception) {}
+            val result = BoundedProcess.run(
+                listOf("xdotool", "getactivewindow", "getwindowpid"),
+                timeoutMs = 1_500L
+            )
+            val pid = result.output.trim().toLongOrNull()
+            if (result.succeeded && pid != null && pid > 0) {
+                resolveLinuxProcess(pid)?.let { return it }
+            }
         }
 
-        // Attempt 2: Query via xprop and /proc (Wayland fallback)
-        // Wayland: xdotool may not work — fall back to /proc polling
-        if (isWayland || !hasXdotool) {
-            try {
-                // Try wmctrl to get active window PID
-                val wmProc = java.lang.ProcessBuilder("wmctrl", "-lp")
-                    .redirectErrorStream(true).start()
-                val lines = wmProc.inputStream.bufferedReader().readLines()
-                wmProc.waitFor()
-                // Lines have: 0x... <desktop> <pid> <host> <title>
-                // Active window has a block marker from xprop
-                for (line in lines) {
-                    val parts = line.trim().split(Regex("\\s+"), limit = 5)
-                    if (parts.size >= 4) {
-                        val pid = parts[2].toLongOrNull()
-                        if (pid != null && pid > 0) {
-                            val ph = ProcessHandle.of(pid).orElse(null)
-                            val name = ph?.info()?.command()?.orElse(null)
-                                ?.substringAfterLast('/')?.lowercase()
-                            if (name != null) return Pair(name, pid)
-                        }
-                    }
+        // Attempt 2: query the active X11/XWayland window directly. Unlike
+        // `wmctrl -lp`, this asks the root window for the active ID first and
+        // never mistakes an arbitrary listed window for foreground.
+        if (isX11 || isXWayland) {
+            val activeWindow = BoundedProcess.run(
+                listOf("xprop", "-root", "_NET_ACTIVE_WINDOW"),
+                timeoutMs = 1_500L
+            )
+            val windowId = Regex("""0x[0-9a-fA-F]+""")
+                .find(activeWindow.output)?.value
+            if (activeWindow.succeeded && windowId != null) {
+                val pidResult = BoundedProcess.run(
+                    listOf("xprop", "-id", windowId, "_NET_WM_PID"),
+                    timeoutMs = 1_500L
+                )
+                val windowPid = Regex("""=\s*(\d+)""")
+                    .find(pidResult.output)?.groupValues?.getOrNull(1)?.toLongOrNull()
+                if (pidResult.succeeded && windowPid != null && windowPid > 0) {
+                    resolveLinuxProcess(windowPid)?.let { return it }
                 }
-            } catch (_: Exception) {}
+            }
         }
 
         return null
+    }
+
+    private fun resolveLinuxProcess(pid: Long): Pair<String, Long>? {
+        val process = ProcessHandle.of(pid).orElse(null) ?: return null
+        val name = process.info().command()?.orElse(null)
+            ?.substringAfterLast('/')?.lowercase()
+            ?: return null
+        return Pair(name, pid)
     }
 }

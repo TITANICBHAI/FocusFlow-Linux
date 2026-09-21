@@ -2,12 +2,14 @@ package com.focusflow.services
 
 import com.focusflow.enforcement.isWindows
 import com.focusflow.enforcement.isLinux
+import com.focusflow.enforcement.BoundedProcess
 import com.focusflow.enforcement.EnforcementLog
 import kotlinx.coroutines.*
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.StandardCopyOption
-import java.util.concurrent.TimeUnit
 
 /**
  * HostsBlocker — three-layer hosts-file website blocking
@@ -224,16 +226,13 @@ object HostsBlocker {
         if (!isWindows && !isLinux) return false
         return try {
             val safeDomain = normalizeDomain(domain) ?: return false
-            val proc = ProcessBuilder("nslookup", safeDomain, "127.0.0.1")
-                .redirectErrorStream(true)
-                .start()
-            val output = proc.inputStream.bufferedReader().readText()
-            if (!proc.waitFor(10, TimeUnit.SECONDS)) {
-                proc.destroyForcibly()
-                return false
-            }
+            val result = BoundedProcess.run(
+                listOf("nslookup", safeDomain, "127.0.0.1"),
+                timeoutMs = 10_000L
+            )
+            if (!result.succeeded) return false
             // nslookup output contains "Address:  127.0.0.1" when the hosts entry is active
-            output.contains("127.0.0.1")
+            result.output.contains("127.0.0.1")
         } catch (_: Exception) { false }
     }
 
@@ -307,9 +306,32 @@ object HostsBlocker {
      * file. REPLACE_EXISTING ensures the move succeeds even when the target exists.
      */
     private fun atomicWriteHosts(hostsFile: File, content: String) {
-        val tmp = File(hostsFile.parent, "hosts.focusflow.tmp")
-        tmp.writeText(content)
-        Files.move(tmp.toPath(), hostsFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        val parent = hostsFile.toPath().parent
+            ?: throw IllegalStateException("hosts path has no parent")
+        val tmp = Files.createTempFile(parent, ".focusflow-hosts-", ".tmp")
+        val originalPermissions = try {
+            Files.getPosixFilePermissions(hostsFile.toPath(), LinkOption.NOFOLLOW_LINKS)
+        } catch (_: UnsupportedOperationException) {
+            null
+        }
+        try {
+            Files.writeString(tmp, content)
+            if (originalPermissions != null) {
+                Files.setPosixFilePermissions(tmp, originalPermissions)
+            }
+            try {
+                Files.move(
+                    tmp,
+                    hostsFile.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING
+                )
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(tmp, hostsFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+        } finally {
+            Files.deleteIfExists(tmp)
+        }
     }
 
     /** Strip Windows CRLF so line parsing is consistent across encodings. */
@@ -320,26 +342,21 @@ object HostsBlocker {
         try {
             if (isLinux) {
                 // systemd-resolved may be present; nscd is a common alternative
-                val proc = ProcessBuilder("resolvectl", "flush-caches")
-                    .redirectErrorStream(true).start()
-                val finished = proc.waitFor(10, TimeUnit.SECONDS)
-                if (!finished) {
-                    proc.destroyForcibly()
-                    return
-                }
-                val exit = proc.exitValue()
-                if (exit != 0) {
+                val result = BoundedProcess.run(
+                    listOf("resolvectl", "flush-caches"),
+                    timeoutMs = 10_000L
+                )
+                if (!result.succeeded) {
                     // fallback: restart nscd
                     try {
-                        val fallback = ProcessBuilder("pkexec", "systemctl", "restart", "nscd")
-                            .redirectErrorStream(true).start()
-                        if (!fallback.waitFor(10, TimeUnit.SECONDS)) fallback.destroyForcibly()
+                        BoundedProcess.run(
+                            listOf("pkexec", "systemctl", "restart", "nscd"),
+                            timeoutMs = 10_000L
+                        )
                     } catch (_: Exception) {}
                 }
             } else {
-                val proc = ProcessBuilder("ipconfig", "/flushdns")
-                    .redirectErrorStream(true).start()
-                if (!proc.waitFor(10, TimeUnit.SECONDS)) proc.destroyForcibly()
+                BoundedProcess.run(listOf("ipconfig", "/flushdns"), timeoutMs = 10_000L)
             }
         } catch (_: Exception) {}
     }
@@ -369,51 +386,53 @@ object HostsBlocker {
         if (!isLinux || operation !in setOf("block", "unblock", "unblock-all")) return false
         if (operation != "unblock-all" && (domain == null || !isSafeDomain(domain))) return false
 
-        return try {
-            val javaBin = File(System.getProperty("java.home"), "bin/java")
-            // Use only the code source that contains the Java-only helper. Do
-            // not elevate the caller's complete development classpath.
-            val helperClasspath = File(
-                Class.forName(PRIVILEGED_HELPER_CLASS).protectionDomain.codeSource.location.toURI()
-            )
-            val pkexec = listOf("/usr/bin/pkexec", "/bin/pkexec", "/usr/local/bin/pkexec")
-                .map(::File)
-                .firstOrNull { it.isFile && it.canExecute() }
-            val classpath = helperClasspath.absolutePath
-            if (!javaBin.isFile || !helperClasspath.exists() || pkexec == null) {
-                EnforcementLog.warn("HostsBlocker", "Cannot locate the JVM/classpath for the privileged hosts helper")
-                return false
-            }
-
-            val args = mutableListOf(
-                pkexec.absolutePath,
-                javaBin.absolutePath,
-                "-cp",
-                classpath,
-                PRIVILEGED_HELPER_CLASS,
-                operation
-            )
-            if (domain != null) args += domain
-
-            val proc = ProcessBuilder(args).redirectErrorStream(true).start()
-            if (!proc.waitFor(15, TimeUnit.SECONDS)) {
-                proc.destroyForcibly()
-                EnforcementLog.warn("HostsBlocker", "Privileged hosts helper timed out for operation=$operation")
-                return false
-            }
-            val output = proc.inputStream.bufferedReader().readText().trim()
-            if (proc.exitValue() == 0) {
-                true
-            } else {
-                EnforcementLog.warn(
-                    "HostsBlocker",
-                    "Privileged hosts helper failed for operation=$operation exit=${proc.exitValue()}${if (output.isNotBlank()) ": $output" else ""}"
+        // Keep helper invocations serialized with direct read-modify-write
+        // operations. This prevents two monitor/UI calls in this JVM from
+        // reading /etc/hosts concurrently and losing one another's entries.
+        return synchronized(writeLock) {
+            try {
+                val javaBin = File(System.getProperty("java.home"), "bin/java")
+                // Use only the code source that contains the Java-only helper. Do
+                // not elevate the caller's complete development classpath.
+                val helperClasspath = File(
+                    Class.forName(PRIVILEGED_HELPER_CLASS).protectionDomain.codeSource.location.toURI()
                 )
+                val pkexec = listOf("/usr/bin/pkexec", "/bin/pkexec", "/usr/local/bin/pkexec")
+                    .map(::File)
+                    .firstOrNull { it.isFile && it.canExecute() }
+                val classpath = helperClasspath.absolutePath
+                if (!javaBin.isFile || !helperClasspath.exists() || pkexec == null) {
+                    EnforcementLog.warn("HostsBlocker", "Cannot locate the JVM/classpath for the privileged hosts helper")
+                    return@synchronized false
+                }
+
+                val args = mutableListOf(
+                    pkexec.absolutePath,
+                    javaBin.absolutePath,
+                    "-cp",
+                    classpath,
+                    PRIVILEGED_HELPER_CLASS,
+                    operation
+                )
+                if (domain != null) args += domain
+
+                val result = BoundedProcess.run(args, timeoutMs = 15_000L)
+                if (result.succeeded) {
+                    true
+                } else {
+                    val detail = result.error
+                        ?: result.output.trim().takeIf { it.isNotBlank() }
+                        ?: "exit=${result.exitCode}"
+                    EnforcementLog.warn(
+                        "HostsBlocker",
+                        "Privileged hosts helper failed for operation=$operation: $detail"
+                    )
+                    false
+                }
+            } catch (e: Exception) {
+                EnforcementLog.warn("HostsBlocker", "Unable to start privileged hosts helper for operation=$operation", e)
                 false
             }
-        } catch (e: Exception) {
-            EnforcementLog.warn("HostsBlocker", "Unable to start privileged hosts helper for operation=$operation", e)
-            false
         }
     }
 }

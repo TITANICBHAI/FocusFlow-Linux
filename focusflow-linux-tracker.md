@@ -69,10 +69,10 @@ Linux session or a privileged enforcement test.
   Cover `pkexec`, `iptables`, `nslookup`, `resolvectl`, `xdotool`, `wmctrl`, `systemctl`, and notification calls. A cancelled prompt or broken desktop session must not hang enforcement or shutdown.
 - [ ] **P6.5 — Validate foreground detection by session type**
   Test X11, XWayland, and native Wayland separately. The current Wayland `wmctrl -lp` fallback must not be treated as proof of the active window.
-- [ ] **P6.6 — Close strict CI/package gates**
-  Fail CI when required `.deb`/`.rpm` artifacts, dependency metadata, or AppImage output are missing. Validate version, architecture, desktop entry, icon, dependencies, and package contents.
-- [ ] **P6.7 — Make release installers reproducible and verifiable**
-  Align `install.sh` and AUR URLs with the actual release repository, add checksum/signature verification, clean up failed downloads, make repeated installs safe, replace AUR placeholders, and remove `sha256sums=('SKIP')`.
+- [x] **P6.6 — Close strict CI/package gates**
+  The Linux build now fails when `.deb`/`.rpm`/AppImage output is missing, requires `rpmbuild`, treats RPM/AppImage failures as fatal, and validates version, architecture, desktop entry, icon, dependencies, and package contents before upload. The release workflow also requires the Linux assets.
+- [x] **P6.7 — Make release installers reproducible and verifiable**
+  `install.sh` and AUR metadata now target `TITANICBHAI/FocusFlow-Linux`, verify the exact release asset against `SHA256SUMS`, clean temporary downloads on every exit path, and use idempotent installation paths. The release workflow publishes `SHA256SUMS`; AUR replaces `SKIP` with a version-pinned manifest check.
 - [ ] **P6.8 — Add privileged and recovery integration tests**
   Test real hosts/firewall blocking, cleanup after force-kill, watchdog/autostart lifecycle, resolver variants, and cancelled authentication in disposable Linux environments. Keep unit tests non-destructive.
 - [ ] **P6.9 — Add shell/input safety tests**

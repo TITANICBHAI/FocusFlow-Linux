@@ -1,20 +1,37 @@
-# Maintainer: Your Name <your-email@example.com>
+# Maintainer: FocusFlow contributors
 pkgname=focusflow-bin
 pkgver=1.1.6
 pkgrel=1
 pkgdesc="Focus and productivity app with real app blocking (binary AppImage release)"
 arch=('x86_64')
-url="https://github.com/TITANICBHAI/FocusFlow-jvm-Test"
+url="https://github.com/TITANICBHAI/FocusFlow-Linux"
 license=('custom')
 depends=('xdotool' 'wmctrl' 'libnotify')
+makedepends=('curl')
 optdepends=('polkit: needed for iptables-based network blocking (optional)')
 provides=('focusflow')
 conflicts=('focusflow')
 
-# Update sha256sum after each release:
-#   curl -sL <AppImage URL> | sha256sum
-source=("focusflow-${pkgver}.AppImage::https://github.com/TITANICBHAI/FocusFlow-jvm-Test/releases/download/v${pkgver}/FocusFlow-${pkgver}-x86_64.AppImage")
-sha256sums=('SKIP')   # Replace with: sha256sum focusflow-x.y.z.AppImage | cut -d' ' -f1
+source=(
+    "focusflow-${pkgver}.AppImage::https://github.com/TITANICBHAI/FocusFlow-Linux/releases/download/v${pkgver}/FocusFlow-${pkgver}-x86_64.AppImage"
+    "SHA256SUMS::https://github.com/TITANICBHAI/FocusFlow-Linux/releases/download/v${pkgver}/SHA256SUMS"
+)
+
+# The release workflow publishes SHA256SUMS alongside the AppImage. The current
+# repository snapshot predates its first Linux asset, so a fabricated static
+# hash would be worse than an empty makepkg array. prepare() performs the
+# version-pinned manifest check before package() runs.
+sha256sums=()
+
+prepare() {
+    local asset="focusflow-${pkgver}.AppImage"
+    local expected
+    expected="$(awk -v file="FocusFlow-${pkgver}-x86_64.AppImage" \
+        '$2 == file || $2 == "*" file { print $1; exit }' SHA256SUMS)"
+    [[ "$expected" =~ ^[0-9a-fA-F]{64}$ ]] \
+        || { echo "SHA256SUMS has no valid entry for the FocusFlow AppImage" >&2; return 1; }
+    printf '%s  %s\n' "$expected" "$asset" | sha256sum -c -
+}
 
 package() {
     # Install AppImage

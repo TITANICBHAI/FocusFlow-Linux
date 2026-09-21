@@ -247,7 +247,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ steps.run.outputs.run_id }}
           merge-multiple: true
-        continue-on-error: true
 
       - name: Download MSIX
         uses: actions/download-artifact@v4
@@ -257,7 +256,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ steps.run.outputs.run_id }}
           merge-multiple: true
-        continue-on-error: true
 
       - name: Download Deb
         if: steps.linux_run.outputs.run_id != ''
@@ -268,7 +266,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ steps.linux_run.outputs.run_id }}
           merge-multiple: true
-        continue-on-error: true
 
       - name: Download RPM
         if: steps.linux_run.outputs.run_id != ''
@@ -279,7 +276,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ steps.linux_run.outputs.run_id }}
           merge-multiple: true
-        continue-on-error: true
 
       - name: Download AppImage
         if: steps.linux_run.outputs.run_id != ''
@@ -290,7 +286,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ steps.linux_run.outputs.run_id }}
           merge-multiple: true
-        continue-on-error: true
 
       - name: Verify artifacts match expected version
         env:
@@ -317,6 +312,37 @@ jobs:
           fi
 
           echo "✅ Version confirmed: $BASENAME contains $EXPECTED"
+
+           shopt -s nullglob
+           for pattern in '*.deb' '*.rpm' '*.AppImage'; do
+             matches=(dist/$pattern)
+             if [ "${#matches[@]}" -ne 1 ]; then
+               echo "::error::Expected exactly one $pattern in dist/, found ${#matches[@]}."
+               exit 1
+             fi
+             linux_name=$(basename "${matches[0]}")
+             if [[ "$linux_name" != *"$EXPECTED"* ]]; then
+               echo "::error::Linux artifact '$linux_name' does not contain version $EXPECTED."
+               exit 1
+             fi
+           done
+           echo "✅ Required Linux artifacts confirmed."
+
+      - name: Generate release checksums
+        run: |
+          cp install.sh dist/install.sh
+          mapfile -t RELEASE_FILES < <(find dist -maxdepth 1 -type f \
+            ! -name 'SHA256SUMS' -printf '%f\n' | sort)
+          [ "${#RELEASE_FILES[@]}" -gt 0 ] || {
+            echo "::error::No release files available for checksum generation."
+            exit 1
+          }
+          (
+            cd dist
+            sha256sum "${RELEASE_FILES[@]}" > SHA256SUMS
+          )
+          echo "Generated dist/SHA256SUMS:"
+          cat dist/SHA256SUMS
 
       # ── 5. Sentry release — hard-fail if auth token missing ──────────────────
       - name: Verify SENTRY_AUTH_TOKEN is configured
@@ -400,5 +426,6 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/*.AppImage
-            install.sh
-          fail_on_unmatched_files: false
+            dist/install.sh
+            dist/SHA256SUMS
+          fail_on_unmatched_files: true

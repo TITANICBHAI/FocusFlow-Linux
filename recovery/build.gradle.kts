@@ -72,8 +72,10 @@ compose.desktop {
 }
 
 kotlin {
+    val javaToolchainVersion =
+        providers.gradleProperty("focusflow.java.version").orElse("19").get().toInt()
     jvmToolchain {
-        languageVersion.set(JavaLanguageVersion.of(19))
+        languageVersion.set(JavaLanguageVersion.of(javaToolchainVersion))
     }
 }
 

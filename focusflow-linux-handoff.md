@@ -20,7 +20,8 @@ test has been performed yet.
 Next task: P1.1 — add the missing source resource
 `src/main/resources/focusflow.png`, after checking the current resource and
 packaging state.  
-Notes for the next agent: The current `ScannedApp` model has no desktop-file
+Notes for the next agent: Read `AGENT_START_HERE.md` first. The current
+`ScannedApp` model has no desktop-file
 path/full `Exec=` field; the old HTML P2.1/P2.2 prompts assume one. The Linux
 build and Linux smoke-test GitHub workflows already exist, so extend them rather
 than creating duplicates. `NuclearMode` already contains most named Linux task

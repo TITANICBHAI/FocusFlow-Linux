@@ -12,12 +12,14 @@ It is a short protocol; the detailed Linux task prompt is in
 4. Read the relevant section of `focusflow-linux-tracker.html` if the task is
    part of the Linux migration.
 5. Read `.agents/memory/MEMORY.md` and any linked topic relevant to the code.
-6. Run:
+6. Run this lightweight safety check:
 
    ```bash
    git status --short
-   git log --oneline -5
    ```
+
+   Do not run `git log` or a full diff routinely. Use them only when the
+   handoff is unclear, unexpected files appear, or the task is destructive.
 
 7. Search the current code and call sites for the task before trusting an older
    prompt. Documentation can be stale; the current implementation wins.

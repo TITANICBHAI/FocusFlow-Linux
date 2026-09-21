@@ -23,6 +23,7 @@ The forward development plan is the Linux migration. Keep the production Windows
 - `focusflow-linux-plan.md` — prioritized findings from direct code analysis.
 - `focusflow-linux-tracker.html` — interactive status tracker with agent prompts and manual test checklist.
 - `focusflow-linux-tracker.md` — Markdown checklist suitable for code review and commit tracking.
+- `AGENT_START_HERE.md` — the single routing guide and ready-to-paste prompt for switching agents.
 - `FOCUSFLOW_LINUX_AGENT_PROMPT.md` — current code-aware execution prompt for Linux migration agents.
 - `AGENT_PRE_WORK_PROMPT.md` — short protocol to paste whenever switching agents.
 - `focusflow-linux-handoff.md` — durable last-agent status, verification, blockers, and next task.

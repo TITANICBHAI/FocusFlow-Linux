@@ -26,6 +26,26 @@ It is a short protocol; the detailed Linux task prompt is in
 8. Choose one narrow task. State its task ID and acceptance checks in the
    handoff before making changes.
 
+## Current project context
+
+FocusFlow is temporarily dual-platform: preserve Windows behavior while Linux
+is brought to release readiness. The long-term product direction is Linux-only,
+but Windows removal is a separate future migration and must not be mixed into
+individual Linux tasks.
+
+The current focused task is normally stated in `focusflow-linux-handoff.md`.
+For the Linux UI pass, use **P6.10 — Linux UI honesty and guidance**:
+
+- Linux Setup screen: asynchronous tool status and actionable missing-tool
+  warnings;
+- Settings: accurate Linux enforcement status and session limitations;
+- VPN/Network: honest permission, hosts, iptables, and resolver messaging;
+- Wayland: clearly state reduced keyboard, foreground-window, and panel
+  guarantees;
+- package/autostart guidance: distinguish installed package, AppImage, and
+  development runs;
+- Linux startup must not show Windows registry or Task Manager messaging.
+
 ## Non-negotiable rules
 
 - Preserve the Windows implementation. Add Linux branches beside it; do not
@@ -38,6 +58,8 @@ It is a short protocol; the detailed Linux task prompt is in
   documented as a limitation.
 - Do not make unrelated refactors.
 - Do not use a successful compile as the only proof that a task is complete.
+- Do not claim pkexec hosts-file support or verified iptables enforcement until
+  those code paths actually succeed; UI copy must describe current behavior.
 
 ## After editing
 

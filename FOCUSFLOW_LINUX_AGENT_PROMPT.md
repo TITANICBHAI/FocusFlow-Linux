@@ -209,6 +209,15 @@ Use the task IDs in all tracker and handoff updates.
 
 ### Phase 6 — Release-readiness hardening
 
+- **P6.10 — Linux UI honesty and guidance**
+  Keep the Linux UI complete and truthful while enforcement hardening continues.
+  Audit `LinuxSetupScreen`, `SettingsScreen`, `VpnNetworkScreen`, `OsBanner`,
+  onboarding/navigation, autostart/package guidance, and the Linux startup
+  registry guard. Tool checks must be asynchronous and actionable. Wayland copy
+  must clearly distinguish reduced keyboard, foreground-window, overlay, and
+  panel guarantees. Do not claim that `/etc/hosts` pkexec writes or iptables
+  enforcement are verified until their implementation succeeds.
+
 - **P6.1 — Hosts-file privilege path**
   The Linux hosts path currently checks whether `/etc/hosts` is writable but
   does not implement the documented `pkexec` write path. Add a constrained,
@@ -291,6 +300,8 @@ Before Linux migration completion, the manual checklist must cover:
 - overlay and notification behavior;
 - autostart enable/disable and cleanup;
 - Linux VPN/network and Settings copy;
+- Linux Setup missing-tool warnings and package/autostart guidance;
+- no Windows registry or Task Manager messaging on Linux startup;
 - crash cleanup;
 - hosts-file and iptables success/failure with and without `pkexec`;
 - systemd-resolved/nscd/no-cache DNS variants;

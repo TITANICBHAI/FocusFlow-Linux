@@ -34,31 +34,37 @@ P1.1, P1.2, Phase 2, P3.1–P3.3, P4.1–P4.3, and P5.1–P5.3 are complete
 according to their scoped checks. The ZIP comparison and Linux-readiness audit
 are recorded in `ZIP_MERGE_TRACKER.md` and `focusflow-linux-plan.md`.
 
-The next work is not another broad migration sweep. It is release-readiness
-hardening: close the CI/package gates, implement and verify the real Linux
-privilege path for `/etc/hosts`, make iptables status truthful, move the
-remaining Linux probe off the UI thread, and then run the device/VM matrix.
-Native Wayland remains a documented reduced guarantee, not an X11 equivalent.
+The current focused task is **P6.10 — Linux UI honesty and guidance**:
+finish the Linux Setup screen, Settings enforcement status, VPN/Network
+permission messaging, Wayland limitation text, missing-tool warnings,
+package/autostart guidance, and Linux startup guards against Windows registry
+or Task Manager messaging. Keep the copy honest about the still-open hosts and
+iptables implementation gaps. Native Wayland remains a documented reduced
+guarantee, not an X11 equivalent.
+
+After P6.10, continue the remaining release-readiness work: real `/etc/hosts`
+privilege handling, truthful iptables status, subprocess timeouts, strict
+package gates, and device/VM verification.
 
 The attached JPEG was not copied unchanged. `focusflow.png` uses the existing
 valid `focusflow_256.png` source, and the original resource remains preserved.
 
 ## Ready-to-paste prompt for the next action
 
-Use this when starting the next Linux readiness task:
+Use this when starting the current Linux UI task:
 
 ```text
-Continue the FocusFlow Linux readiness work. Read AGENT_START_HERE.md,
+Continue FocusFlow task P6.10 — Linux UI honesty and guidance. Read AGENT_START_HERE.md,
 AGENT_PRE_WORK_PROMPT.md, FOCUSFLOW_LINUX_AGENT_PROMPT.md,
 focusflow-linux-plan.md, focusflow-linux-tracker.md, and
 focusflow-linux-handoff.md before editing.
 
-Choose exactly one open P6 task from the tracker. Re-read the current code and
-call sites before changing it. Preserve Windows behavior, keep I/O off Compose
-threads, do not claim native Wayland capabilities that are not supported, and
-run the targeted test plus the relevant Gradle/package check. Update the
-tracker only after its acceptance checks pass and record exact blockers in the
-handoff.
+Audit and update only the Linux Setup, Settings, VPN/Network, Wayland
+limitation, missing-tool, package/autostart, and Linux startup messaging paths.
+Preserve Windows behavior, keep I/O off Compose threads, and do not claim that
+hosts-file or iptables enforcement is verified when it is not. Run the targeted
+compile/test and update the tracker and handoff with exact verification and
+limitations.
 ```
 
 ## Git check policy

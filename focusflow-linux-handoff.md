@@ -5,16 +5,16 @@ plan or tracker. Each agent must update it before finishing.
 
 ## Current state
 
-Last agent: FocusFlow Linux readiness audit
+Last agent: FocusFlow Linux UI readiness work
 Date: 2026-09-21  
-Task IDs: Linux readiness audit
-Status: Audit complete; release readiness is not complete. The Windows-focused archive comparison remains complete, and the current Linux implementation remains authoritative where the archive has no Linux equivalent.
-Acceptance checks: Pre-work instructions, plan, tracker, handoff, workflows, installer metadata, Linux source paths, and Linux tests were audited. Remaining gaps were added to Phase 6 and the manual device/VM matrix.
-Changed: Updated `focusflow-linux-plan.md`, `focusflow-linux-tracker.md`, `AGENT_START_HERE.md`, `FOCUSFLOW_LINUX_AGENT_PROMPT.md`, and `replit.md` with the audited release gates. No Kotlin or workflow source was changed in this audit.
-Verification: Existing `gradle :compileKotlin :test --no-daemon` passed on GraalVM 19 / Gradle 8.14.2 before this documentation-only audit. Final `git diff --check` passed after all documentation updates. The audit itself used source/workflow inspection; no privileged or display-session behavior was claimed as verified.
-Blockers or environment limits: The current Linux hosts path has no actual pkexec write mechanism; Linux iptables reports intent before asynchronous success is known; the Linux Setup iptables probe is synchronous; package/installer gates are not strict; and real X11, native Wayland, XWayland, desktop-environment, privileged firewall, resolver, package lifecycle, and Windows runtime tests remain unavailable here.
-Next task: Choose one open P6 item from `focusflow-linux-tracker.md`, preferably P6.1 (hosts-file privilege path) or P6.2 (truthful firewall status), then run its targeted tests. Do not check manual device items until they are run on the specified distro/session.
-Notes for the next agent: Read `AGENT_START_HERE.md` first. Preserve Windows branches. Keep native Wayland documented as reduced protection. Do not import embedded webhooks or the archive's unused Windows uninstall path, and do not treat compile/test success as Linux release proof.
+Task IDs: P6.10 — Linux UI honesty and guidance
+Status: In progress. The documentation has been routed to this focused UI task before source edits. The Windows-focused archive comparison remains complete, and the current Linux implementation remains authoritative where the archive has no Linux equivalent.
+Acceptance checks: Linux Setup has asynchronous, actionable tool status; Settings reports actual Linux enforcement and session limitations; VPN/Network explains current permissions and resolver behavior; package/autostart guidance distinguishes install modes; Linux startup shows no Windows registry or Task Manager messaging; Wayland limitations are explicit; targeted compile/test passes.
+Changed: Updated `AGENT_PRE_WORK_PROMPT.md`, `AGENT_START_HERE.md`, `FOCUSFLOW_LINUX_AGENT_PROMPT.md`, and `focusflow-linux-tracker.md` with the current P6.10 scope. Source UI changes are next.
+Verification: Documentation routing is in place. Source/UI verification is pending. No hosts-file or iptables success will be claimed from this task.
+Blockers or environment limits: Native Wayland, privileged hosts/firewall behavior, and package/autostart lifecycle remain unavailable for real-device verification in this environment.
+Next task: Finish P6.10 in the Linux UI source, run targeted compile/tests, inspect the running desktop screen, then update this handoff with exact files and limitations. Leave P6.1/P6.2 open.
+Notes for the next agent: Preserve Windows branches and keep I/O off Compose threads. The long-term product is Linux-only, but Windows remains a temporary regression platform. Do not show Windows registry or Task Manager copy on Linux.
 
 ## Update template
 

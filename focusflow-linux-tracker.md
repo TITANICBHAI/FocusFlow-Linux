@@ -77,6 +77,14 @@ Linux session or a privileged enforcement test.
   Test real hosts/firewall blocking, cleanup after force-kill, watchdog/autostart lifecycle, resolver variants, and cancelled authentication in disposable Linux environments. Keep unit tests non-destructive.
 - [ ] **P6.9 — Add shell/input safety tests**
   Cover process names, domain names, desktop-file `Exec=` values, paths with spaces, and shell metacharacters. Verify no user-controlled value reaches an unsafe shell command.
+- [ ] **P6.10 — Linux UI honesty and guidance**
+  Audit and update Linux Setup status/warnings, Settings enforcement status,
+  VPN/Network permissions and resolver copy, Wayland limitations,
+  package/autostart guidance, and Linux startup guards. Keep Windows registry
+  and Task Manager messaging out of Linux. Acceptance requires asynchronous
+  tool probes, accurate current-state copy, a targeted compile/test, and an
+  explicit note that real hosts/iptables success remains unverified until its
+  implementation is fixed.
 
 ## Manual test checklist
 

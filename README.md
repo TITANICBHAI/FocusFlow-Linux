@@ -1,10 +1,8 @@
-# FocusFlow — Deep Focus App Blocker for Windows
+# FocusFlow — Deep Focus App Blocker
 
 > **Real enforcement. No soft timers. No workarounds.**
 
-FocusFlow is a Windows productivity app built with **Kotlin + Compose Multiplatform Desktop**. It kills blocked processes via Win32/JNA, adds live Windows Firewall rules, and now includes a full **Focus Launcher** — a CBT-style kiosk mode that replaces your desktop during deep work sessions. A Linux port is the next major workstream, with platform-specific enforcement being added alongside the production Windows path.
-
-Available on the **Microsoft Store** as *FocusFlow — Deep Focus App Blocker* by TBTechs.
+FocusFlow is a productivity app built with **Kotlin + Compose Multiplatform Desktop**. The Linux release uses native process, hosts, firewall, desktop-session, and package integrations while preserving the existing Windows implementation in the source tree.
 
 ---
 
@@ -16,7 +14,7 @@ Linux migration work is planned and tracked in two root-level documents:
 - **[Interactive Linux tracker](focusflow-linux-tracker.html)** — browser-based task status board with agent prompts and manual test checklists.
 - **[Markdown Linux tracker](focusflow-linux-tracker.md)** — Git-friendly checkbox version of the interactive tracker for reviews and commits.
 
-The migration must preserve the Windows implementation. Add Linux branches alongside existing Windows branches; do not replace or remove working Windows enforcement. Before calling the Linux port ready, complete the five tracked phases and run the Linux and Windows regression checks described in the trackers.
+The migration preserves the Windows implementation in source. Linux release readiness is tracked separately, including the Linux package, privilege, desktop-session, and enforcement checks.
 
 ---
 
@@ -24,12 +22,13 @@ The migration must preserve the Windows implementation. Add Linux branches along
 
 | Format | Where |
 |--------|-------|
-| **Microsoft Store** | Search *FocusFlow Deep Focus App Blocker* |
-| **EXE installer** | [GitHub Actions](../../actions) → latest build → `FocusFlow-Windows-EXE` |
-| **MSI package** | [GitHub Actions](../../actions) → latest build → `FocusFlow-Windows-MSI` |
-| **MSIX package** | [GitHub Actions](../../actions) → latest build → `FocusFlow-Windows-MSIX` |
+| **Debian/Ubuntu** | GitHub Release `.deb` package |
+| **Fedora/RPM** | GitHub Release `.rpm` package |
+| **Portable Linux** | GitHub Release `.AppImage` package |
+| **Other distributions** | `install.sh` or the AUR package |
 
-Every push to `main` automatically builds EXE + MSI + MSIX via GitHub Actions and creates a GitHub Release.
+Every push to `main` builds the Linux packages and validation artifacts. The
+release workflow publishes them manually after a successful package build.
 
 ---
 

@@ -6,10 +6,14 @@ Java toolchain is set to **19** in both `build.gradle.kts` and `recovery/build.g
 
 ## CI / GitHub Actions
 Push via `bash push_to_github.sh` (requires `GITHUB_PERSONAL_ACCESS_TOKEN` secret).
-Three workflows build on every push to `main`:
-- **build-linux.yml** — packages `.deb`, `.rpm`, `.AppImage` on `ubuntu-latest`
-- **build-windows.yml** — packages `.exe`, `.msi`, `.msix` on `windows-latest`
-- **build-recovery.yml** — packages recovery tool `.exe` on `windows-latest`
+Linux packaging is split into independent jobs so a failure in one package format
+does not hide the status of the others:
+- **build-linux.yml** — packages and validates `.deb`, `.rpm`, and `.AppImage` on `ubuntu-latest`
+- **test-linux.yml** — runs Linux enforcement smoke tests
+- **release.yml** — manually publishes the three Linux packages, `install.sh`, and `SHA256SUMS`
+
+Windows source paths remain in the application for compatibility, but the GitHub
+Windows build and recovery workflows have been removed.
 
 ### Linux packaging notes
 - `rpm-build` is unavailable on Ubuntu 24.04; `rpm` package includes `rpmbuild`
@@ -173,29 +177,20 @@ export PATH=$JAVA_HOME/bin:$PATH
 -Djava.nio.channels.spi.SelectorProvider=sun.nio.ch.PollSelectorProvider  ← MSIX AppContainer fix
 ```
 
-## MSIX / Microsoft Store Identity (Partner Center values)
+## Historical Windows Store metadata
 
-These values MUST match Partner Center exactly. They are hardcoded in `.github/workflows/build-windows.yml`:
-
-| Field | Value |
-|---|---|
-| `Identity/@Name` | `TBTechs.FocusFlowDeepFocusAppBlocker` |
-| `Identity/@Publisher` | `CN=E08824C8-6F22-4DC2-8025-DD8C707E2BE9` |
-| `Identity/@Version` | `1.0.6.0` (4th digit must be 0 for Store) |
-| `Properties/DisplayName` | `FocusFlow - Deep Focus App Blocker` |
-| `Properties/PublisherDisplayName` | `TBTechs` |
-
-> **Important:** If Partner Center shows a different reserved app name, update `Properties/DisplayName` in `.github/workflows/build-windows.yml` to match exactly.
-> No code-signing certificate needed for Store submission — Microsoft re-signs MSIX during ingestion.
+The Windows Store identity values below are retained in project history for
+reference only. The Windows GitHub build and recovery workflows are no longer
+configured in this repository.
 
 ## CI/CD
 
-GitHub Actions at `.github/workflows/build-windows.yml`:
-- Runs on `windows-latest`
-- Builds EXE + MSI (Gradle `packageExe`/`packageMsi`) + MSIX (`makeappx.exe`)
-- All 3 Partner Center identity fields are verified before `makeappx` runs
-- Auto-creates a GitHub Release on every push to `main`
-- Watch CI: https://github.com/TITANICBHAI/FocusFlow-jvm/actions
+GitHub Actions at `.github/workflows/build-linux.yml`:
+- Runs independent Debian, RPM, and AppImage jobs on `ubuntu-latest`
+- Validates package metadata, dependencies, desktop entries, icons, and payloads
+- Uploads each Linux package as a separate artifact
+- Publish `.github/workflows/release.yml` manually after a successful package build
+- Watch CI: https://github.com/TITANICBHAI/FocusFlow-Linux/actions
 
 ## Pushing to GitHub
 
@@ -206,12 +201,6 @@ bash push_to_github.sh
 Requires `GITHUB_PERSONAL_ACCESS_TOKEN` Replit Secret (already set).
 
 ## Recent Changes (May 2026)
-
-### MSIX / Microsoft Store fixes
-- Fixed `Identity/@Name` → `TBTechs.FocusFlowDeepFocusAppBlocker` (was `TBTechs.FocusFlow`)
-- Fixed `Identity/@Publisher` → `CN=E08824C8-6F22-4DC2-8025-DD8C707E2BE9` (was `CN=TBTechs`)
-- Fixed `Properties/DisplayName` → `FocusFlow - Deep Focus App Blocker` (was `FocusFlow`, not reserved)
-- Added triple-field manifest verification before `makeappx` runs
 
 ### Code improvements
 - `build.gradle.kts`: Added `-Djava.nio.channels.spi.SelectorProvider=sun.nio.ch.PollSelectorProvider` — prevents Java NIO failures inside MSIX AppContainer

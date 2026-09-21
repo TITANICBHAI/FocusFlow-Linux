@@ -1,10 +1,104 @@
-# FocusFlow — Deep Focus App Blocker
+# FocusFlow — Deep Focus App Blocker for Linux
 
-> **Real enforcement. No soft timers. No workarounds.**
+> **Real enforcement. No soft timers. No “I’ll just close the app.”**
 
-FocusFlow is a productivity app built with **Kotlin + Compose Multiplatform Desktop**. The Linux release uses native process, hosts, firewall, desktop-session, and package integrations while preserving the existing Windows implementation in the source tree.
+FocusFlow is a local-first desktop app for people who want their computer to
+stop negotiating with them during a focus session. It tracks the work you
+actually planned, blocks the distractions you named, and keeps an audit trail
+of the attempts that got blocked.
+
+The Linux port is built for people who care about how their desktop works:
+processes, sessions, hosts files, firewall rules, X11, Wayland, permissions,
+package formats, and the difference between a real block and a button that
+looks like one. The UI is Kotlin + Compose Desktop. The data stays on the
+machine in SQLite. There is no account and no cloud sync.
+
+FocusFlow is currently dual-platform in the source tree. Linux is the forward
+product direction; the Windows implementation remains available while Linux
+enforcement and desktop-session support continue to mature.
 
 ---
+
+## Download FocusFlow for Linux
+
+The current release is **v2.0.1**:
+
+| Distribution | Package | Notes |
+|--------------|---------|-------|
+| Debian / Ubuntu | [`focusflow_2.0.1_amd64.deb`](https://github.com/TITANICBHAI/FocusFlow-Linux/releases/tag/v2.0.1) | Installs as a native Debian package |
+| Fedora / RPM-based systems | [`focusflow-2.0.1-1.x86_64.rpm`](https://github.com/TITANICBHAI/FocusFlow-Linux/releases/tag/v2.0.1) | Native RPM package |
+| Any x86_64 Linux | [`FocusFlow-2.0.1-x86_64.AppImage`](https://github.com/TITANICBHAI/FocusFlow-Linux/releases/tag/v2.0.1) | Portable; no system installation required |
+| Other distributions | [`install.sh`](https://github.com/TITANICBHAI/FocusFlow-Linux/releases/tag/v2.0.1) | Installer and checksum are attached to the release |
+
+Download only from the [GitHub release page](https://github.com/TITANICBHAI/FocusFlow-Linux/releases/tag/v2.0.1)
+or a package source linked from this repository. Verify a downloaded file
+against `SHA256SUMS` when installing outside a package manager.
+
+The Linux packages are built and checked by GitHub Actions. The release
+workflow publishes them only after the Debian, RPM, AppImage, and Linux smoke
+test jobs pass.
+
+### Quick start
+
+For Debian or Ubuntu:
+
+```bash
+wget https://github.com/TITANICBHAI/FocusFlow-Linux/releases/download/v2.0.1/focusflow_2.0.1_amd64.deb
+sudo apt install ./focusflow_2.0.1_amd64.deb
+```
+
+For the portable AppImage:
+
+```bash
+wget https://github.com/TITANICBHAI/FocusFlow-Linux/releases/download/v2.0.1/FocusFlow-2.0.1-x86_64.AppImage
+chmod +x FocusFlow-2.0.1-x86_64.AppImage
+./FocusFlow-2.0.1-x86_64.AppImage
+```
+
+The AppImage and packages are currently built for **x86_64**. ARM builds are
+not advertised until they have a separate CI build and desktop test path.
+
+## What FocusFlow does
+
+FocusFlow is deliberately more opinionated than a timer:
+
+- You define the task or session before the clock starts.
+- You choose which applications, domains, keywords, and escape routes are
+  off-limits.
+- A blocked attempt is recorded instead of disappearing into a log file you
+  will never read.
+- Breaks, PINs, schedules, allowances, and hard-lock mode make the easy exit
+  require an intentional decision.
+- The app keeps your tasks, notes, habits, reports, and focus history locally.
+
+It is not a parental-control service, an antivirus product, or a remote
+monitoring system. It is a local desktop tool for making a commitment harder
+to break.
+
+---
+
+## Linux support status
+
+The Linux desktop is the primary workstream. The important distinction is
+between the parts that are already packaged and the parts that depend on the
+desktop session:
+
+| Area | Current Linux behavior |
+|------|------------------------|
+| Compose desktop UI | Supported |
+| SQLite data and reports | Supported |
+| Process inspection and process blocking | Supported with desktop/session limitations |
+| Hosts-file website blocking | Requires the appropriate privilege |
+| iptables network blocking | Linux-only path; status and privileges are checked explicitly |
+| X11 foreground detection | The most complete desktop path |
+| Wayland foreground detection | Session/compositor dependent; native Wayland support is still being hardened |
+| XWayland applications | Tested separately from native Wayland applications |
+| `.deb`, `.rpm`, AppImage | Built and validated in GitHub Actions |
+| Windows enforcement | Preserved for compatibility while the migration continues |
+
+FocusFlow does not pretend that X11 and Wayland expose the same controls.
+When a compositor or permission model prevents a feature, the limitation
+should be visible rather than hidden behind a green “blocked” label.
 
 ## Linux Migration Roadmap
 
@@ -16,115 +110,116 @@ Linux migration work is planned and tracked in two root-level documents:
 
 The migration preserves the Windows implementation in source. Linux release readiness is tracked separately, including the Linux package, privilege, desktop-session, and enforcement checks.
 
-See the [Linux publishing guide](LINUX_PUBLISHING_GUIDE.md) for stores, repositories, packaging channels, and release checklists.
-
----
-
-## Download
-
-| Format | Where |
-|--------|-------|
-| **Debian/Ubuntu** | GitHub Release `.deb` package |
-| **Fedora/RPM** | GitHub Release `.rpm` package |
-| **Portable Linux** | GitHub Release `.AppImage` package |
-| **Other distributions** | `install.sh` or the AUR package |
-
-Every push to `main` builds the Linux packages and validation artifacts. The
-release workflow publishes them manually after a successful package build.
+See the [Linux publishing guide](LINUX_PUBLISHING_GUIDE.md) for Flathub,
+Snap Store, AUR, COPR, OBS, Launchpad PPA, distro repositories, AppImage
+distribution, and the release checklist.
 
 ---
 
 ## Features
+### Enforcement
 
-### Focus Launcher — CBT-Style Kiosk Mode
-| Feature | Detail |
-|---------|--------|
-| **Kiosk desktop** | Hides the Windows taskbar and replaces the desktop with a full-screen focus workspace |
-| **Nuclear Mode integration** | Activates maximum blocking the moment a launcher session starts |
-| **PIN-gated breaks** | 5-minute breaks require a SHA-256 PIN — no impulsive escapes |
-| **Hard lock mode** | No breaks allowed — pure deep work until the session ends |
-| **Crash recovery** | Taskbar is unconditionally restored on next launch, JVM shutdown hook, and global crash handler |
-| **Safe process whitelist** | 55+ input/system processes are never killed (keyboard drivers, touchpad, mouse peripherals, audio, UAC, accessibility) |
+- **Application blocking** — blocks selected processes and records the attempt.
+- **Keyword blocking** — catches matching window titles where the desktop
+  session exposes them.
+- **Website blocking** — writes selected domains to the hosts-file path when
+  the user grants the required privilege.
+- **Network blocking** — uses the Linux firewall path where the environment
+  allows it; Windows uses its native firewall path.
+- **Block schedules** — repeat blocking on a weekly timetable.
+- **Daily allowances** — let an app run for a defined amount of time per day.
+- **Standalone blocks** — start a timed block without creating a full focus
+  session.
+- **Block Defense** — inspect and configure the enforcement layers instead of
+  treating them as magic.
+- **Nuclear Mode** — the strictest mode, intended to remove common escape
+  routes rather than merely dimming a notification.
 
-### App & Website Blocking
-| Feature | Status | How |
-|---------|--------|-----|
-| **App blocking** | ✅ Real | `SetWinEventHook` (instant) + 500ms polling fallback via JNA |
-| **Network blocking** | ✅ Real (admin) | `netsh advfirewall` + PowerShell `New-NetFirewallRule` |
-| **Keyword blocker** | ✅ | Window-title keyword detection |
-| **Website blocking** | ✅ | Hosts-file domain blocking |
-| **Block schedules** | ✅ | Automatic blocking on a weekly timetable |
-| **Daily allowances** | ✅ | Per-app time limits per day |
-| **Standalone blocks** | ✅ | One-shot timed block sessions |
-| **Block overlay** | ✅ | Always-on-top full-screen Compose overlay |
-| **Nuclear Mode** | ✅ | Maximum enforcement — blocks Task Manager + 30+ escape routes |
-| **Block Defense** | ✅ | Hardened enforcement layer configuration |
+### Focus work
 
-### Focus Sessions & Productivity
-| Feature | Status |
-|---------|--------|
-| Focus session timer (Pomodoro + custom) | ✅ |
-| Session PIN gate (SHA-256) | ✅ |
-| Sound aversion tones on app kill | ✅ |
-| Break enforcer | ✅ |
-| Habit tracker with streak grid | ✅ |
-| Task management with recurring tasks | ✅ |
-| Task alarms & reminders | ✅ |
-| Daily notes | ✅ |
-| Stats, charts & session history | ✅ |
-| Temptation log (every block attempt) | ✅ |
-| Weekly focus report (auto every Sunday) | ✅ |
-| Focus insights | ✅ |
+- Pomodoro and custom focus sessions
+- Session PINs and PIN-gated breaks
+- Hard-lock sessions with no break path
+- Focus Launcher with a dedicated work surface
+- Recurring tasks, alarms, and reminders
+- Daily notes, habits, streaks, stats, and session history
+- Weekly focus reports and focus insights
+- Temptation log for blocked attempts
+- Optional aversion tone when an application is stopped
 
-### System & Privacy
-| Feature | Status |
-|---------|--------|
-| System tray — minimise, toggle, quit | ✅ |
-| Auto-start with Windows (HKCU Run key) | ✅ |
-| Auto-backup (rolling local backups) | ✅ |
-| All data stored locally — no accounts, no cloud | ✅ |
-| Windows notifications (balloon + toast) | ✅ |
+### Local-first by design
+
+- SQLite database stored under `~/.focusflow/`
+- Rolling local backups
+- No account required
+- No cloud dashboard
+- No advertising SDK
+- No remote administrator
+- Privacy policy and terms are published with the project
+
+The app still includes a system tray, notifications, onboarding, and recovery
+paths. Linux startup and notification behavior varies by desktop environment,
+so those integrations are being verified per session type rather than marked
+universally complete.
 
 ---
 
-## Enforcement Details
+## How enforcement works on Linux
 
-**Dual-mode foreground detection:**
-1. `SetWinEventHook` (WINEVENT_OUTOFCONTEXT) — fires instantly on any foreground change
-2. 500ms polling fallback — catches UWP apps routed through ApplicationFrameHost.exe
+FocusFlow does not need a cloud service to block a local process. The Linux
+path uses the JVM process APIs and session-aware helpers, then records the
+result in SQLite. Website and firewall enforcement are separate layers because
+they need different permissions and fail for different reasons.
 
-**When a blocked app is detected:**
-1. `ProcessHandle.of(pid).destroyForcibly()` — JVM 9+ process kill
-2. Fallback: `taskkill /F /IM processname.exe` via `ProcessBuilder`
-3. Block overlay window appears full-screen
-4. Block attempt logged to SQLite temptation log
-5. Optional: `New-NetFirewallRule` via PowerShell adds a live outbound firewall rule
+On X11, foreground-window information is generally available to a desktop
+application. On native Wayland, the compositor intentionally withholds much
+of that information. FocusFlow therefore treats X11, XWayland, and native
+Wayland as different support cases.
 
-**UWP app support:** When ApplicationFrameHost.exe is foreground, the monitor scans running processes to resolve the actual hosted UWP app.
+The Linux package validator checks more than whether a file exists:
 
-**Focus Launcher safety:** 55+ system processes are always whitelisted — keyboard stack (`ctfmon.exe`, `tabtip.exe`, `textinputhost.exe`), OEM touchpad drivers (Synaptics, Elan, Precision), mouse peripherals (Logitech, Razer, SteelSeries), audio (`audiodg.exe`), UAC (`consent.exe`), and accessibility tools (`narrator.exe`, `magnify.exe`).
+- package name, version, architecture, and dependencies;
+- desktop entry and icon payload;
+- AppImage executable mode and x86_64 format;
+- AppImage extraction and payload metadata.
+
+This is why a green compiler result is not treated as a complete Linux release
+test.
 
 ---
 
-## Build Locally
+## Build and develop locally
 
-Requires JDK 17+.
+Requires JDK 19 for the current project configuration. Linux development is
+the normal path; the native enforcement layer must still be tested on the
+desktop session where it will run.
 
 ```bash
-# Run the app (UI is cross-platform; enforcement is Windows-only)
+# Run the desktop UI
 ./gradlew run
 
-# Build standalone Windows EXE (~150 MB with embedded JRE)
-./gradlew packageExe
+# Run the Linux enforcement tests
+./gradlew test --tests "com.focusflow.enforcement.*"
 
-# Build MSI installer
-./gradlew packageMsi
+# Build Linux packages
+./gradlew packageDeb
+./gradlew packageRpm
+./gradlew packageAppImage
 
-# Build distributable (for MSIX)
-./gradlew createDistributable
+# Validate package metadata and payloads
+scripts/validate-linux-packages.sh build/compose/binaries/main 2.0.1
 ```
 
-Cross-compilation is not supported by jpackage. Use GitHub Actions for Windows EXE/MSI/MSIX.
+For a clean release, use the GitHub Actions workflows instead of trusting one
+developer machine:
+
+- `Build Linux Packages` builds `.deb`, `.rpm`, and AppImage artifacts.
+- `Linux Smoke Tests` runs the Linux enforcement test group.
+- `Publish Linux Release` publishes the assets only after a successful build.
+
+The CI jobs install their own Ubuntu dependencies and use JDK 19. Privileged
+hosts-file and firewall checks are intentionally not part of the default
+non-destructive smoke-test suite.
 
 ---
 
@@ -136,11 +231,11 @@ Cross-compilation is not supported by jpackage. Use GitHub Actions for Windows E
 | UI | Compose Multiplatform Desktop | 1.6.1 |
 | UI design system | Material 3 dark theme | — |
 | Native interop | JNA + jna-platform | 5.14.0 |
-| Database | org.xerial:sqlite-jdbc | 3.45.1.0 |
+| Database | org.xerial:sqlite-jdbc | 3.47.1.0 |
 | Async | kotlinx.coroutines-swing | 1.7.3 |
 | Build | Gradle (Kotlin DSL) | 8.14.2 |
 | Packaging | jpackage (Compose Desktop plugin) | bundled JRE |
-| CI/CD | GitHub Actions `windows-latest` | — |
+| CI/CD | GitHub Actions `ubuntu-latest` | Linux packages and smoke tests |
 
 ---
 
@@ -215,7 +310,11 @@ src/main/kotlin/com/focusflow/
 
 ---
 
-## MSIX / Microsoft Store Identity
+## Windows compatibility
+
+Windows support is retained while the Linux port is completed. The Windows
+installer and Microsoft Store identity are kept here for contributors working
+on that path; they are not the Linux distribution identity.
 
 | Field | Value |
 |-------|-------|

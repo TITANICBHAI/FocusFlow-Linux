@@ -59,10 +59,11 @@ dpkg-deb -x "${debs[0]}" "$deb_root"
 validate_desktop_and_icon "$deb_root"
 
 echo "Validating RPM package: ${rpms[0]}"
-rpm_package="$(rpm -qp --queryformat '%{NAME}' "${rpms[0]}")"
-rpm_version="$(rpm -qp --queryformat '%{VERSION}' "${rpms[0]}")"
-rpm_arch="$(rpm -qp --queryformat '%{ARCH}' "${rpms[0]}")"
-rpm_requires="$(rpm -qp --requires "${rpms[0]}")"
+rpm_file="$(realpath "${rpms[0]}")"
+rpm_package="$(rpm -qp --queryformat '%{NAME}' "$rpm_file")"
+rpm_version="$(rpm -qp --queryformat '%{VERSION}' "$rpm_file")"
+rpm_arch="$(rpm -qp --queryformat '%{ARCH}' "$rpm_file")"
+rpm_requires="$(rpm -qp --requires "$rpm_file")"
 [[ "$rpm_package" == "focusflow" ]] || die "Unexpected .rpm package name: $rpm_package"
 [[ "$rpm_version" == "$EXPECTED_VERSION" ]] || die ".rpm version $rpm_version != $EXPECTED_VERSION"
 [[ "$rpm_arch" == "x86_64" ]] || die ".rpm architecture $rpm_arch != x86_64"
@@ -71,17 +72,18 @@ printf '%s\n' "$rpm_requires" | grep -qx 'wmctrl' || die ".rpm dependencies do n
 rpm_root="$(mktemp -d)"
 (
   cd "$rpm_root"
-  rpm2cpio "${rpms[0]}" | cpio -idm --quiet
+  rpm2cpio "$rpm_file" | cpio -idm --quiet
 )
 validate_desktop_and_icon "$rpm_root"
 
 echo "Validating AppImage: ${appimages[0]}"
-[[ -x "${appimages[0]}" ]] || die "AppImage is not executable"
-file "${appimages[0]}" | grep -Eqi 'x86-64|amd64' || die "AppImage is not an x86_64 executable"
+appimage_file="$(realpath "${appimages[0]}")"
+[[ -x "$appimage_file" ]] || die "AppImage is not executable"
+file "$appimage_file" | grep -Eqi 'x86-64|amd64' || die "AppImage is not an x86_64 executable"
 app_root="$(mktemp -d)"
 (
   cd "$app_root"
-  APPIMAGE_EXTRACT_AND_RUN=1 "${appimages[0]}" --appimage-extract >/dev/null
+  APPIMAGE_EXTRACT_AND_RUN=1 "$appimage_file" --appimage-extract >/dev/null
 )
 [[ -d "$app_root/squashfs-root" ]] || die "AppImage extraction did not produce squashfs-root"
 validate_desktop_and_icon "$app_root/squashfs-root"

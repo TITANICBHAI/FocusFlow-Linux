@@ -16,6 +16,8 @@ Linux migration work is planned and tracked in two root-level documents:
 
 The migration preserves the Windows implementation in source. Linux release readiness is tracked separately, including the Linux package, privilege, desktop-session, and enforcement checks.
 
+See the [Linux publishing guide](LINUX_PUBLISHING_GUIDE.md) for stores, repositories, packaging channels, and release checklists.
+
 ---
 
 ## Download

@@ -12,8 +12,10 @@ description: |
   separate support cases.
 grade: stable
 confinement: classic
-architectures:
-  - build-on: amd64
+platforms:
+  amd64:
+    build-on: amd64
+    build-for: amd64
 
 apps:
   focusflow:

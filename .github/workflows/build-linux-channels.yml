@@ -35,9 +35,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y flatpak flatpak-builder
-          flatpak remote-add --if-not-exists --system flathub \
+          flatpak --user remote-add --if-not-exists flathub \
             https://dl.flathub.org/repo/flathub.flatpakrepo
-          flatpak install --system --noninteractive -y flathub \
+          flatpak --user install --noninteractive -y flathub \
             org.freedesktop.Platform//24.08 \
             org.freedesktop.Sdk//24.08
 
@@ -147,9 +147,13 @@ jobs:
           VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' build.gradle.kts | head -1)"
           WORK="$(mktemp -d)"
           git archive --format=tar --prefix="focusflow-${VERSION}/" HEAD \
-            | tar -x -C "$WORK"
+            > "$WORK/focusflow_${VERSION}.orig.tar"
+          gzip -n "$WORK/focusflow_${VERSION}.orig.tar"
+          tar -xzf "$WORK/focusflow_${VERSION}.orig.tar.gz" -C "$WORK"
           cp -a packaging/launchpad/debian "$WORK/focusflow-${VERSION}/debian"
-          chmod +x "$WORK/focusflow-${VERSION}/debian/rules"
+          chmod +x \
+            "$WORK/focusflow-${VERSION}/gradlew" \
+            "$WORK/focusflow-${VERSION}/debian/rules"
           (
             cd "$WORK/focusflow-${VERSION}"
             dpkg-buildpackage -S -us -uc -d

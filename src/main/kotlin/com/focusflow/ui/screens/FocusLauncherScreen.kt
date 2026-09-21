@@ -42,6 +42,19 @@ private val DURATION_PRESETS = listOf(
     "4 hours"  to 240
 )
 
+private const val CUSTOM_DURATION_INDEX = -1
+private const val MAX_CUSTOM_DURATION_MINUTES = 24 * 60
+
+private fun formatDuration(totalMinutes: Int): String {
+    val hours = totalMinutes / 60
+    val minutes = totalMinutes % 60
+    return when {
+        hours > 0 && minutes > 0 -> "${hours}h ${minutes}m"
+        hours > 0 -> "${hours}h"
+        else -> "${minutes}m"
+    }
+}
+
 @Composable
 fun FocusLauncherScreen() {
     val strings = LocalizationManager.strings
@@ -51,6 +64,10 @@ fun FocusLauncherScreen() {
     var searchQuery      by remember { mutableStateOf("") }
     var searchResults    by remember { mutableStateOf<List<FocusLauncherApp>>(emptyList()) }
     var durationIndex    by remember { mutableStateOf(0) }
+    var customDurationMinutes by remember { mutableStateOf<Int?>(null) }
+    var showCustomDurationDialog by remember { mutableStateOf(false) }
+    var customHoursText   by remember { mutableStateOf("1") }
+    var customMinutesText by remember { mutableStateOf("0") }
     var isLoading        by remember { mutableStateOf(true) }
     var confirmEnter     by remember { mutableStateOf(false) }
     var showAdminWarning by remember { mutableStateOf(false) }
@@ -391,6 +408,29 @@ fun FocusLauncherScreen() {
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
                     }
                 }
+                val customSelected = durationIndex == CUSTOM_DURATION_INDEX
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (customSelected) Purple80 else Surface3)
+                        .border(
+                            1.dp,
+                            if (customSelected) Purple80 else Color.Transparent,
+                            RoundedCornerShape(8.dp)
+                        )
+                        .clickable { showCustomDurationDialog = true }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        if (customSelected && customDurationMinutes != null)
+                            "Custom · ${formatDuration(customDurationMinutes!!)}"
+                        else "Custom",
+                        color = if (customSelected) Color.White else OnSurface2,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = if (customSelected) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                }
             }
         }
 
@@ -426,6 +466,82 @@ fun FocusLauncherScreen() {
             }
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    if (showCustomDurationDialog) {
+        val hours = customHoursText.toIntOrNull() ?: 0
+        val minutes = customMinutesText.toIntOrNull() ?: 0
+        val error = when {
+            customHoursText.isBlank() || customMinutesText.isBlank() ->
+                "Enter hours and minutes."
+            hours !in 0..24 -> "Hours must be between 0 and 24."
+            minutes !in 0..59 -> "Minutes must be between 0 and 59."
+            hours * 60 + minutes < 1 -> "Duration must be at least 1 minute."
+            hours * 60 + minutes > MAX_CUSTOM_DURATION_MINUTES ->
+                "Custom sessions can be at most 24 hours."
+            else -> null
+        }
+
+        AlertDialog(
+            onDismissRequest = { showCustomDurationDialog = false },
+            containerColor = Surface2,
+            shape = RoundedCornerShape(20.dp),
+            title = {
+                Text("Custom session duration", color = OnSurface, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Choose any duration from 1 minute up to 24 hours.",
+                        color = OnSurface2,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedTextField(
+                            value = customHoursText,
+                            onValueChange = { customHoursText = it.filter(Char::isDigit).take(2) },
+                            label = { Text("Hours") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Purple80,
+                                unfocusedBorderColor = OnSurface2
+                            )
+                        )
+                        OutlinedTextField(
+                            value = customMinutesText,
+                            onValueChange = { customMinutesText = it.filter(Char::isDigit).take(2) },
+                            label = { Text("Minutes") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Purple80,
+                                unfocusedBorderColor = OnSurface2
+                            )
+                        )
+                    }
+                    if (error != null) {
+                        Text(error, color = Error, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        customDurationMinutes = hours * 60 + minutes
+                        durationIndex = CUSTOM_DURATION_INDEX
+                        showCustomDurationDialog = false
+                    },
+                    enabled = error == null,
+                    colors = ButtonDefaults.buttonColors(containerColor = Purple80)
+                ) { Text("Use duration") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomDurationDialog = false }) {
+                    Text(strings.btnCancel, color = OnSurface2)
+                }
+            }
+        )
     }
 
     // ── Admin elevation warning ───────────────────────────────────────────────

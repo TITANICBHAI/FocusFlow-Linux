@@ -58,6 +58,39 @@ data class BlockSchedule(
     val processNames: List<String> = emptyList()
 )
 
+/**
+ * A schedule represents a non-empty daily time window.  Keeping validation and
+ * matching next to the model prevents the UI and enforcement service from
+ * drifting apart, especially for windows that cross midnight.
+ */
+fun BlockSchedule.hasValidTimeRange(): Boolean {
+    val validStart = startHour in 0..23 && startMinute in 0..59
+    val validEnd = endHour in 0..23 && endMinute in 0..59
+    return validStart && validEnd &&
+        (startHour != endHour || startMinute != endMinute)
+}
+
+fun BlockSchedule.isActiveAt(now: LocalDateTime): Boolean {
+    if (!enabled || !hasValidTimeRange() || daysOfWeek.isEmpty()) return false
+
+    val today = now.dayOfWeek.value
+    val previousDay = if (today == 1) 7 else today - 1
+    val currentMinutes = now.hour * 60 + now.minute
+    val startMinutes = startHour * 60 + startMinute
+    val endMinutes = endHour * 60 + endMinute
+
+    return if (startMinutes < endMinutes) {
+        today in daysOfWeek &&
+            currentMinutes >= startMinutes &&
+            currentMinutes < endMinutes
+    } else {
+        // For an overnight window, the after-midnight tail belongs to the
+        // previous calendar day's schedule entry.
+        (today in daysOfWeek && currentMinutes >= startMinutes) ||
+            (previousDay in daysOfWeek && currentMinutes < endMinutes)
+    }
+}
+
 data class DailyAllowance(
     val processName: String,
     val displayName: String,

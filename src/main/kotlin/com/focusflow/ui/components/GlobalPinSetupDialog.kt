@@ -21,12 +21,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.focusflow.i18n.LocalizationManager
 import com.focusflow.services.GlobalPin
+import com.focusflow.services.PinPolicy
 import com.focusflow.ui.theme.*
 
 private enum class PinSetupStep { CHOOSE, SET_CUSTOM, SHOW_GENERATED }
 
 @Composable
-fun GlobalPinSetupDialog(onDismiss: () -> Unit) {
+fun GlobalPinSetupDialog(
+    onDismiss: () -> Unit,
+    onComplete: () -> Unit = onDismiss
+) {
     val s             = LocalizationManager.strings
     var step          by remember { mutableStateOf(PinSetupStep.CHOOSE) }
     var customPin     by remember { mutableStateOf("") }
@@ -223,9 +227,10 @@ fun GlobalPinSetupDialog(onDismiss: () -> Unit) {
                         Button(
                             onClick = {
                                 when {
-                                    customPin.length < 8    -> pinError = s.pinSetupMinChars
+                                    customPin.length < PinPolicy.MIN_LENGTH -> pinError = s.pinSetupMinChars
+                                    customPin.length > PinPolicy.MAX_LENGTH -> pinError = "PIN must be at most ${PinPolicy.MAX_LENGTH} characters"
                                     customPin != confirmPin -> pinError = s.pinSetupNoMatch
-                                    else -> { GlobalPin.set(customPin); onDismiss() }
+                                    else -> { GlobalPin.set(customPin); onComplete() }
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Purple80)
@@ -234,7 +239,7 @@ fun GlobalPinSetupDialog(onDismiss: () -> Unit) {
                 }
                 PinSetupStep.SHOW_GENERATED -> {
                     Button(
-                        onClick  = onDismiss,
+                        onClick  = onComplete,
                         enabled  = savedConfirm,
                         colors   = ButtonDefaults.buttonColors(containerColor = Purple80)
                     ) { Text(s.btnDone) }

@@ -45,16 +45,21 @@ import com.focusflow.services.FocusSessionService
 import kotlin.system.exitProcess
 import com.focusflow.ui.components.AndroidPromoDialog
 import com.focusflow.ui.components.BlockOverlay
+import com.focusflow.ui.components.EdgeExtensionPromoDialog
 import com.focusflow.ui.components.FocusLauncherBreakBanner
 import com.focusflow.ui.components.FocusLauncherOverlay
 import com.focusflow.ui.components.GlobalPinSetupDialog
 import com.focusflow.ui.components.OsBanner
 import com.focusflow.ui.components.OnboardingDialog
+import com.focusflow.ui.components.PostPinRecommendationsDialog
 import com.focusflow.ui.components.ReviewPromptDialog
+import com.focusflow.ui.components.openEdgeExtensionStore
+import com.focusflow.ui.components.openUrl
 import com.focusflow.ui.components.SideNav
 import com.focusflow.ui.components.TelemetryConsentDialog
 import com.focusflow.services.FocusLauncherService
 import com.focusflow.services.GlobalPin
+import com.focusflow.services.ReviewPromptService
 import com.focusflow.ui.screens.*
 import com.focusflow.ui.theme.*
 import kotlinx.coroutines.Dispatchers
@@ -65,7 +70,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.input.key.*
 import com.focusflow.ui.LocalNavigate
 
-private const val APP_VERSION = "1.1.6"
+private const val APP_VERSION = "2.0.1"
+private const val EDGE_EXTENSION_PROMO_DISMISSED = "edge_extension_promo_dismissed"
+private const val POST_PIN_RECOMMENDATIONS_SHOWN = "post_pin_recommendations_shown"
+private const val DIRECT_RELEASES_URL = "https://github.com/TITANICBHAI/FocusFlow-PC/releases"
 
 /**
  * Screens where the floating "Restart as Admin" button is shown.
@@ -97,7 +105,10 @@ fun App() {
     var showOnboarding      by remember { mutableStateOf(false) }
     var showGlobalPinSetup  by remember { mutableStateOf(false) }
     var showAndroidPromo    by remember { mutableStateOf(false) }
-    var showReviewPrompt    by remember { mutableStateOf(false) }
+    var showEdgeExtensionPromo by remember { mutableStateOf(false) }
+    var showPostPinRecommendations by remember { mutableStateOf(false) }
+    var postPinRecommendationsShown by remember { mutableStateOf(false) }
+    val showReviewPrompt by ReviewPromptService.shouldShow.collectAsState()
     var showTelemetryConsent          by remember { mutableStateOf(false) }
     // True when onboarding is waiting behind the consent dialog on first launch.
     var pendingOnboardingAfterConsent by remember { mutableStateOf(false) }
@@ -130,10 +141,13 @@ fun App() {
         }
         val launchData = withContext(Dispatchers.IO) {
             val fl = Database.getSetting("onboarding_complete") != "true"
-            val pn = !GlobalPin.isSet() && !GlobalPin.isDeclined()
 
             val openCount = (Database.getSetting("app_open_count")?.toIntOrNull() ?: 0) + 1
             Database.setSetting("app_open_count", openCount.toString())
+
+            // Do not interrupt a fresh install with the PIN prompt. It appears
+            // from the second completed app open onward.
+            val pn = !GlobalPin.isSet() && !GlobalPin.isDeclined() && openCount >= 2
 
             // 30-day cooldown: store last-shown date instead of a permanent boolean.
             val lastShownDateStr = Database.getSetting("android_promo_shown_date")
@@ -150,39 +164,35 @@ fun App() {
             val lastPromoVersion = Database.getSetting("android_promo_last_version")
             val isNewVersion = lastPromoVersion != APP_VERSION
 
-            // Show if: (3+ opens and cooldown elapsed) OR new version detected.
-            val showAndroid = !fl && (
-                (openCount >= 3 && daysSinceShown >= 30) || isNewVersion
-            )
-            val showReview = openCount >= 15
-                && Database.getSetting("review_prompt_shown") != "true"
-                && !fl
-                && !showAndroid
-
-            // Show telemetry consent on the very first launch, before onboarding,
-            // if the user has never been asked (null = never set, as opposed to "true"/"false").
-            val showConsent = Database.getSetting("crash_reports_enabled") == null
+            // Keep the Android promotion behind a meaningful usage threshold.
+            val showAndroid = !fl && openCount >= 5 &&
+                (daysSinceShown >= 30 || isNewVersion)
+            // Ask for telemetry after onboarding has completed. A null value
+            // still distinguishes "never asked" from an explicit decline.
+            val showConsent = !fl && Database.getSetting("crash_reports_enabled") == null
 
             if (showAndroid) {
                 Database.setSetting("android_promo_shown_date", java.time.LocalDate.now().toString())
                 Database.setSetting("android_promo_last_version", APP_VERSION)
             }
-            if (showReview)  Database.setSetting("review_prompt_shown", "true")
-
-            listOf(fl, pn, showAndroid, showReview, showConsent)
+            listOf(fl, pn, showAndroid, showConsent)
         }
         val firstLaunch  = launchData[0]
         val pinNeeded    = launchData[1]
         val androidPromo = launchData[2]
-        val reviewPrompt = launchData[3]
-        val needsConsent = launchData[4]
+        val needsConsent = launchData[3]
 
         if (firstLaunch && !needsConsent) showOnboarding = true
         // On first launch with consent pending: queue onboarding to fire after consent is dismissed.
         if (firstLaunch && needsConsent) pendingOnboardingAfterConsent = true
         if (pinNeeded && !firstLaunch) showGlobalPinSetup = true
         if (androidPromo) showAndroidPromo = true
-        if (reviewPrompt) showReviewPrompt = true
+        if (!firstLaunch && IS_WINDOWS &&
+            Database.getSetting(EDGE_EXTENSION_PROMO_DISMISSED) != "true" &&
+            Database.getSetting("app_open_count")?.toIntOrNull()?.let { it >= 8 } == true
+        ) {
+            showEdgeExtensionPromo = true
+        }
         if (needsConsent) showTelemetryConsent = true
     }
 
@@ -298,7 +308,9 @@ fun App() {
                                 )
                                 Screen.FOCUS           -> FocusScreen(preloadTask = focusPreloadTask)
                                 Screen.FOCUS_LAUNCHER  -> FocusLauncherScreen()
-                                Screen.BLOCK_APPS      -> AppBlockerScreen()
+                                Screen.BLOCK_APPS      -> AppBlockerScreen(
+                                    onNavigateToBlockDefense = { currentScreen = Screen.BLOCK_DEFENSE }
+                                )
                                 Screen.STATS          -> StatsScreen()
                                 Screen.NOTES          -> DailyNotesScreen()
                                 Screen.HABITS         -> HabitsScreen()
@@ -364,7 +376,31 @@ fun App() {
         }
 
         if (showGlobalPinSetup) {
-            GlobalPinSetupDialog(onDismiss = { showGlobalPinSetup = false })
+            GlobalPinSetupDialog(
+                onDismiss = { showGlobalPinSetup = false },
+                onComplete = {
+                    showGlobalPinSetup = false
+                    if (!postPinRecommendationsShown) {
+                        postPinRecommendationsShown = true
+                        showPostPinRecommendations = true
+                        scope.launch(Dispatchers.IO) {
+                            Database.setSetting(POST_PIN_RECOMMENDATIONS_SHOWN, "true")
+                        }
+                    }
+                }
+            )
+        }
+
+        if (showPostPinRecommendations) {
+            PostPinRecommendationsDialog(
+                onOpenExtension = { openEdgeExtensionStore() },
+                onOpenNetworkShield = {
+                    showPostPinRecommendations = false
+                    navigate(Screen.VPN_NETWORK)
+                },
+                onOpenReleases = { openUrl(DIRECT_RELEASES_URL) },
+                onDismiss = { showPostPinRecommendations = false }
+            )
         }
 
         if (showAndroidPromo) {
@@ -372,7 +408,25 @@ fun App() {
         }
 
         if (showReviewPrompt) {
-            ReviewPromptDialog(onDismiss = { showReviewPrompt = false })
+            ReviewPromptDialog()
+        }
+
+        if (showEdgeExtensionPromo) {
+            EdgeExtensionPromoDialog(
+                onInstall = {
+                    openEdgeExtensionStore()
+                    showEdgeExtensionPromo = false
+                    scope.launch(Dispatchers.IO) {
+                        Database.setSetting(EDGE_EXTENSION_PROMO_DISMISSED, "true")
+                    }
+                },
+                onDismiss = {
+                    showEdgeExtensionPromo = false
+                    scope.launch(Dispatchers.IO) {
+                        Database.setSetting(EDGE_EXTENSION_PROMO_DISMISSED, "true")
+                    }
+                }
+            )
         }
 
         if (showTelemetryConsent) {

@@ -3,6 +3,7 @@ package com.focusflow.ui.screens
 import androidx.compose.foundation.Image
 import com.focusflow.ui.components.EmptyStateCard
 import com.focusflow.ui.components.FfVerticalScrollbar
+import com.focusflow.ui.components.PinGateDialog
 import com.focusflow.ui.components.ShortcutTooltip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -155,7 +156,7 @@ fun AppIcon(
 }
 
 @Composable
-fun AppBlockerScreen() {
+fun AppBlockerScreen(onNavigateToBlockDefense: () -> Unit = {}) {
     val strings     = LocalizationManager.strings
     var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf(strings.blockerTabAlwaysBlock, strings.blockerTabDailyAllowance)
@@ -216,7 +217,7 @@ fun AppBlockerScreen() {
         }
 
         when (selectedTab) {
-            0 -> AlwaysBlockTab()
+            0 -> AlwaysBlockTab(onNavigateToBlockDefense)
             1 -> DailyAllowanceTab()
         }
     }
@@ -256,7 +257,7 @@ fun StandaloneBlockScreen() {
 // ── Always Block Tab ───────────────────────────────────────────────────────────
 
 @Composable
-private fun AlwaysBlockTab() {
+private fun AlwaysBlockTab(onNavigateToBlockDefense: () -> Unit) {
     val scope   = rememberCoroutineScope()
     val strings = LocalizationManager.strings
 
@@ -269,6 +270,10 @@ private fun AlwaysBlockTab() {
     var searchQuery   by remember { mutableStateOf("") }
     var showAllInline by remember { mutableStateOf(false) }
     var inlineSearch  by remember { mutableStateOf("") }
+    var alwaysOnEnabled by remember { mutableStateOf(false) }
+    var globalPinSet by remember { mutableStateOf(false) }
+    var showGlobalPinGate by remember { mutableStateOf(false) }
+    var pendingGlobalAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     fun reload() {
         scope.launch {
@@ -278,7 +283,22 @@ private fun AlwaysBlockTab() {
             val runningNames = running.map { it.processName }.toSet()
             blockRules  = rules
             scannedApps = running + curated.filter { it.processName !in runningNames }
+            alwaysOnEnabled = withContext(Dispatchers.IO) {
+                Database.getSetting("always_on_enforcement") == "true"
+            }
+            globalPinSet = withContext(Dispatchers.IO) {
+                com.focusflow.services.GlobalPin.isSet()
+            }
             isLoading   = false
+        }
+    }
+
+    fun guardedRemoval(action: () -> Unit) {
+        if (globalPinSet) {
+            pendingGlobalAction = action
+            showGlobalPinGate = true
+        } else {
+            action()
         }
     }
 
@@ -342,6 +362,44 @@ private fun AlwaysBlockTab() {
                         color = OnSurface2,
                         modifier = Modifier.weight(1f)
                     )
+                }
+            }
+
+            if (!alwaysOnEnabled) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Error.copy(alpha = 0.14f))
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(Icons.Default.Warning, null, tint = Error, modifier = Modifier.size(22.dp))
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                "ATTENTION",
+                                color = Error,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Text(
+                                "These apps are saved in your block list, but Always-On Enforcement is OFF. " +
+                                    "Turn it on in Block Defense or the apps will only be blocked during focus sessions.",
+                                color = OnSurface,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            TextButton(
+                                onClick = onNavigateToBlockDefense,
+                                contentPadding = PaddingValues(horizontal = 0.dp, vertical = 2.dp)
+                            ) {
+                                Text("Open Block Defense →", color = Error, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -669,19 +727,24 @@ private fun AlwaysBlockTab() {
                         BlockRuleCard(
                             rule = rule,
                             onToggle = { enabled ->
-                                scope.launch {
-                                    withContext(Dispatchers.IO) {
-                                        Database.upsertBlockRule(rule.copy(enabled = enabled))
+                                val action: () -> Unit = {
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            Database.upsertBlockRule(rule.copy(enabled = enabled))
+                                        }
+                                        if (!enabled) NetworkBlocker.removeRule(rule.processName)
+                                        reload()
                                     }
-                                    if (!enabled) NetworkBlocker.removeRule(rule.processName)
-                                    reload()
                                 }
+                                if (enabled) action() else guardedRemoval(action)
                             },
                             onDelete = {
-                                scope.launch {
-                                    withContext(Dispatchers.IO) { Database.deleteBlockRule(rule.id) }
-                                    NetworkBlocker.removeRule(rule.processName)
-                                    reload()
+                                guardedRemoval {
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) { Database.deleteBlockRule(rule.id) }
+                                        NetworkBlocker.removeRule(rule.processName)
+                                        reload()
+                                    }
                                 }
                             }
                         )
@@ -724,6 +787,23 @@ private fun AlwaysBlockTab() {
                     showPicker = false
                     reload()
                 }
+            }
+        )
+    }
+
+    if (showGlobalPinGate) {
+        PinGateDialog(
+            title = "Global PIN required",
+            subtitle = "Enter your Global PIN to disable or remove a blocked app.",
+            allowReset = false,
+            onSuccess = {
+                showGlobalPinGate = false
+                pendingGlobalAction?.invoke()
+                pendingGlobalAction = null
+            },
+            onDismiss = {
+                showGlobalPinGate = false
+                pendingGlobalAction = null
             }
         )
     }

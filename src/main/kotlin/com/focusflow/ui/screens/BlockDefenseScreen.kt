@@ -22,15 +22,18 @@ import androidx.compose.ui.unit.dp
 import com.focusflow.data.Database
 import com.focusflow.data.models.BlockRule
 import com.focusflow.data.models.BlockSchedule
+import com.focusflow.data.models.isActiveAt
 import com.focusflow.enforcement.ProcessMonitor
 import com.focusflow.i18n.LocalizationManager
 import com.focusflow.services.BlockScheduleService
 import com.focusflow.services.GlobalPin
 import com.focusflow.services.SessionPin
+import com.focusflow.ui.components.BlockScheduleEditorDialog
 import com.focusflow.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.LocalDateTime
 
 @Composable
 fun BlockDefenseScreen(onNavigateToVpn: () -> Unit = {}, onNavigateToAppBlocker: () -> Unit = {}) {
@@ -46,6 +49,7 @@ fun BlockDefenseScreen(onNavigateToVpn: () -> Unit = {}, onNavigateToAppBlocker:
     var overlayMsg       by remember { mutableStateOf("") }
 
     var showAddSchedule  by remember { mutableStateOf(false) }
+    var scheduleBeingEdited by remember { mutableStateOf<BlockSchedule?>(null) }
     var showPinGate      by remember { mutableStateOf(false) }
     var pendingAlwaysOn  by remember { mutableStateOf(false) }
 
@@ -215,22 +219,17 @@ fun BlockDefenseScreen(onNavigateToVpn: () -> Unit = {}, onNavigateToAppBlocker:
                 Text(strings.defNoSchedules, color = OnSurface2, style = MaterialTheme.typography.bodySmall)
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    val now = java.time.LocalTime.now()
+                    val now = LocalDateTime.now()
                     blockSchedules.forEach { sched ->
-                        val activeNow = sched.enabled && run {
-                            val day = java.time.LocalDate.now().dayOfWeek.value
-                            sched.daysOfWeek.contains(day) &&
-                            now >= java.time.LocalTime.of(sched.startHour, sched.startMinute) &&
-                            now < java.time.LocalTime.of(sched.endHour, sched.endMinute)
-                        }
+                        val activeNow = sched.isActiveAt(now)
                         Row(
                             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
                                 .background(if (activeNow) Warning.copy(alpha = 0.1f) else Surface3)
                                 .padding(horizontal = 14.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(sched.name, color = OnSurface, style = MaterialTheme.typography.bodyMedium)
                                 val days = listOf("Mon","Tue","Wed","Thu","Fri","Sat","Sun")
                                 val dayStr = sched.daysOfWeek.mapNotNull { days.getOrNull(it-1) }.joinToString(", ")
@@ -244,6 +243,12 @@ fun BlockDefenseScreen(onNavigateToVpn: () -> Unit = {}, onNavigateToAppBlocker:
                                     .background(Warning.copy(alpha = 0.18f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
                                     Text(strings.defScheduleActive, color = Warning, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
                                 }
+                            }
+                            IconButton(
+                                onClick = { scheduleBeingEdited = sched },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(Icons.Default.Edit, "Edit schedule", tint = OnSurface2, modifier = Modifier.size(16.dp))
                             }
                         }
                     }
@@ -282,7 +287,7 @@ fun BlockDefenseScreen(onNavigateToVpn: () -> Unit = {}, onNavigateToAppBlocker:
 
     // ── Add schedule dialog ─────────────────────────────────────────────────────
     if (showAddSchedule) {
-        AddScheduleDialogBD(
+        BlockScheduleEditorDialog(
             onDismiss = { showAddSchedule = false },
             onSave    = { sched ->
                 scope.launch {
@@ -290,6 +295,20 @@ fun BlockDefenseScreen(onNavigateToVpn: () -> Unit = {}, onNavigateToAppBlocker:
                     BlockScheduleService.forceCheck()
                     reload()
                     showAddSchedule = false
+                }
+            }
+        )
+    }
+    scheduleBeingEdited?.let { schedule ->
+        BlockScheduleEditorDialog(
+            initialSchedule = schedule,
+            onDismiss = { scheduleBeingEdited = null },
+            onSave = { updated ->
+                scope.launch {
+                    withContext(Dispatchers.IO) { Database.upsertBlockSchedule(updated) }
+                    BlockScheduleService.forceCheck()
+                    scheduleBeingEdited = null
+                    reload()
                 }
             }
         )

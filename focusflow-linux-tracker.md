@@ -28,28 +28,28 @@ Keep the Windows implementation working. Add Linux branches alongside existing W
 
 - [x] **P3.1 — `GlobalKeyboardHook`: close the Wayland keyboard gap**
   Native Wayland is explicitly reported as reduced protection because portal Inhibit does not block global keyboard delivery and GlobalShortcuts does not suppress compositor escape keys. X11 retains the real global grab; process blocking and the overlay remain active on Wayland.
-- [ ] **P3.2 — `NuclearMode`: add GNOME/KDE task managers to the escape list**  
-  Cover common Linux system monitors and terminal tools without duplicating existing entries.
-- [ ] **P3.3 — `FloatingBlockOverlay`: raise on Linux**  
-  Add best-effort `xdotool windowraise` calls on Linux/X11 or XWayland without blocking or affecting Windows behavior.
+- [x] **P3.2 — `NuclearMode`: add GNOME/KDE task managers to the escape list**  
+  Added missing KDE/GNOME/LXQt monitor variants and user-launched monitor tools while excluding compositor, display-server, D-Bus, and system-critical processes.
+- [x] **P3.3 — `FloatingBlockOverlay`: raise on Linux**  
+  Added an IO-dispatched, best-effort `xdotool windowraise` path for X11/XWayland. Native Wayland remains process-enforcement-only.
 
 ## Phase 4 — System integration
 
-- [ ] **P4.1 — `SystemTrayManager`: `notify-send` fallback for Wayland**  
-  Route notifications through `notify-send` when AWT tray support is unavailable and the tool is installed.
-- [ ] **P4.2 — `WindowsStartupManager`: verify `resolveExePath()` for AppImage/deb**  
-  Resolve the actual Linux executable path, keep the `.desktop` entry valid, and include `StartupWMClass=focusflow`.
-- [ ] **P4.3 — `FocusLauncherService`: GNOME/KDE panel handling**  
-  Detect the desktop environment, avoid ineffective `xdotool` calls where panels are compositor-integrated, and log the limitation while preserving XFCE/LXPanel behavior.
+- [x] **P4.1 — `SystemTrayManager`: `notify-send` fallback for Wayland**  
+  Notifications now use `notify-send` asynchronously when AWT tray support is unavailable and the tool is installed.
+- [x] **P4.2 — `WindowsStartupManager`: verify `resolveExePath()` for AppImage/deb**  
+  Linux autostart now resolves a real executable when available, retains a valid JVM fallback, quotes desktop commands, and writes `StartupWMClass=focusflow`.
+- [x] **P4.3 — `FocusLauncherService`: GNOME/KDE panel handling**  
+  Native Wayland and GNOME/KDE/Plasma compositor panels are detected and skipped with a one-time limitation log; X11 XFCE/LXPanel behavior remains unchanged.
 
 ## Phase 5 — Polish and distribution
 
-- [ ] **P5.1 — `VpnNetworkScreen`: replace Windows-only text on Linux**  
-  Show `/etc/hosts`, `iptables`, and `pkexec` context to Linux users instead of Windows firewall/administrator wording.
-- [ ] **P5.2 — `SettingsScreen`: Linux-aware enforcement description**  
-  Display Linux enforcement status and tooling accurately, including the xdotool polling path.
-- [ ] **P5.3 — `CrashReporter`: verify `safetyCleanup()` on Linux**  
-  Confirm crash cleanup cannot invoke unsafe Windows/JNA behavior on Linux and that existing tests remain green.
+- [x] **P5.1 — `VpnNetworkScreen`: replace Windows-only text on Linux**  
+  Linux now describes `/etc/hosts`, iptables, and pkexec while Windows retains its administrator/Firewall copy.
+- [x] **P5.2 — `SettingsScreen`: Linux-aware enforcement description**  
+  Linux shows active xdotool/wmctrl polling, a green enforcement status, Linux enforcement components, and the Linux database path.
+- [x] **P5.3 — `CrashReporter`: verify `safetyCleanup()` on Linux**  
+  Safety cleanup documents the guarded registry call and uses the existing Linux-safe launcher emergency restore path; Linux tests remain green.
 - [ ] **P5.4 — CI: GitHub Actions Linux build and test step**  
   Run Linux tests on `ubuntu-latest`, install required desktop tools, and verify at least one Linux package build.
 

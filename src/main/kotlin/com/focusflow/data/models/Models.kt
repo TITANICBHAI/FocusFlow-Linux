@@ -191,3 +191,34 @@ data class CustomBlockPreset(
     val processNames: List<String>,
     val createdAt: LocalDateTime = LocalDateTime.now()
 )
+
+data class FocusLauncherPreset(
+    val id: String,
+    val name: String,
+    val processNames: List<String>,
+    val createdAt: LocalDateTime = LocalDateTime.now()
+)
+
+data class FocusLauncherSessionApp(
+    val processName: String,
+    val displayName: String,
+    val exePath: String? = null
+)
+
+/**
+ * Durable state for resuming a Focus Launcher session after an unexpected
+ * shutdown or reboot. The session PIN is persisted as a hash only.
+ */
+data class FocusLauncherSession(
+    val apps: List<FocusLauncherSessionApp>,
+    val sessionStartMs: Long,
+    val sessionEndMs: Long = 0L,
+    val breaksTotal: Int = 1,
+    val breaksUsed: Int = 0,
+    val breakDurationSeconds: Int = 5 * 60,
+    val breakSecondsAccumulated: Long = 0L,
+    val hardLocked: Boolean = false,
+    val breakActive: Boolean = false,
+    val breakEndMs: Long = 0L,
+    val pinHash: String
+)

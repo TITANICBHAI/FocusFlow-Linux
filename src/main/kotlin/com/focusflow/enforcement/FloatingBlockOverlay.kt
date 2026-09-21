@@ -68,6 +68,30 @@ object FloatingBlockOverlay {
             // Bring above everything, including always-on-top task manager etc.
             w.toFront()
             w.requestFocus()
+            if (isLinux) scope.launch { raiseLinuxOverlayWindows() }
+        }
+    }
+
+    /**
+     * Best-effort X11/XWayland raise. Native Wayland compositors can reject
+     * client-side raise requests, so process enforcement remains the fallback.
+     * This runs off the EDT and never changes the Windows path.
+     */
+    private fun raiseLinuxOverlayWindows() {
+        if (!isLinux || System.getenv("DISPLAY").isNullOrBlank()) return
+        if (!hasXdotool) return
+        runCatching {
+            val search = ProcessBuilder(
+                "xdotool", "search", "--pid", ProcessHandle.current().pid().toString()
+            ).redirectErrorStream(true).start()
+            val ids = search.inputStream.bufferedReader().use { it.readText() }
+            search.waitFor()
+            ids.lineSequence().map { it.trim() }.filter { it.isNotBlank() }.forEach { id ->
+                runCatching {
+                    ProcessBuilder("xdotool", "windowraise", id)
+                        .redirectErrorStream(true).start().waitFor()
+                }
+            }
         }
     }
 

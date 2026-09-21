@@ -47,7 +47,6 @@ import com.focusflow.ui.components.AndroidPromoDialog
 import com.focusflow.ui.components.BlockOverlay
 import com.focusflow.ui.components.EdgeExtensionPromoDialog
 import com.focusflow.ui.components.FocusLauncherBreakBanner
-import com.focusflow.ui.components.FocusLauncherOverlay
 import com.focusflow.ui.components.GlobalPinSetupDialog
 import com.focusflow.ui.components.OsBanner
 import com.focusflow.ui.components.OnboardingDialog
@@ -333,8 +332,6 @@ fun App() {
                     }
                 }
             }
-
-            FocusLauncherOverlay()
 
             BlockOverlay(
                 visible   = overlayVisible,

@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.focusflow.data.Database
+import com.focusflow.data.models.FocusLauncherPreset
 import com.focusflow.enforcement.InstalledAppsScanner
 import com.focusflow.enforcement.isWindows
 import com.focusflow.i18n.LocalizationManager
@@ -33,6 +34,7 @@ import com.focusflow.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 
 private val DURATION_PRESETS = listOf(
     "No limit" to null,
@@ -71,6 +73,13 @@ fun FocusLauncherScreen() {
     var isLoading        by remember { mutableStateOf(true) }
     var confirmEnter     by remember { mutableStateOf(false) }
     var showAdminWarning by remember { mutableStateOf(false) }
+    var breaksAllowed     by remember { mutableStateOf(1) }
+    var breakDurationMins by remember { mutableStateOf(5) }
+    var showPinBeforeEnter by remember { mutableStateOf(false) }
+    var generatedPin       by remember { mutableStateOf("") }
+    var launcherPresets    by remember { mutableStateOf<List<FocusLauncherPreset>>(emptyList()) }
+    var showSavePreset     by remember { mutableStateOf(false) }
+    var presetName         by remember { mutableStateOf("") }
 
     // Checked once on composition — running "net session" is a blocking call so we
     // do it inside remember{} rather than on every recomposition.
@@ -104,6 +113,7 @@ fun FocusLauncherScreen() {
 
         // Load persisted selection; fall back to all-selected if none saved yet
         val persisted = withContext(Dispatchers.IO) { Database.getSetting("launcher_selected_apps") }
+        launcherPresets = withContext(Dispatchers.IO) { Database.getFocusLauncherPresets() }
         selectedApps = if (persisted != null && persisted.isNotBlank()) {
             val saved     = persisted.split(",").filter { it.isNotBlank() }.toSet()
             val available = apps.map { it.processName.lowercase() }.toSet()
@@ -161,6 +171,44 @@ fun FocusLauncherScreen() {
                     Text(strings.launcherSubtitle,
                         style = MaterialTheme.typography.bodySmall, color = OnSurface2)
                 }
+            }
+        }
+
+        // ── Saved launcher presets ────────────────────────────────────────────
+        if (launcherPresets.isNotEmpty()) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Saved app sets", color = OnSurface, fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        launcherPresets.forEach { preset ->
+                            AssistChip(
+                                onClick = {
+                                    selectedApps = preset.processNames.map { it.lowercase() }.toSet()
+                                },
+                                label = { Text(preset.name) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.PlaylistPlay, null, modifier = Modifier.size(16.dp))
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            OutlinedButton(
+                onClick = {
+                    presetName = ""
+                    showSavePreset = true
+                },
+                enabled = selectedApps.isNotEmpty(),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Icon(Icons.Default.BookmarkAdd, null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Save selected apps as preset")
             }
         }
 
@@ -418,7 +466,11 @@ fun FocusLauncherScreen() {
                             if (customSelected) Purple80 else Color.Transparent,
                             RoundedCornerShape(8.dp)
                         )
-                        .clickable { showCustomDurationDialog = true }
+                        .clickable {
+                            customHoursText = customDurationMinutes?.let { (it / 60).toString() } ?: "1"
+                            customMinutesText = customDurationMinutes?.let { (it % 60).toString() } ?: "0"
+                            showCustomDurationDialog = true
+                        }
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -430,6 +482,42 @@ fun FocusLauncherScreen() {
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = if (customSelected) FontWeight.SemiBold else FontWeight.Normal
                     )
+                }
+            }
+        }
+
+        // ── Break configuration ──────────────────────────────────────────────
+        item {
+            Text("Breaks", color = OnSurface, fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(0 to "None", 1 to "1", 2 to "2", -1 to "∞").forEach { (count, label) ->
+                    FilterChip(
+                        selected = breaksAllowed == count,
+                        onClick = { breaksAllowed = count },
+                        label = { Text(label) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Purple80.copy(alpha = .2f),
+                            selectedLabelColor = Purple80
+                        )
+                    )
+                }
+            }
+            if (breaksAllowed != 0) {
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(3, 5, 10, 15).forEach { mins ->
+                        FilterChip(
+                            selected = breakDurationMins == mins,
+                            onClick = { breakDurationMins = mins },
+                            label = { Text("${mins}m") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Purple80.copy(alpha = .2f),
+                                selectedLabelColor = Purple80
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -630,7 +718,11 @@ fun FocusLauncherScreen() {
     // ── Confirm dialog ────────────────────────────────────────────────────────
     if (confirmEnter) {
         val appsForSession = availableApps.filter { it.processName.lowercase() in selectedApps }
-        val duration       = DURATION_PRESETS[durationIndex].second
+        val duration       = if (durationIndex == CUSTOM_DURATION_INDEX) {
+            customDurationMinutes
+        } else {
+            DURATION_PRESETS[durationIndex].second
+        }
 
         AlertDialog(
             onDismissRequest = { confirmEnter = false },
@@ -660,7 +752,11 @@ fun FocusLauncherScreen() {
                         val saved = appsForSession.joinToString(",") { it.processName.lowercase() }
                         scope.launch(Dispatchers.IO) {
                             Database.setSetting("launcher_selected_apps", saved)
-                            FocusLauncherService.enter(appsForSession, duration)
+                            val pin = FocusLauncherService.preparePin()
+                            withContext(Dispatchers.Main) {
+                                generatedPin = pin
+                                showPinBeforeEnter = true
+                            }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Purple80)
@@ -669,6 +765,108 @@ fun FocusLauncherScreen() {
             dismissButton = {
                 TextButton(onClick = { confirmEnter = false }) {
                     Text(strings.btnCancel, color = OnSurface2)
+                }
+            }
+        )
+    }
+
+    // ── One-time session PIN ──────────────────────────────────────────────────
+    if (showPinBeforeEnter) {
+        val appsForSession = availableApps.filter { it.processName.lowercase() in selectedApps }
+        val duration = if (durationIndex == CUSTOM_DURATION_INDEX) {
+            customDurationMinutes
+        } else {
+            DURATION_PRESETS[durationIndex].second
+        }
+        AlertDialog(
+            onDismissRequest = { },
+            containerColor = Surface2,
+            shape = RoundedCornerShape(20.dp),
+            icon = {
+                Icon(Icons.Default.Key, null, tint = Purple80, modifier = Modifier.size(32.dp))
+            },
+            title = {
+                Text("Your Session PIN", color = OnSurface, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "Write this down — you'll need it to take breaks and end the session.",
+                        color = OnSurface2, style = MaterialTheme.typography.bodySmall
+                    )
+                    Box(
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                            .background(Surface3).padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(generatedPin, color = Purple80, fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold)
+                    }
+                    Text("This PIN will not be shown again.", color = Warning,
+                        style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showPinBeforeEnter = false
+                        generatedPin = ""
+                        scope.launch(Dispatchers.IO) {
+                            FocusLauncherService.enter(
+                                apps = appsForSession,
+                                durationMinutes = duration,
+                                breaksAllowed = breaksAllowed,
+                                breakSeconds = breakDurationMins * 60
+                            )
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Purple80)
+                ) { Text("I've noted it — Start") }
+            }
+        )
+    }
+
+    if (showSavePreset) {
+        AlertDialog(
+            onDismissRequest = { showSavePreset = false },
+            containerColor = Surface2,
+            title = { Text("Save app set", color = OnSurface, fontWeight = FontWeight.Bold) },
+            text = {
+                OutlinedTextField(
+                    value = presetName,
+                    onValueChange = { presetName = it },
+                    singleLine = true,
+                    label = { Text("Preset name") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Purple80,
+                        unfocusedBorderColor = Surface3
+                    )
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val name = presetName.trim()
+                        if (name.isBlank()) return@Button
+                        val preset = FocusLauncherPreset(
+                            id = UUID.randomUUID().toString(),
+                            name = name,
+                            processNames = selectedApps.toList()
+                        )
+                        showSavePreset = false
+                        scope.launch(Dispatchers.IO) {
+                            Database.upsertFocusLauncherPreset(preset)
+                            val updated = Database.getFocusLauncherPresets()
+                            withContext(Dispatchers.Main) { launcherPresets = updated }
+                        }
+                    },
+                    enabled = presetName.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Purple80)
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSavePreset = false }) {
+                    Text("Cancel", color = OnSurface2)
                 }
             }
         )

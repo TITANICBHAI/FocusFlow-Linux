@@ -204,12 +204,13 @@ fun LinuxSetupScreen() {
                 icon = Icons.Default.VisibilityOff,
                 iconTint = Warning,
                 title = "xdotool",
-                needed = "Hide and restore desktop panels during Focus Launcher kiosk mode.",
+                needed = "Best-effort panel hide/show during Focus Launcher kiosk mode on X11. GNOME/KDE and native Wayland panels are compositor-controlled.",
                 howTo = """
                     sudo apt install xdotool
                     or: sudo dnf install xdotool
                     or: sudo pacman -S xdotool
-                    xdotool may not work on Wayland — fallback to wmctrl in that case.
+                    xdotool may not work on Wayland or GNOME/KDE — FocusFlow logs
+                    the limitation and still enforces through process blocking.
                 """.trimIndent(),
                 required = false,
                 installed = xdotoolOk,

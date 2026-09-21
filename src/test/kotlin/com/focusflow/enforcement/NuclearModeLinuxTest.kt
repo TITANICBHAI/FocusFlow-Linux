@@ -17,6 +17,9 @@ class NuclearModeLinuxTest {
         assertTrue("ptyxis" in names)
         assertTrue("foot" in names)
         assertTrue("rofi" in names)
+        assertTrue("kde-systemmonitor" in names)
+        assertTrue("gnome-usage" in names)
+        assertTrue("lxqt-taskmanager" in names)
     }
 
     @Test

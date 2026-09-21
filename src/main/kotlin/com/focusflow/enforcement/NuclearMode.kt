@@ -69,12 +69,13 @@ object NuclearMode {
         "nu", "nushell",
         // System monitors — can kill FocusFlow processes
         "gnome-system-monitor", "ksysguard", "kdesystemguard",
-        "plasma-systemmonitor", "mate-system-monitor",
+        "plasma-systemmonitor", "kde-systemmonitor", "mate-system-monitor",
+        "gnome-usage", "missioncenter", "resources", "stacer", "qps",
         "htop", "btop", "top", "glances",
         // Config editors — can undo FocusFlow settings
         "dconf-editor", "gconf-editor",
         // Task/process management
-        "procman", "lxtask", "xfce4-taskmanager",
+        "procman", "lxtask", "xfce4-taskmanager", "lxqt-taskmanager",
         // Run command dialogs — can launch anything
         "gnome-run", "krunner", "xfce4-appfinder", "rofi", "dmenu",
         // Package managers — could install bypass tools

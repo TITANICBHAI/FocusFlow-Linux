@@ -42,7 +42,9 @@ object WindowsStartupManager {
                     "[Desktop Entry]\n" +
                     "Type=Application\n" +
                     "Name=FocusFlow\n" +
-                    "Exec=${resolveExePath()}\n" +
+                    "Exec=${desktopExec(resolveExePath())}\n" +
+                    "StartupWMClass=focusflow\n" +
+                    "Terminal=false\n" +
                     "X-GNOME-Autostart-enabled=true\n"
                 )
             } catch (_: Exception) { /* skip silently if cannot write */ }
@@ -87,9 +89,19 @@ object WindowsStartupManager {
         // Linux: return the current process command or script path
         if (isLinux) {
             val cmd = ProcessHandle.current().info().command().orElse("")
-            if (cmd.isNotBlank() && File(cmd).exists()) return cmd
-            val script = File(System.getProperty("user.dir", ""), "focusflow")
-            if (script.exists()) return script.absolutePath
+            if (cmd.isNotBlank() && File(cmd).exists() &&
+                !File(cmd).name.equals("java", ignoreCase = true) &&
+                !File(cmd).name.startsWith("java", ignoreCase = true)
+            ) return cmd
+
+            val candidates = listOf(
+                File(System.getProperty("user.dir", ""), "focusflow"),
+                File("/usr/bin/focusflow"),
+                File("/usr/local/bin/focusflow"),
+                File("/opt/focusflow/bin/focusflow"),
+                File(System.getProperty("user.home", ""), "Applications/FocusFlow.AppImage")
+            )
+            candidates.firstOrNull { it.isFile && it.canExecute() }?.let { return it.absolutePath }
             return "java -jar /usr/share/focusflow/focusflow.jar"
         }
 
@@ -120,4 +132,11 @@ object WindowsStartupManager {
         // Fallback
         return "FocusFlow.exe"
     }
+
+    private fun desktopExec(command: String): String =
+        command.split(" ").joinToString(" ") { token ->
+            if (token.isEmpty() || token.startsWith("-") || token.contains("=")) token
+            else if (token.any { it.isWhitespace() }) "'${token.replace("'", "'\\''")}'"
+            else token
+        }
 }

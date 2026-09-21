@@ -1,0 +1,42 @@
+Before editing
+Read replit.md.
+
+Read focusflow-linux-handoff.md.
+
+Read focusflow-linux-plan.md and focusflow-linux-tracker.md.
+
+Read the relevant section of focusflow-linux-tracker.html if the task is part of the Linux migration.
+
+Read .agents/memory/MEMORY.md and any linked topic relevant to the code.
+
+Run this lightweight safety check:
+
+git status --short
+
+Do not run git log or a full diff routinely. Use them only when the handoff is unclear, unexpected files appear, or the task is destructive.
+
+Search the current code and call sites for the task before trusting an older prompt. Documentation can be stale; the current implementation wins.
+
+Choose one narrow task. State its task ID and acceptance checks in the handoff before making changes.
+
+Non-negotiable rules
+Preserve the Windows implementation. Add Linux branches beside it; do not replace or delete working Windows paths.
+Do not duplicate an existing workflow, helper, model field, or dependency without checking the current code first.
+Keep database, filesystem, process, image, and package I/O off the UI thread.
+Keep platform-specific code behind platform guards.
+Do not claim a Linux or Wayland capability that was not tested or clearly documented as a limitation.
+Do not make unrelated refactors.
+Do not use a successful compile as the only proof that a task is complete.
+After editing
+Run a targeted compile/test first.
+Run the relevant Gradle test, package task, or manual environment check.
+Tick the matching checkbox in focusflow-linux-tracker.md only when its acceptance checks pass.
+If the implementation state changed, update the matching default status or prompt in focusflow-linux-tracker.html; do not rely on browser-only state.
+Update focusflow-linux-handoff.md with:
+the task ID and status;
+files changed;
+commands/checks run and their results;
+any environment limitation;
+the next uncompleted task.
+End with a concise handoff so the next agent can continue without repeating the investigation.
+If you cannot complete the task, leave it unchecked, record the exact blocker, and identify the smallest next action. Never silently skip it.

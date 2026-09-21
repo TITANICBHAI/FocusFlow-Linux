@@ -15,6 +15,7 @@ import com.focusflow.enforcement.WatchdogInstaller
 import com.focusflow.services.*
 import com.focusflow.services.FocusLauncherService
 import com.focusflow.IS_LINUX
+import com.focusflow.ui.launcher.LauncherWindowHost
 
 fun main() = application {
     // ── Crash reporter — MUST be first, before any other service ──────────────
@@ -109,19 +110,18 @@ fun main() = application {
     LaunchedEffect(isKioskMode, launcherBreak) {
         when {
             isKioskMode -> {
-                // Full kiosk: go fullscreen and keep the window visible/on-top.
-                windowVisible = true
-                windowState.placement = WindowPlacement.Fullscreen
+                // The launcher owns one fullscreen window per monitor. Hide the
+                // dashboard window so it cannot sit underneath or receive input.
+                windowVisible = false
             }
             launcherBreak -> {
-                // Break is active while a session is still running.
-                // Taskbar has been restored by FocusLauncherService.startBreak() but
-                // the window is still fullscreen from kiosk mode — restore it to a
-                // normal floating window so the user can actually reach their desktop.
-                windowState.placement = WindowPlacement.Floating
+                // Breaks are rendered by the launcher window but it is no longer
+                // topmost, so keep the dashboard hidden as well.
+                windowVisible = false
             }
             !launcherActive -> {
                 // Session fully ended: return window to floating.
+                windowVisible = true
                 windowState.placement = WindowPlacement.Floating
             }
         }
@@ -274,4 +274,8 @@ fun main() = application {
             App()
         }
     }
+
+    // Dedicated fullscreen launcher windows are separate from the dashboard so
+    // multiple monitors are covered without replacing the existing app window.
+    LauncherWindowHost()
 }

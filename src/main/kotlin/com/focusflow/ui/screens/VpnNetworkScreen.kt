@@ -28,6 +28,8 @@ import com.focusflow.i18n.LocalizationManager
 import com.focusflow.enforcement.NetworkBlocker
 import com.focusflow.enforcement.ProcessMonitor
 import com.focusflow.enforcement.VpnBlocker
+import com.focusflow.enforcement.isLinux
+import com.focusflow.enforcement.isWindows
 import com.focusflow.services.GlobalPin
 import com.focusflow.services.HostsBlocker
 import com.focusflow.ui.components.PinGateDialog
@@ -82,7 +84,11 @@ fun VpnNetworkScreen() {
     fun showAdminError(context: String) {
         scope.launch {
             snackbarHostState.showSnackbar(
-                message = "$context requires administrator privileges. Re-launch FocusFlow as Administrator.",
+                message = if (isLinux) {
+                    "$context needs PolicyKit authorization. Make sure pkexec is installed and try again."
+                } else {
+                    "$context requires administrator privileges. Re-launch FocusFlow as Administrator."
+                },
                 duration = SnackbarDuration.Long
             )
         }
@@ -374,9 +380,15 @@ fun VpnNetworkScreen() {
                         )
                         Text(
                             if (newMode == NetworkRuleMode.DOMAIN)
-                                "Blocks the domain via the Windows hosts file (requires admin). If app-specific is enabled, also adds a firewall rule for that app only."
+                                if (isLinux)
+                                    "Blocks the domain via /etc/hosts (requires pkexec). App-specific rules also use iptables when available."
+                                else
+                                    "Blocks the domain via the Windows hosts file (requires admin). If app-specific is enabled, also adds a firewall rule for that app only."
                             else
-                                "When the foreground window title contains this keyword, FocusFlow cuts network for the matching app via Windows Firewall — without killing the process.",
+                                if (isLinux)
+                                    "When the foreground window title contains this keyword, FocusFlow cuts network access with iptables — without killing the process."
+                                else
+                                    "When the foreground window title contains this keyword, FocusFlow cuts network for the matching app via Windows Firewall — without killing the process.",
                             color = OnSurface2,
                             style = MaterialTheme.typography.bodySmall,
                             fontSize = 11.sp
@@ -561,7 +573,10 @@ fun VpnNetworkScreen() {
             ) {
                 Icon(Icons.Default.Info, null, tint = Purple80, modifier = Modifier.size(18.dp))
                 Text(
-                    "Both VPN Shield and Network Cutoff Rules require FocusFlow to run with administrator privileges. Domain blocks modify the Windows hosts file; keyword cutoffs and VPN blocks use Windows Firewall rules.",
+                    if (isLinux)
+                        "VPN Shield and Network Cutoff Rules use /etc/hosts and iptables. FocusFlow requests elevated access through pkexec; no Windows administrator rights are required."
+                    else
+                        "Both VPN Shield and Network Cutoff Rules require FocusFlow to run with administrator privileges. Domain blocks modify the Windows hosts file; keyword cutoffs and VPN blocks use Windows Firewall rules.",
                     color = OnSurface2,
                     style = MaterialTheme.typography.bodySmall
                 )

@@ -24,12 +24,20 @@ import com.sun.jna.win32.W32APIOptions
 interface User32Extra : StdCallLibrary {
     companion object {
         val INSTANCE: User32Extra = Native.load("user32", User32Extra::class.java, W32APIOptions.DEFAULT_OPTIONS)
+        val HWND_TOPMOST   = HWND(Pointer(-1))
+        val HWND_NOTOPMOST = HWND(Pointer(-2))
+        const val SWP_NOSIZE     = 0x0001
+        const val SWP_NOMOVE     = 0x0002
+        const val SWP_NOACTIVATE = 0x0010
+        const val SWP_SHOWWINDOW = 0x0040
     }
 
     fun GetForegroundWindow(): HWND
     fun GetWindowThreadProcessId(hWnd: HWND, lpdwProcessId: IntArray): Int
     fun GetWindowTextW(hWnd: HWND, lpString: CharArray, nMaxCount: Int): Int
     fun GetWindowTextLengthW(hWnd: HWND): Int
+    fun IsWindowVisible(hWnd: HWND): Boolean
+    fun IsIconic(hWnd: HWND): Boolean
 
     /** Find a top-level window by class name or window title. Returns null if not found. */
     fun FindWindowW(lpClassName: String?, lpWindowName: String?): HWND?
@@ -46,6 +54,13 @@ interface User32Extra : StdCallLibrary {
 
     /** Show, hide, or change the state of a window. SW_HIDE=0, SW_SHOW=5. */
     fun ShowWindow(hWnd: HWND, nCmdShow: Int): Boolean
+    fun SetForegroundWindow(hWnd: HWND): Boolean
+    fun SetWindowPos(
+        hWnd: HWND,
+        hWndInsertAfter: HWND?,
+        X: Int, Y: Int, cx: Int, cy: Int,
+        uFlags: Int
+    ): Boolean
 }
 
 interface Psapi : StdCallLibrary {
@@ -115,6 +130,31 @@ fun getForegroundProcessName(): String? {
             ?.lowercase()
     } catch (_: Exception) {
         null
+    }
+}
+
+/**
+ * Restore and activate a visible top-level window belonging to [pid].
+ * Returns false for non-Windows platforms or helper processes with no
+ * focusable top-level window.
+ */
+fun focusWindowByPid(pid: Long): Boolean {
+    if (!isWindows || pid <= 0L) return false
+    return try {
+        val user32 = User32Extra.INSTANCE
+        var hwnd = user32.FindWindowExW(null, null, null, null)
+        while (hwnd != null) {
+            val pidArr = IntArray(1)
+            user32.GetWindowThreadProcessId(hwnd, pidArr)
+            if (pidArr[0].toLong() == pid && user32.IsWindowVisible(hwnd)) {
+                if (user32.IsIconic(hwnd)) user32.ShowWindow(hwnd, 9)
+                if (user32.SetForegroundWindow(hwnd)) return true
+            }
+            hwnd = user32.FindWindowExW(null, hwnd, null, null)
+        }
+        false
+    } catch (_: Exception) {
+        false
     }
 }
 

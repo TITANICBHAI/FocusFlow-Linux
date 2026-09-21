@@ -5,15 +5,16 @@ plan or tracker. Each agent must update it before finishing.
 
 ## Current state
 
-Last agent: FocusFlow Linux migration implementation
+Last agent: FocusFlow Linux parity sweep
 Date: 2026-09-21  
-Task IDs: P1.1, P1.2, P2.1, P2.2, P2.3, P3.1 completed
-Status: Phase 1 build blockers, Phase 2 core-blocking code, and the P3.1 Wayland assessment are complete.
-Changed: Added `src/main/resources/focusflow.png`; removed the unrelated root React/video files; added XDG icon lookup and Linux desktop metadata; normalized quoted, env, ordinary, and Flatpak `Exec=` values; added Flatpak/Snap desktop directories; guarded the Windows registry check and dialog; added explicit X11/Wayland keyboard-protection modes, Wayland limitation logging, and Linux UI copy.
-Verification: `bash ./gradlew compileKotlin test --no-daemon` passed; `InstalledAppsScannerLinuxTest` passed; `src/main/resources/focusflow.png` is a valid 256x256 PNG identical to `focusflow_256.png`; Gradle copied it unchanged to `build/resources/main`; `bash ./gradlew packageDeb --no-daemon` passed; the `.deb` contains `./opt/focusflow/lib/FocusFlow.png`; root Kotlin/Gradle references to the removed files are absent; `git diff --check` passed.
+Task IDs: P3.2, P3.3, P4.1, P4.2, P4.3, P5.1, P5.2, P5.3
+Status: Linux feature and UI parity sweep in progress. The acceptance target is to add safe Linux behavior beside Windows behavior, correct Linux-facing copy, and verify compile/tests/package paths without claiming untested compositor behavior.
+Acceptance checks: Linux escape-process coverage; best-effort X11 overlay raise; notify-send fallback; valid Linux autostart executable and StartupWMClass; desktop-aware launcher panel handling; Linux VPN/settings copy; crash cleanup guard review; targeted tests, package build, diff check, and fresh workflow startup.
+Changed: Previous completed migration work remains intact; this task has only recorded the scoped parity sweep before editing.
+Verification: Pending for this task.
 Blockers or environment limits: No real X11, Wayland, desktop-environment, Windows runtime, or live app-blocking test has been performed. Native Wayland global shortcut suppression remains intentionally unavailable; the product now reports that reduced guarantee.
-Next task: P3.2 — Linux escape processes.
-Notes for the next agent: Read `AGENT_START_HERE.md` first. `ScannedApp` retains `execCommand` and `desktopFilePath`; the icon loader accepts the existing path API plus an optional process name and performs Linux disk/image work from existing IO call sites. `GlobalKeyboardHook.linuxKeyboardMode()` distinguishes X11 global grab, native Wayland reduced protection, and unavailable/headless sessions. The Linux build and smoke-test workflows already exist, so extend them rather than creating duplicates.
+Next task: Complete the parity sweep, then update the tracker and handoff only with verified results.
+Notes for the next agent: Read `AGENT_START_HERE.md` first. Preserve the Windows branches. The Linux build and smoke-test workflows already exist, so extend them rather than creating duplicates.
 
 ## Update template
 

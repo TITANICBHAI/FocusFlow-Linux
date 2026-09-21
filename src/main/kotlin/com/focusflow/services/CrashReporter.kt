@@ -535,7 +535,9 @@ object CrashReporter {
     /**
      * Best-effort pre-crash cleanup.
      * Every call is individually guarded — one failure must not block the others.
-     * Goal: leave Windows in a usable state if the app dies mid-session.
+     * Goal: leave the host OS in a usable state if the app dies mid-session.
+     * Registry cleanup is internally Windows-guarded; the launcher emergency
+     * restore has a separate Linux-safe path for process state and panels.
      */
     private fun safetyCleanup() {
         // Order matters: restore taskbar/windows first, then disable enforcement.

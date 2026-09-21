@@ -164,13 +164,16 @@ fun SettingsScreen() {
             SectionCard(title = strings.settingsEnforcement) {
                 SettingRow(
                     label = strings.settingsProcessMonitor,
-                    subtitle = if (isWindows) "Active — 500ms polling + instant WinEventHook"
-                               else "Inactive — only enforced on Windows",
+                    subtitle = when {
+                        isWindows -> "Active — 500ms polling + instant WinEventHook"
+                        isLinux -> "Active — 500ms xdotool polling${if (hasXdotool) "" else " (xdotool not found)"}"
+                        else -> "Unavailable on this platform"
+                    },
                     trailing = {
                         Icon(
-                            if (isWindows) Icons.Default.CheckCircle else Icons.Default.Warning,
+                            if (isWindows || isLinux) Icons.Default.CheckCircle else Icons.Default.Warning,
                             null,
-                            tint = if (isWindows) Success else Warning
+                            tint = if (isWindows || isLinux) Success else Warning
                         )
                     }
                 )
@@ -179,14 +182,19 @@ fun SettingsScreen() {
 
                 SettingRow(
                     label    = strings.settingsInstantDetection,
-                    subtitle = if (hookActive)
-                                   "WinEventHook active — zero-delay foreground detection"
-                               else "WinEventHook inactive — polling fallback only",
+                    subtitle = when {
+                        isWindows && hookActive ->
+                            "WinEventHook active — zero-delay foreground detection"
+                        isLinux ->
+                            "Linux foreground polling — xdotool/wmctrl fallback"
+                        else ->
+                            "WinEventHook inactive — polling fallback only"
+                    },
                     trailing = {
                         Icon(
-                            if (hookActive) Icons.Default.FlashOn else Icons.Default.FlashOff,
+                            if (hookActive || isLinux) Icons.Default.FlashOn else Icons.Default.FlashOff,
                             null,
-                            tint = if (hookActive) Success else OnSurface2
+                            tint = if (hookActive || isLinux) Success else OnSurface2
                         )
                     }
                 )
@@ -1023,9 +1031,21 @@ fun SettingsScreen() {
                 Text("FocusFlow JVM v1.1.6", color = OnSurface)
                 Spacer(Modifier.height(4.dp))
                 Text("Kotlin 1.9.22 + Compose Multiplatform Desktop 1.6.1", style = MaterialTheme.typography.bodySmall, color = OnSurface2)
-                Text("Enforcement: JNA Win32 + WinEventHook + Nuclear Mode + Windows Firewall", style = MaterialTheme.typography.bodySmall, color = OnSurface2)
+                Text(
+                    when {
+                        isWindows -> "Enforcement: JNA Win32 + WinEventHook + Nuclear Mode + Windows Firewall"
+                        isLinux -> "Enforcement: ProcessHandle + xdotool polling + Nuclear Mode + iptables/hosts"
+                        else -> "Enforcement: platform features unavailable"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurface2
+                )
                 Text("Features: Pomodoro, Daily Notes, 7-Day Stats, Task Alarms, App Scanner", style = MaterialTheme.typography.bodySmall, color = OnSurface2)
-                Text("Database: SQLite at %USERPROFILE%\\.focusflow\\focusflow.db", style = MaterialTheme.typography.bodySmall, color = OnSurface2)
+                Text(
+                    "Database: SQLite at ${if (isLinux) "~/.focusflow/focusflow.db" else "%USERPROFILE%\\\\.focusflow\\\\focusflow.db"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurface2
+                )
             }
         }
 

@@ -1,6 +1,11 @@
 package com.focusflow.services
 
 import com.focusflow.enforcement.isLinux
+import com.focusflow.enforcement.LinuxToolsChecker
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.awt.*
 import java.awt.geom.Arc2D
 import java.awt.geom.Line2D
@@ -8,6 +13,7 @@ import java.awt.geom.RoundRectangle2D
 import java.awt.image.BufferedImage
 
 object SystemTrayManager {
+    private val notificationScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     // @Volatile: both fields are initialised on the AWT EDT (inside EventQueue.invokeLater)
     // but are read from IO and Main threads (showNotification, updateTooltip,
@@ -101,7 +107,27 @@ object SystemTrayManager {
         message: String,
         type: TrayIcon.MessageType = TrayIcon.MessageType.INFO
     ) {
-        trayIcon?.displayMessage(title, message, type)
+        val icon = trayIcon
+        if (icon != null) {
+            icon.displayMessage(title, message, type)
+        } else if (isLinux) {
+            // Native Wayland commonly has no AWT/XEmbed tray. Keep the same
+            // notification API and use the desktop's libnotify bridge instead.
+            notificationScope.launch {
+                if (!LinuxToolsChecker.isInstalled("notify-send")) return@launch
+                val urgency = when (type) {
+                    TrayIcon.MessageType.ERROR -> "critical"
+                    TrayIcon.MessageType.WARNING -> "normal"
+                    else -> "low"
+                }
+                runCatching {
+                    ProcessBuilder(
+                        "notify-send", "--app-name=FocusFlow",
+                        "--urgency=$urgency", title, message
+                    ).redirectErrorStream(true).start()
+                }
+            }
+        }
     }
 
     fun updateTooltip(text: String) {

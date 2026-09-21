@@ -157,6 +157,13 @@ object ProcessMonitor {
     @Volatile var launcherAllowedProcesses: Set<String> = emptySet()
 
     /**
+     * Called for every launcher foreground transition so the dedicated launcher
+     * windows can lower themselves for allowed apps and reclaim topmost order
+     * for everything else.
+     */
+    @Volatile var onLauncherForegroundChanged: ((processName: String) -> Unit)? = null
+
+    /**
      * For Linux: /proc/cmdline parsing may reveal the executable base name.
      * This utility strips path prefixes (like "/usr/bin/" or "./") to get the
      * bare process name for matching.
@@ -417,6 +424,13 @@ object ProcessMonitor {
     fun onForegroundChanged(processName: String, pid: Long = 0L) {
         if (!isAnyEnforcementActive()) return
         val lower = processName.lowercase()
+
+        // Launcher visibility must observe allowed apps too, before the normal
+        // enforcement cooldown can discard a repeated foreground event.
+        if (launcherAllowedProcesses.isNotEmpty()) {
+            onLauncherForegroundChanged?.invoke(processName)
+        }
+
         val now   = System.currentTimeMillis()
         // Fast pre-check: discard obvious repeat events before spending coroutine
         // overhead. This prevents a rapid window-switching storm from queuing

@@ -37,7 +37,14 @@ Work through the tracker in order:
 5. **Phase 5 — Polish and distribution:** fix Linux-facing UI text, verify Linux-safe crash cleanup, and run Linux tests/package builds in CI.
 6. **After ship:** consider AppImage updates, native Wayland kiosk integration and Snap packaging.
 
-Do not mark Linux migration complete until the manual X11, Wayland, desktop-environment, packaging, and Windows regression checks in the trackers have been run.
+Do not mark Linux migration complete until the manual X11, native Wayland,
+XWayland, desktop-environment, packaging, privilege, recovery, and Windows
+regression checks in `focusflow-linux-tracker.md` have been run. The 2026-09-21
+readiness audit found that the remaining release blockers are the real Linux
+`/etc/hosts` privilege path, truthful asynchronous iptables status, strict CI
+artifact validation, installer/AUR provenance and checksums, and device/VM
+verification across session types. See `focusflow-linux-plan.md` for the
+acceptance gates; do not treat a successful compile as Linux release proof.
 
 # FocusFlow JVM — by TBTechs
 

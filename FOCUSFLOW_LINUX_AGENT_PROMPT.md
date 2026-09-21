@@ -202,7 +202,33 @@ Use the task IDs in all tracker and handoff updates.
 - **P5.4 — CI**
   Extend the existing Linux workflows only where coverage is missing. Do not
   create a duplicate workflow. Keep the current package workflow and smoke-test
-  workflow responsibilities clear.
+  workflow responsibilities clear. The current workflows are not a complete
+  release gate: the test workflow does not prove privileged enforcement or
+  package output, and the package workflow tolerates some missing-artifact and
+  repackaging failures. Required artifacts and metadata must fail closed.
+
+### Phase 6 — Release-readiness hardening
+
+- **P6.1 — Hosts-file privilege path**
+  The Linux hosts path currently checks whether `/etc/hosts` is writable but
+  does not implement the documented `pkexec` write path. Add a constrained,
+  auditable privilege mechanism, preserve atomic writes, and test cancellation,
+  cleanup, and resolver behavior.
+- **P6.2 — Firewall truthfulness**
+  Linux `NetworkBlocker.addRule()` currently registers intent before its
+  asynchronous iptables operation is known to succeed. Expose pending/failure
+  state, verify tagged rules, bound subprocesses, and retry or clean up safely.
+- **P6.3 — UI-thread I/O**
+  Add `iptables` to the shared async Linux tool probe and remove the synchronous
+  iptables check from `LinuxSetupScreen`.
+- **P6.4 — Runtime and packaging gates**
+  Validate X11, native Wayland, XWayland, GNOME, KDE/Plasma, and a lightweight
+  desktop separately. Validate strict Deb/Rpm/AppImage outputs, installer/AUR
+  checksums, desktop entries, upgrades, uninstalls, and recovery behavior.
+- **P6.5 — Security and recovery**
+  Add shell-argument safety tests, subprocess timeouts, privileged integration
+  coverage, force-kill cleanup checks, and no-consent telemetry/package-content
+  checks.
 
 ## Engineering rules
 
@@ -266,6 +292,12 @@ Before Linux migration completion, the manual checklist must cover:
 - autostart enable/disable and cleanup;
 - Linux VPN/network and Settings copy;
 - crash cleanup;
+- hosts-file and iptables success/failure with and without `pkexec`;
+- systemd-resolved/nscd/no-cache DNS variants;
+- autostart/watchdog install, relaunch, duplicate prevention, and uninstall;
+- multi-monitor, scaling, lock/unlock, suspend/resume, and display hot-plug;
+- clean-package install, upgrade, launch, and removal on supported distros;
+- missing optional tools and cancelled authentication;
 - Windows build and Windows enforcement regression checks.
 
 ## Handoff format

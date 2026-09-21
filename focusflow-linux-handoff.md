@@ -5,16 +5,16 @@ plan or tracker. Each agent must update it before finishing.
 
 ## Current state
 
-Last agent: FocusFlow Linux parity sweep
+Last agent: FocusFlow Linux readiness audit
 Date: 2026-09-21  
-Task IDs: P3.2, P3.3, P4.1, P4.2, P4.3, P5.1, P5.2, P5.3
-Status: Linux feature and UI parity sweep in progress. The acceptance target is to add safe Linux behavior beside Windows behavior, correct Linux-facing copy, and verify compile/tests/package paths without claiming untested compositor behavior.
-Acceptance checks: Linux escape-process coverage; best-effort X11 overlay raise; notify-send fallback; valid Linux autostart executable and StartupWMClass; desktop-aware launcher panel handling; Linux VPN/settings copy; crash cleanup guard review; targeted tests, package build, diff check, and fresh workflow startup.
-Changed: Previous completed migration work remains intact; this task has only recorded the scoped parity sweep before editing.
-Verification: Pending for this task.
-Blockers or environment limits: No real X11, Wayland, desktop-environment, Windows runtime, or live app-blocking test has been performed. Native Wayland global shortcut suppression remains intentionally unavailable; the product now reports that reduced guarantee.
-Next task: Complete the parity sweep, then update the tracker and handoff only with verified results.
-Notes for the next agent: Read `AGENT_START_HERE.md` first. Preserve the Windows branches. The Linux build and smoke-test workflows already exist, so extend them rather than creating duplicates.
+Task IDs: Linux readiness audit
+Status: Audit complete; release readiness is not complete. The Windows-focused archive comparison remains complete, and the current Linux implementation remains authoritative where the archive has no Linux equivalent.
+Acceptance checks: Pre-work instructions, plan, tracker, handoff, workflows, installer metadata, Linux source paths, and Linux tests were audited. Remaining gaps were added to Phase 6 and the manual device/VM matrix.
+Changed: Updated `focusflow-linux-plan.md`, `focusflow-linux-tracker.md`, `AGENT_START_HERE.md`, `FOCUSFLOW_LINUX_AGENT_PROMPT.md`, and `replit.md` with the audited release gates. No Kotlin or workflow source was changed in this audit.
+Verification: Existing `gradle :compileKotlin :test --no-daemon` passed on GraalVM 19 / Gradle 8.14.2 before this documentation-only audit. Final `git diff --check` passed after all documentation updates. The audit itself used source/workflow inspection; no privileged or display-session behavior was claimed as verified.
+Blockers or environment limits: The current Linux hosts path has no actual pkexec write mechanism; Linux iptables reports intent before asynchronous success is known; the Linux Setup iptables probe is synchronous; package/installer gates are not strict; and real X11, native Wayland, XWayland, desktop-environment, privileged firewall, resolver, package lifecycle, and Windows runtime tests remain unavailable here.
+Next task: Choose one open P6 item from `focusflow-linux-tracker.md`, preferably P6.1 (hosts-file privilege path) or P6.2 (truthful firewall status), then run its targeted tests. Do not check manual device items until they are run on the specified distro/session.
+Notes for the next agent: Read `AGENT_START_HERE.md` first. Preserve Windows branches. Keep native Wayland documented as reduced protection. Do not import embedded webhooks or the archive's unused Windows uninstall path, and do not treat compile/test success as Linux release proof.
 
 ## Update template
 

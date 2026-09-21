@@ -17,3 +17,4 @@ override_dh_auto_install:
 
 override_dh_auto_clean:
 	bash gradlew clean --no-daemon -Pfocusflow.java.version=17 || true
+	rm -rf .gradle

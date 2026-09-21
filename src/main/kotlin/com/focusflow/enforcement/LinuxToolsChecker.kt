@@ -16,14 +16,8 @@ object LinuxToolsChecker {
     )
 
     /** Check whether a command-line tool is on PATH. */
-    fun isInstalled(tool: String): Boolean = try {
-        ProcessBuilder("which", tool)
-            .redirectErrorStream(true)
-            .start()
-            .waitFor() == 0
-    } catch (_: Exception) {
-        false
-    }
+    fun isInstalled(tool: String): Boolean =
+        BoundedProcess.run(listOf("which", tool), 2_000).succeeded
 
     /** Probe all tools FocusFlow uses on Linux and return their statuses. */
     fun checkAll(): List<ToolStatus> = listOf(

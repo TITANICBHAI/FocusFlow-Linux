@@ -2,9 +2,12 @@ package com.focusflow.services
 
 import com.focusflow.enforcement.isWindows
 import com.focusflow.enforcement.isLinux
+import com.focusflow.enforcement.EnforcementLog
 import kotlinx.coroutines.*
+import java.io.File
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.TimeUnit
 
 /**
  * HostsBlocker — three-layer hosts-file website blocking
@@ -29,6 +32,10 @@ object HostsBlocker {
     private val HOSTS_PATH: String
         get() = if (isLinux) "/etc/hosts" else "C:\\Windows\\System32\\drivers\\etc\\hosts"
     private const val MARKER     = "# FocusFlow"
+    private const val PRIVILEGED_HELPER_CLASS = "com.focusflow.services.HostsPrivilegedHelper"
+    private val SAFE_DOMAIN = Regex(
+        "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$"
+    )
 
     /** Subdomains written for every blocked root domain. */
     private val SUBDOMAINS = listOf("", "www.", "m.", "mobile.", "app.")
@@ -67,12 +74,21 @@ object HostsBlocker {
      */
     fun blockDomain(domain: String): BlockResult {
         if (!isWindows && !isLinux) return BlockResult.NotWindows
-        if (!canWriteHostsFile()) return BlockResult.NoAdmin
+        val root = normalizeDomain(domain) ?: return BlockResult.Error("Invalid domain")
 
-        val root = domain.lowercase().removePrefix("www.").trim()
+        // Linux normally runs unprivileged. The helper accepts only the
+        // allowlisted operation and domain, and performs the read/modify/write
+        // itself as root so user-controlled content never reaches a shell.
+        if (isLinux && !canWriteHostsFile()) {
+            if (!runLinuxPrivileged("block", root)) return BlockResult.NoAdmin
+            flushDnsCache()
+            monitoredDomains = monitoredDomains + root
+            return if (verifyBlock(root)) BlockResult.Success else BlockResult.VerificationFail
+        }
+
         return try {
             synchronized(writeLock) {
-                val hostsFile = java.io.File(HOSTS_PATH)
+                val hostsFile = File(HOSTS_PATH)
                 val existing  = normalizeContent(hostsFile.readText())
                 val sb        = StringBuilder(existing)
                 if (!existing.endsWith("\n")) sb.append("\n")
@@ -96,16 +112,33 @@ object HostsBlocker {
             // Layer 2: verify (outside the lock — nslookup is slow and blocks nothing)
             if (verifyBlock(root)) BlockResult.Success else BlockResult.VerificationFail
         } catch (e: Exception) {
-            BlockResult.Error(e.message ?: "Unknown error")
+            // A writable check can race with permissions changing. Retry through
+            // the constrained helper rather than reporting a silent partial path.
+            if (isLinux && runLinuxPrivileged("block", root)) {
+                flushDnsCache()
+                monitoredDomains = monitoredDomains + root
+                if (verifyBlock(root)) BlockResult.Success else BlockResult.VerificationFail
+            } else {
+                BlockResult.Error(e.message ?: "Unknown error")
+            }
         }
     }
 
     fun unblockDomain(domain: String): Boolean {
         if (!isWindows && !isLinux) return false
-        val root = domain.lowercase().removePrefix("www.").trim()
+        val root = normalizeDomain(domain) ?: return false
+        if (isLinux && !canWriteHostsFile()) {
+            val removed = runLinuxPrivileged("unblock", root)
+            if (removed) {
+                flushDnsCache()
+                monitoredDomains = monitoredDomains - root
+            }
+            return removed
+        }
+
         return try {
             synchronized(writeLock) {
-                val hostsFile = java.io.File(HOSTS_PATH)
+                val hostsFile = File(HOSTS_PATH)
                 val lines     = normalizeContent(hostsFile.readText()).lines()
                 val exactEntries = SUBDOMAINS.map { prefix ->
                     "127.0.0.1  $prefix$root  $MARKER"
@@ -116,14 +149,32 @@ object HostsBlocker {
                 monitoredDomains = monitoredDomains - root
             }
             true
-        } catch (_: Exception) { false }
+        } catch (_: Exception) {
+            if (isLinux) {
+                val removed = runLinuxPrivileged("unblock", root)
+                if (removed) {
+                    flushDnsCache()
+                    monitoredDomains = monitoredDomains - root
+                }
+                removed
+            } else false
+        }
     }
 
     fun unblockAll(): Boolean {
         if (!isWindows && !isLinux) return false
+        if (isLinux && !canWriteHostsFile()) {
+            val removed = runLinuxPrivileged("unblock-all")
+            if (removed) {
+                flushDnsCache()
+                monitoredDomains = emptySet()
+            }
+            return removed
+        }
+
         return try {
             synchronized(writeLock) {
-                val hostsFile = java.io.File(HOSTS_PATH)
+                val hostsFile = File(HOSTS_PATH)
                 val lines     = normalizeContent(hostsFile.readText()).lines()
                 val filtered  = lines.filter { !it.contains(MARKER) }
                 atomicWriteHosts(hostsFile, filtered.joinToString("\n") + "\n")
@@ -131,13 +182,22 @@ object HostsBlocker {
                 monitoredDomains = emptySet()
             }
             true
-        } catch (_: Exception) { false }
+        } catch (_: Exception) {
+            if (isLinux) {
+                val removed = runLinuxPrivileged("unblock-all")
+                if (removed) {
+                    flushDnsCache()
+                    monitoredDomains = emptySet()
+                }
+                removed
+            } else false
+        }
     }
 
     fun getBlockedDomains(): List<String> {
         if (!isWindows && !isLinux) return emptyList()
         return try {
-            normalizeContent(java.io.File(HOSTS_PATH).readText())
+            normalizeContent(File(HOSTS_PATH).readText())
                 .lines()
                 .filter { it.contains(MARKER) }
                 .mapNotNull { line ->
@@ -163,11 +223,15 @@ object HostsBlocker {
     fun verifyBlock(domain: String): Boolean {
         if (!isWindows && !isLinux) return false
         return try {
-            val proc = ProcessBuilder("nslookup", domain, "127.0.0.1")
+            val safeDomain = normalizeDomain(domain) ?: return false
+            val proc = ProcessBuilder("nslookup", safeDomain, "127.0.0.1")
                 .redirectErrorStream(true)
                 .start()
             val output = proc.inputStream.bufferedReader().readText()
-            proc.waitFor()
+            if (!proc.waitFor(10, TimeUnit.SECONDS)) {
+                proc.destroyForcibly()
+                return false
+            }
             // nslookup output contains "Address:  127.0.0.1" when the hosts entry is active
             output.contains("127.0.0.1")
         } catch (_: Exception) { false }
@@ -180,8 +244,8 @@ object HostsBlocker {
     fun integrityScore(domain: String): Float {
         if (!isWindows && !isLinux) return 0f
         return try {
-            val root    = domain.lowercase().removePrefix("www.").trim()
-            val content = normalizeContent(java.io.File(HOSTS_PATH).readText())
+            val root    = normalizeDomain(domain) ?: return 0f
+            val content = normalizeContent(File(HOSTS_PATH).readText())
             val present = SUBDOMAINS.count { prefix ->
                 content.contains("127.0.0.1  $prefix$root  $MARKER")
             }
@@ -220,12 +284,11 @@ object HostsBlocker {
      * This silently corrects tampering by antivirus or other tools.
      */
     private fun reapplyMissingBlocks() {
-        if (!canWriteHostsFile()) return
         val domains = monitoredDomains
         if (domains.isEmpty()) return
 
         try {
-            val content = normalizeContent(java.io.File(HOSTS_PATH).readText())
+            val content = normalizeContent(File(HOSTS_PATH).readText())
             val needsRepair = domains.any { root ->
                 SUBDOMAINS.any { prefix -> !content.contains("127.0.0.1  $prefix$root  $MARKER") }
             }
@@ -243,8 +306,8 @@ object HostsBlocker {
      * single move — so a crash mid-write can never leave a partial/empty hosts
      * file. REPLACE_EXISTING ensures the move succeeds even when the target exists.
      */
-    private fun atomicWriteHosts(hostsFile: java.io.File, content: String) {
-        val tmp = java.io.File(hostsFile.parent, "hosts.focusflow.tmp")
+    private fun atomicWriteHosts(hostsFile: File, content: String) {
+        val tmp = File(hostsFile.parent, "hosts.focusflow.tmp")
         tmp.writeText(content)
         Files.move(tmp.toPath(), hostsFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
     }
@@ -259,15 +322,24 @@ object HostsBlocker {
                 // systemd-resolved may be present; nscd is a common alternative
                 val proc = ProcessBuilder("resolvectl", "flush-caches")
                     .redirectErrorStream(true).start()
-                val exit = proc.waitFor()
+                val finished = proc.waitFor(10, TimeUnit.SECONDS)
+                if (!finished) {
+                    proc.destroyForcibly()
+                    return
+                }
+                val exit = proc.exitValue()
                 if (exit != 0) {
                     // fallback: restart nscd
-                    try { ProcessBuilder("pkexec", "systemctl", "restart", "nscd").start().waitFor() }
-                    catch (_: Exception) {}
+                    try {
+                        val fallback = ProcessBuilder("pkexec", "systemctl", "restart", "nscd")
+                            .redirectErrorStream(true).start()
+                        if (!fallback.waitFor(10, TimeUnit.SECONDS)) fallback.destroyForcibly()
+                    } catch (_: Exception) {}
                 }
             } else {
-                ProcessBuilder("ipconfig", "/flushdns")
-                    .redirectErrorStream(true).start().waitFor()
+                val proc = ProcessBuilder("ipconfig", "/flushdns")
+                    .redirectErrorStream(true).start()
+                if (!proc.waitFor(10, TimeUnit.SECONDS)) proc.destroyForcibly()
             }
         } catch (_: Exception) {}
     }
@@ -276,6 +348,72 @@ object HostsBlocker {
 
     fun canWriteHostsFile(): Boolean {
         if (!isWindows && !isLinux) return false
-        return try { java.io.File(HOSTS_PATH).canWrite() } catch (_: Exception) { false }
+        return try { File(HOSTS_PATH).canWrite() } catch (_: Exception) { false }
+    }
+
+    internal fun isSafeDomain(domain: String): Boolean = normalizeDomain(domain) != null
+
+    private fun normalizeDomain(domain: String): String? {
+        val root = domain.trim().lowercase().removePrefix("www.")
+        return root.takeIf {
+            it.isNotEmpty() && it.length <= 253 && SAFE_DOMAIN.matches(it)
+        }
+    }
+
+    /**
+     * Invoke the constrained helper without a shell. The helper is passed only
+     * an allowlisted operation and a validated domain; it always targets
+     * /etc/hosts itself and never accepts a target path or arbitrary file body.
+     */
+    private fun runLinuxPrivileged(operation: String, domain: String? = null): Boolean {
+        if (!isLinux || operation !in setOf("block", "unblock", "unblock-all")) return false
+        if (operation != "unblock-all" && (domain == null || !isSafeDomain(domain))) return false
+
+        return try {
+            val javaBin = File(System.getProperty("java.home"), "bin/java")
+            // Use only the code source that contains the Java-only helper. Do
+            // not elevate the caller's complete development classpath.
+            val helperClasspath = File(
+                Class.forName(PRIVILEGED_HELPER_CLASS).protectionDomain.codeSource.location.toURI()
+            )
+            val pkexec = listOf("/usr/bin/pkexec", "/bin/pkexec", "/usr/local/bin/pkexec")
+                .map(::File)
+                .firstOrNull { it.isFile && it.canExecute() }
+            val classpath = helperClasspath.absolutePath
+            if (!javaBin.isFile || !helperClasspath.exists() || pkexec == null) {
+                EnforcementLog.warn("HostsBlocker", "Cannot locate the JVM/classpath for the privileged hosts helper")
+                return false
+            }
+
+            val args = mutableListOf(
+                pkexec.absolutePath,
+                javaBin.absolutePath,
+                "-cp",
+                classpath,
+                PRIVILEGED_HELPER_CLASS,
+                operation
+            )
+            if (domain != null) args += domain
+
+            val proc = ProcessBuilder(args).redirectErrorStream(true).start()
+            if (!proc.waitFor(15, TimeUnit.SECONDS)) {
+                proc.destroyForcibly()
+                EnforcementLog.warn("HostsBlocker", "Privileged hosts helper timed out for operation=$operation")
+                return false
+            }
+            val output = proc.inputStream.bufferedReader().readText().trim()
+            if (proc.exitValue() == 0) {
+                true
+            } else {
+                EnforcementLog.warn(
+                    "HostsBlocker",
+                    "Privileged hosts helper failed for operation=$operation exit=${proc.exitValue()}${if (output.isNotBlank()) ": $output" else ""}"
+                )
+                false
+            }
+        } catch (e: Exception) {
+            EnforcementLog.warn("HostsBlocker", "Unable to start privileged hosts helper for operation=$operation", e)
+            false
+        }
     }
 }

@@ -31,7 +31,7 @@ import kotlinx.coroutines.withContext
  * Shows the user which packages and permissions are needed for full
  * enforcement:
  *   - pkexec (for attempted privileged firewall operations)
- *   - writable /etc/hosts (the current Linux hosts path does not elevate its write)
+ *   - writable /etc/hosts or pkexec for the constrained hosts helper
  *   - iptables (for attempted firewall rules)
  *   - xdotool (for panel hide/show during Focus Launcher kiosk)
  *   - notify-send (libnotify-bin for desktop notifications)
@@ -168,7 +168,7 @@ fun LinuxSetupScreen() {
                 icon = Icons.Default.Shield,
                 iconTint = Error,
                 title = "pkexec (PolicyKit)",
-                needed = "Used when FocusFlow attempts privileged iptables operations. It does not currently elevate /etc/hosts writes.",
+                needed = "Used for privileged iptables operations and the constrained Linux /etc/hosts helper.",
                 howTo = """
                     On Ubuntu/Debian:
                     \tsudo apt install policykit-1
@@ -179,8 +179,8 @@ fun LinuxSetupScreen() {
                     Verify:
                     \tpkexec echo ok
                     If you see a password prompt and then 'ok', pkexec is available.
-                    Hosts-file blocking still requires /etc/hosts to be writable by
-                    the running user until the privileged write path is implemented.
+                    If /etc/hosts is not writable, FocusFlow uses its constrained
+                    PolicyKit helper for the supported block/unblock operations.
                 """.trimIndent(),
                 required = true,
                 installed = pkexecOk,
@@ -373,9 +373,9 @@ fun LinuxSetupScreen() {
                             color = OnSurface
                         )
                         Text(
-                            "Linux firewall attempts may request PolicyKit authorization. The current hosts-file path " +
-                                "only succeeds when /etc/hosts is writable, and firewall success still needs runtime " +
-                                "verification. No data leaves your machine.",
+                            "Linux firewall and hosts operations may request PolicyKit authorization. Hosts writes use a " +
+                                "constrained helper when direct access is unavailable, and firewall success still needs " +
+                                "runtime verification. No data leaves your machine.",
                             fontSize = 12.sp,
                             color = OnSurface2,
                             lineHeight = 17.sp

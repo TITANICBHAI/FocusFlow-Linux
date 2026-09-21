@@ -86,7 +86,7 @@ fun VpnNetworkScreen() {
             snackbarHostState.showSnackbar(
                 message = if (isLinux) {
                     if (context.contains("Hosts", ignoreCase = true))
-                        "$context could not run: the current Linux hosts path requires /etc/hosts to be writable and does not elevate through pkexec yet."
+                        "$context could not run: FocusFlow needs a writable /etc/hosts or a successful PolicyKit authorization."
                     else
                         "$context needs a privileged Linux operation. Make sure pkexec and iptables are installed; rule success still requires runtime verification."
                 } else {
@@ -388,7 +388,7 @@ fun VpnNetworkScreen() {
                         Text(
                             if (newMode == NetworkRuleMode.DOMAIN)
                                 if (isLinux)
-                                    "Attempts to block the domain via /etc/hosts. The current Linux path requires that file to be writable; pkexec does not yet elevate the hosts write. App-specific rules attempt iptables and must be verified at runtime."
+                                    "Attempts to block the domain via /etc/hosts. If the file is not writable, FocusFlow requests PolicyKit authorization through its constrained helper. App-specific rules attempt iptables and must be verified at runtime."
                                 else
                                     "Blocks the domain via the Windows hosts file (requires admin). If app-specific is enabled, also adds a firewall rule for that app only."
                             else
@@ -481,31 +481,41 @@ fun VpnNetworkScreen() {
                             scope.launch {
                                 var hostsOk = true
                                 var firewallOk = true
+                                var firewallPending = false
                                 withContext(Dispatchers.IO) {
                                     Database.upsertNetworkCutoffRule(rule)
                                     // Apply immediately for domain rules
                                     if (rule.mode == NetworkRuleMode.DOMAIN) {
-                                        if (!HostsBlocker.canWriteHostsFile()) {
-                                            hostsOk = false
-                                        } else {
-                                            val blockResult = HostsBlocker.blockDomain(pat)
-                                            when (blockResult) {
-                                                is HostsBlocker.BlockResult.Success ->
-                                                    HostsBlocker.startMonitor()
-                                                is HostsBlocker.BlockResult.VerificationFail,
-                                                is HostsBlocker.BlockResult.Error ->
-                                                    hostsOk = false
-                                                else -> {}
-                                            }
+                                        val blockResult = HostsBlocker.blockDomain(pat)
+                                        when (blockResult) {
+                                            is HostsBlocker.BlockResult.Success ->
+                                                HostsBlocker.startMonitor()
+                                            is HostsBlocker.BlockResult.VerificationFail,
+                                            is HostsBlocker.BlockResult.Error,
+                                            HostsBlocker.BlockResult.NoAdmin ->
+                                                hostsOk = false
+                                            else -> {}
                                         }
                                         if (targetProc != null) {
                                             val added = NetworkBlocker.addRule(targetProc)
-                                            if (!added) firewallOk = false
+                                            if (!added) {
+                                                when (NetworkBlocker.linuxRuleStatus(targetProc).state) {
+                                                    NetworkBlocker.LinuxRuleState.PENDING -> firewallPending = true
+                                                    NetworkBlocker.LinuxRuleState.FAILED -> firewallOk = false
+                                                    else -> Unit
+                                                }
+                                            }
                                         }
                                     }
                                 }
                                 if (!hostsOk) showAdminError("Hosts file domain blocking")
                                 if (!firewallOk) showAdminError("Firewall rule creation")
+                                if (firewallPending) {
+                                    snackbarHostState.showSnackbar(
+                                        "Firewall request queued; FocusFlow will mark it active only after iptables verification.",
+                                        duration = SnackbarDuration.Long
+                                    )
+                                }
                                 newPattern       = ""
                                 newTargetProcess = ""
                                 newTargetDisplay = ""
@@ -588,8 +598,8 @@ fun VpnNetworkScreen() {
                 Icon(Icons.Default.Info, null, tint = Purple80, modifier = Modifier.size(18.dp))
                 Text(
                     if (isLinux)
-                        "Linux uses /etc/hosts and iptables. The hosts path currently succeeds only when /etc/hosts is writable; " +
-                            "iptables operations may request pkexec but are not treated as verified until the rule is confirmed. " +
+                        "Linux uses /etc/hosts and iptables. Hosts writes use a constrained PolicyKit helper when direct " +
+                            "access is unavailable; iptables operations are not treated as verified until the rule is confirmed. " +
                             "Resolver caches and DNS-over-HTTPS can keep a site reachable after a hosts change."
                     else
                         "Both VPN Shield and Network Cutoff Rules require FocusFlow to run with administrator privileges. Domain blocks modify the Windows hosts file; keyword cutoffs and VPN blocks use Windows Firewall rules.",

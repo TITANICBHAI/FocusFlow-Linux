@@ -19,12 +19,16 @@ class NetworkBlockerLinuxTest {
     }
 
     @Test
-    fun `addRule on Linux returns true without crashing`() {
+    fun `addRule on Linux does not report unverified success`() {
         assumeTrue(isLinux, "Linux-only test")
-        // Linux path registers the rule in-memory and returns true so callers
-        // believe the block succeeded (HostsBlocker handles the actual blocking).
+        // Linux must not report success before an iptables rule is verified.
         val result = NetworkBlocker.addRule("test-process")
-        assertTrue(result, "addRule must return true on Linux (in-memory registration)")
+        assertFalse(result, "addRule must not report an unverified Linux rule as active")
+        assertNotEquals(
+            NetworkBlocker.LinuxRuleState.ACTIVE,
+            NetworkBlocker.linuxRuleStatus("test-process").state
+        )
+        NetworkBlocker.removeRule("test-process")
     }
 
     @Test
@@ -41,5 +45,12 @@ class NetworkBlockerLinuxTest {
         assertDoesNotThrow {
             NetworkBlocker.removeAllRules()
         }
+    }
+
+    @Test
+    fun `bounded process terminates a hung command`() {
+        val result = BoundedProcess.run(listOf("/bin/sh", "-c", "sleep 2"), 100)
+        assertTrue(result.timedOut)
+        assertFalse(result.succeeded)
     }
 }

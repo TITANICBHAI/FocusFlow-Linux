@@ -97,14 +97,12 @@ private fun getForegroundWindowTitleWindows(): String? {
 }
 
 private fun getLinuxWindowTitle(): String? {
-    if (!isX11 || !hasXdotool) return null
-    return try {
-        val proc = ProcessBuilder("xdotool", "getactivewindow", "getwindowname")
-            .redirectErrorStream(true).start()
-        val title = proc.inputStream.bufferedReader().readText().trim()
-        proc.waitFor()
-        title.takeIf { it.isNotBlank() }
-    } catch (_: Exception) { null }
+    if ((!isX11 && !isXWayland) || !hasXdotool) return null
+    val result = BoundedProcess.run(
+        listOf("xdotool", "getactivewindow", "getwindowname"),
+        1_500
+    )
+    return result.output.trim().takeIf { result.succeeded && it.isNotBlank() }
 }
 
 /**
@@ -272,19 +270,24 @@ val isWayland: Boolean get() = isLinux && (
     System.getenv("XDG_SESSION_TYPE")?.lowercase() == "wayland"
 )
 
+/** True when a Wayland session also exposes an X11 display through XWayland. */
+val isXWayland: Boolean get() = isLinux && isWayland && hasX11Display
+
+/** True when no X11/XWayland display is available for active-window queries. */
+val isNativeWayland: Boolean get() = isLinux && isWayland && !hasX11Display
+
+private val hasX11Display: Boolean get() = !System.getenv("DISPLAY").isNullOrBlank()
+
 /**
  * True if running on Linux under X11 (Xorg or XWayland).
  */
-val isX11: Boolean get() = isLinux && !isWayland && System.getenv("DISPLAY") != null
+val isX11: Boolean get() = isLinux && !isWayland && hasX11Display
 
 /**
  * True if xdotool is installed and callable. Evaluated once at startup.
  */
 val hasXdotool: Boolean by lazy {
-    try {
-        ProcessBuilder("xdotool", "version")
-            .redirectErrorStream(true).start().waitFor() == 0
-    } catch (_: Exception) { false }
+    BoundedProcess.run(listOf("xdotool", "version"), 2_000).succeeded
 }
 
 /**

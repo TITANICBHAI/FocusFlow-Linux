@@ -241,7 +241,7 @@ fun SettingsScreen() {
                     HorizontalDivider(color = Surface3, modifier = Modifier.padding(vertical = 8.dp))
                     SettingRow(
                         label = "Linux network enforcement",
-                        subtitle = "Partial — hosts blocking requires a writable /etc/hosts; iptables rules are attempted but not runtime-verified",
+                        subtitle = "Partial — hosts blocking uses a constrained PolicyKit helper when needed; iptables rules remain pending until runtime verification",
                         trailing = {
                             Icon(Icons.Default.Warning, null, tint = Warning)
                         }

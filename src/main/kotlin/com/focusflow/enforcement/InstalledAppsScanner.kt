@@ -2,9 +2,33 @@ package com.focusflow.enforcement
 
 import com.sun.jna.platform.win32.Advapi32Util
 import com.sun.jna.platform.win32.WinReg
+import java.util.LinkedHashMap
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
-data class ScannedApp(
+enum class AppSource {
+    NATIVE_DESKTOP,
+    FLATPAK,
+    SNAP,
+    WINDOWS_REGISTRY,
+    RUNNING_ONLY,
+    MANUAL
+}
+
+enum class AppDetectionConfidence {
+    UNKNOWN,
+    LOW,
+    MEDIUM,
+    HIGH
+}
+
+/**
+ * Shared application identity used by the installed-app catalog and all
+ * future pickers. [processName] remains the primary enforcement key for
+ * backwards compatibility, while the additional fields identify the
+ * installed application more reliably on Linux.
+ */
+data class AppDescriptor(
     val processName: String,
     val displayName: String,
     val isRunning: Boolean,
@@ -12,8 +36,41 @@ data class ScannedApp(
     /** Original desktop-file Exec= value, retained for diagnostics and launchers. */
     val execCommand: String? = null,
     /** Source .desktop file used to discover this Linux application. */
-    val desktopFilePath: String? = null
+    val desktopFilePath: String? = null,
+    /** Stable desktop-entry ID, normally the relative .desktop filename. */
+    val desktopId: String? = null,
+    /** Flatpak application ID, Snap name, or another package identifier. */
+    val packageId: String? = null,
+    /** Additional process/application aliases used during catalog matching. */
+    val processAliases: List<String> = emptyList(),
+    /** Parsed Icon= value from the desktop entry. */
+    val iconName: String? = null,
+    /** Parsed TryExec= value, if the desktop entry provided one. */
+    val tryExec: String? = null,
+    /** Parsed Categories= values, useful for future picker filtering. */
+    val categories: List<String> = emptyList(),
+    val source: AppSource = AppSource.MANUAL,
+    /** PIDs currently matched to this catalog entry. */
+    val runningPids: List<Long> = emptyList(),
+    val detectionConfidence: AppDetectionConfidence = AppDetectionConfidence.UNKNOWN
 )
+
+/** Compatibility name retained for current callers while the catalog adopts AppDescriptor. */
+typealias ScannedApp = AppDescriptor
+
+interface AppCatalogRepository {
+    fun read(): List<AppDescriptor>
+    fun refresh(): List<AppDescriptor>
+    fun resolve(reference: String): AppDescriptor?
+}
+
+/** Shared catalog entry point for future pickers; scanner APIs remain compatible. */
+object InstalledAppCatalog : AppCatalogRepository {
+    override fun read(): List<AppDescriptor> = InstalledAppsScanner.getAppCatalog()
+    override fun refresh(): List<AppDescriptor> = InstalledAppsScanner.refreshAppCatalog()
+    override fun resolve(reference: String): AppDescriptor? =
+        InstalledAppsScanner.resolveApp(reference)
+}
 
 object InstalledAppsScanner {
 
@@ -177,7 +234,11 @@ object InstalledAppsScanner {
                         displayName = display,
                         isRunning = true,
                         exePath = cmd,
-                        execCommand = commandLine.takeIf { it.isNotBlank() }
+                        execCommand = commandLine.takeIf { it.isNotBlank() },
+                        processAliases = processAliasesForRunningProcess(exe, commandLine),
+                        packageId = normalizeLinuxExec(commandLine)
+                            ?.packageId,
+                        source = AppSource.RUNNING_ONLY
                     )
                 }
                 .filter { app ->
@@ -213,6 +274,52 @@ object InstalledAppsScanner {
     }
 
     /**
+     * Returns the installed-app catalog with running state merged onto
+     * desktop-file entries. Running processes without a desktop entry are
+     * retained as RUNNING_ONLY records.
+     */
+    fun getAppCatalog(): List<AppDescriptor> {
+        val installed = getInstalledApps()
+        val running = getRunningApps()
+        return mergeInstalledAndRunning(installed, running)
+    }
+
+    /**
+     * Clears the process-lifetime installed-app cache and performs a fresh
+     * catalog read. Running processes are always sampled again by
+     * [getAppCatalog], so this is primarily for newly installed desktop files.
+     */
+    fun refreshAppCatalog(): List<AppDescriptor> {
+        synchronized(installLock) {
+            installedCache.clear()
+            installedScanned = false
+            exePathCache.clear()
+            desktopFileCache.clear()
+            execCommandCache.clear()
+        }
+        return getAppCatalog()
+    }
+
+    /**
+     * Resolves a saved app reference by stable ID, package ID, process alias,
+     * process name, or display name. The comparison is intentionally
+     * case-insensitive because Linux process matching is normalized this way.
+     */
+    fun resolveApp(reference: String): AppDescriptor? {
+        val key = reference.trim().lowercase(Locale.ROOT)
+        if (key.isBlank()) return null
+        return getAppCatalog().firstOrNull { app ->
+            sequenceOf(
+                app.desktopId,
+                app.packageId,
+                app.processName,
+                app.displayName
+            ).filterNotNull().any { it.equals(key, ignoreCase = true) } ||
+                app.processAliases.any { it.equals(key, ignoreCase = true) }
+        }
+    }
+
+    /**
      * Returns apps that are verifiably on this machine — registry-installed apps
      * (with a real, existing .exe) plus any currently-running user processes not
      * already in the registry results.  The old hardcoded fallback list is NOT
@@ -220,11 +327,7 @@ object InstalledAppsScanner {
      * are rarely installed on a given PC and confused users.
      */
     fun getCuratedApps(): List<ScannedApp> {
-        val installed   = getInstalledApps()
-        val installedEx = installed.map { it.processName }.toSet()
-        val running     = getRunningApps()
-            .filter { it.processName !in installedEx }
-        return (installed + running).sortedBy { it.displayName }
+        return getAppCatalog()
     }
 
     /** Look up the exe path for a process name using the cache built by any prior scan. */
@@ -315,7 +418,8 @@ object InstalledAppsScanner {
                         processName = processName,
                         displayName = friendlyDisplay,
                         isRunning   = false,
-                        exePath     = rawPath
+                        exePath     = rawPath,
+                        source      = AppSource.WINDOWS_REGISTRY
                     )
                     result[processName] = app
                     exePathCache.putIfAbsent(processName, rawPath)
@@ -333,93 +437,331 @@ object InstalledAppsScanner {
 
     // ── Linux desktop-file scan ─────────────────────────────────────────────
 
-    /**
-     * Scans .desktop files from /usr/share/applications and ~/.local/share/applications
-     * for installed applications, parsing Name= and Exec= fields.
-     * Note: DE-specific; may not find all Flatpak/Snap apps.
-     */
-    private fun scanLinuxDesktopFiles(): List<ScannedApp> {
-        val result = mutableMapOf<String, ScannedApp>()
-        val home = System.getProperty("user.home")
-        val dirs = listOf(
-            java.io.File("/usr/share/applications"),
-            java.io.File("$home/.local/share/applications"),
-            java.io.File("$home/.local/share/flatpak/exports/share/applications"),
-            java.io.File("/var/lib/flatpak/exports/share/applications"),
-            java.io.File("/var/lib/snapd/desktop/applications")
-        ).filter { it.isDirectory }
-        for (dir in dirs) {
-            val files = try {
-                dir.listFiles()
-                    ?.filter { it.isFile && it.extension.equals("desktop", ignoreCase = true) }
-                    ?.sortedBy { it.name }
-            } catch (_: Exception) { null } ?: continue
-            for (f in files) {
-                try {
-                    val entry = parseLinuxDesktopFile(f) ?: continue
-                    val normalized = normalizeLinuxExec(entry.exec) ?: continue
-                    val procName = normalized.processName
-                    if (procName in systemIgnore) continue
-                    if (procName in result) continue
-
-                    val display = curated[procName] ?: entry.name
-                    val app = ScannedApp(
-                        processName    = procName,
-                        displayName    = display,
-                        isRunning      = false,
-                        exePath        = normalized.command,
-                        execCommand    = normalized.fullCommand,
-                        desktopFilePath = f.absolutePath
-                    )
-                    result[procName] = app
-                    exePathCache.putIfAbsent(procName, normalized.command)
-                    desktopFileCache[procName] = f.absolutePath
-                    execCommandCache[procName] = normalized.fullCommand
-
-                    // A normal binary can be looked up by its executable basename.
-                    // Do not cache "flatpak" itself because many desktop files use
-                    // that launcher and would overwrite one another.
-                    val commandName = java.io.File(normalized.command).name.lowercase()
-                    if (commandName != "flatpak" && commandName != "env") {
-                        desktopFileCache.putIfAbsent(commandName, f.absolutePath)
-                    }
-                } catch (e2: Exception) { /* skip malformed desktop file */ }
-            }
-        }
-        return result.values.sortedBy { it.displayName }
-    }
+    private data class LinuxApplicationRoot(
+        val directory: java.io.File,
+        val source: AppSource
+    )
 
     private data class LinuxDesktopEntry(
         val name: String,
-        val exec: String
+        val exec: String,
+        val desktopId: String,
+        val packageId: String?,
+        val iconName: String?,
+        val tryExec: String?,
+        val categories: List<String>
     )
 
     private data class NormalizedLinuxExec(
         val processName: String,
         val command: String,
-        val fullCommand: String
+        val fullCommand: String,
+        val aliases: List<String> = emptyList(),
+        val packageId: String? = null
     )
 
-    private fun parseLinuxDesktopFile(file: java.io.File): LinuxDesktopEntry? {
-        var name: String? = null
-        var exec: String? = null
-        var inDesktopEntry = true
-        file.forEachLine { line ->
-            val trimmed = line.trim()
-            if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-                inDesktopEntry = trimmed == "[Desktop Entry]"
-            } else if (inDesktopEntry && !trimmed.startsWith("#")) {
-                when {
-                    trimmed.startsWith("Name=") && name == null ->
-                        name = trimmed.removePrefix("Name=").trim()
-                    trimmed.startsWith("Exec=") && exec == null ->
-                        exec = trimmed.removePrefix("Exec=").trim()
+    /**
+     * Reads the user XDG application directory first, then system XDG
+     * directories, followed by Flatpak exports and Snap's exported desktop
+     * files. The order is also the precedence order for duplicate desktop IDs.
+     */
+    private fun linuxApplicationRoots(): List<LinuxApplicationRoot> {
+        val home = System.getProperty("user.home", "")
+        val dataHome = System.getenv("XDG_DATA_HOME")
+            ?.takeIf { it.isNotBlank() }
+            ?.let { java.io.File(it) }
+            ?: java.io.File(home, ".local/share")
+        val dataDirs = (System.getenv("XDG_DATA_DIRS")
+            ?.takeIf { it.isNotBlank() }
+            ?: "/usr/local/share:/usr/share")
+            .split(':')
+            .filter { it.isNotBlank() }
+            .map { java.io.File(it) }
+
+        val roots = buildList {
+            add(LinuxApplicationRoot(java.io.File(dataHome, "applications"), AppSource.NATIVE_DESKTOP))
+            add(
+                LinuxApplicationRoot(
+                    java.io.File(dataHome, "flatpak/exports/share/applications"),
+                    AppSource.FLATPAK
+                )
+            )
+            dataDirs.forEach { dataDir ->
+                add(LinuxApplicationRoot(java.io.File(dataDir, "applications"), AppSource.NATIVE_DESKTOP))
+                add(
+                    LinuxApplicationRoot(
+                        java.io.File(dataDir, "flatpak/exports/share/applications"),
+                        AppSource.FLATPAK
+                    )
+                )
+            }
+            add(
+                LinuxApplicationRoot(
+                    java.io.File("/var/lib/flatpak/exports/share/applications"),
+                    AppSource.FLATPAK
+                )
+            )
+            add(
+                LinuxApplicationRoot(
+                    java.io.File("/var/lib/snapd/desktop/applications"),
+                    AppSource.SNAP
+                )
+            )
+        }
+        return roots.distinctBy { "${it.source}:${it.directory.absolutePath}" }
+    }
+
+    /**
+     * Scans desktop files without collapsing separate desktop IDs that happen
+     * to launch the same process. User/system duplicates are collapsed by
+     * desktop ID, with earlier XDG roots taking precedence.
+     */
+    private fun scanLinuxDesktopFiles(
+        roots: List<LinuxApplicationRoot> = linuxApplicationRoots()
+    ): List<ScannedApp> {
+        val result = LinkedHashMap<String, ScannedApp>()
+        for (root in roots) {
+            val files = try {
+                if (!root.directory.isDirectory) {
+                    emptyList()
+                } else {
+                    root.directory.walkTopDown()
+                        .filter { it.isFile && it.extension.equals("desktop", ignoreCase = true) }
+                        .sortedBy { it.absolutePath }
+                        .toList()
+                }
+            } catch (_: Exception) {
+                emptyList()
+            }
+
+            for (file in files) {
+                try {
+                    val entry = parseLinuxDesktopFile(file) ?: continue
+                    val app = buildLinuxDescriptor(
+                        entry = entry,
+                        source = root.source,
+                        desktopFilePath = file.absolutePath
+                    ) ?: continue
+                    if (app.processName in systemIgnore) continue
+
+                    val identity = (app.desktopId ?: file.nameWithoutExtension)
+                        .lowercase(Locale.ROOT)
+                    if (result.containsKey(identity)) continue
+                    result[identity] = app
+                    cacheLinuxDescriptor(app)
+                } catch (_: Exception) {
+                    // A single malformed desktop file must not hide other apps.
                 }
             }
         }
-        val displayName = name?.takeIf { it.isNotBlank() } ?: return null
-        val command = exec?.takeIf { it.isNotBlank() } ?: return null
-        return LinuxDesktopEntry(displayName, command)
+        return result.values.sortedBy { it.displayName.lowercase(Locale.ROOT) }
+    }
+
+    private fun parseLinuxDesktopFile(file: java.io.File): LinuxDesktopEntry? {
+        return parseLinuxDesktopContent(
+            content = file.readText(),
+            desktopId = file.relativeToOrNull(file.parentFile ?: file)
+                ?.path
+                ?.removeSuffix(".desktop")
+                ?: file.nameWithoutExtension
+        )
+    }
+
+    private fun parseLinuxDesktopContent(
+        content: String,
+        desktopId: String,
+        localePreferences: List<String> = preferredLocaleTags()
+    ): LinuxDesktopEntry? {
+        val values = LinkedHashMap<String, String>()
+        val localizedNames = LinkedHashMap<String, String>()
+        var inDesktopEntry = false
+
+        content.lineSequence().forEach { line ->
+            val trimmed = line.trim()
+            if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+                inDesktopEntry = trimmed == "[Desktop Entry]"
+                return@forEach
+            }
+            if (!inDesktopEntry || trimmed.isBlank() || trimmed.startsWith("#")) return@forEach
+
+            val separator = trimmed.indexOf('=')
+            if (separator <= 0) return@forEach
+            val key = trimmed.substring(0, separator).trim()
+            val value = unescapeDesktopValue(trimmed.substring(separator + 1).trim())
+            if (key.startsWith("Name[") && key.endsWith("]")) {
+                localizedNames[key.substringAfter("Name[").removeSuffix("]")] = value
+            } else if (!values.containsKey(key)) {
+                values[key] = value
+            }
+        }
+
+        if (values["Type"]?.equals("Application", ignoreCase = true) == false) return null
+        if (values["Hidden"].toBoolean() || values["NoDisplay"].toBoolean()) return null
+
+        val onlyShowIn = splitDesktopList(values["OnlyShowIn"])
+        val notShowIn = splitDesktopList(values["NotShowIn"])
+        if (!isVisibleOnCurrentDesktop(onlyShowIn, notShowIn)) return null
+
+        val name = chooseLocalizedName(
+            fallback = values["Name"],
+            localizedNames = localizedNames,
+            localePreferences = localePreferences
+        ) ?: return null
+        val exec = values["Exec"]?.takeIf { it.isNotBlank() } ?: return null
+        val packageId = values["X-Flatpak"]
+            ?.takeIf { it.isNotBlank() && !it.equals("true", ignoreCase = true) }
+            ?: values["X-SnapInstanceName"]?.takeIf { it.isNotBlank() }
+            ?: values["X-Snap-Instance"]?.takeIf { it.isNotBlank() }
+
+        return LinuxDesktopEntry(
+            name = name,
+            exec = exec,
+            desktopId = desktopId,
+            packageId = packageId,
+            iconName = values["Icon"]?.takeIf { it.isNotBlank() },
+            tryExec = values["TryExec"]?.takeIf { it.isNotBlank() },
+            categories = splitDesktopList(values["Categories"])
+        )
+    }
+
+    private fun buildLinuxDescriptor(
+        entry: LinuxDesktopEntry,
+        source: AppSource,
+        desktopFilePath: String?
+    ): ScannedApp? {
+        val normalized = normalizeLinuxExec(entry.exec) ?: return null
+        if (entry.tryExec != null && !isExecutableAvailable(entry.tryExec)) return null
+        val packageId = entry.packageId ?: normalized.packageId
+        val aliases = (normalized.aliases + listOfNotNull(packageId))
+            .map { it.lowercase(Locale.ROOT) }
+            .filter { it.isNotBlank() }
+            .distinct()
+        return ScannedApp(
+            processName = normalized.processName,
+            displayName = entry.name,
+            isRunning = false,
+            exePath = normalized.command,
+            execCommand = normalized.fullCommand,
+            desktopFilePath = desktopFilePath,
+            desktopId = entry.desktopId,
+            packageId = packageId,
+            processAliases = aliases,
+            iconName = entry.iconName,
+            tryExec = entry.tryExec,
+            categories = entry.categories,
+            source = source
+        )
+    }
+
+    private fun cacheLinuxDescriptor(app: ScannedApp) {
+        val desktopPath = app.desktopFilePath ?: return
+        val names = (listOf(app.processName) + app.processAliases)
+            .map { it.lowercase(Locale.ROOT) }
+            .filter { it.isNotBlank() }
+            .distinct()
+        names.forEach { name ->
+            desktopFileCache.putIfAbsent(name, desktopPath)
+            app.execCommand?.let { execCommandCache.putIfAbsent(name, it) }
+        }
+
+        val commandName = java.io.File(app.exePath.orEmpty()).name.lowercase(Locale.ROOT)
+        if (commandName != "flatpak" && commandName != "snap" && commandName != "env") {
+            desktopFileCache.putIfAbsent(commandName, desktopPath)
+        }
+        app.exePath?.let { exePathCache.putIfAbsent(app.processName, it) }
+    }
+
+    private fun splitDesktopList(value: String?): List<String> =
+        value.orEmpty()
+            .split(';')
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+
+    private fun preferredLocaleTags(): List<String> {
+        val configured = listOf(
+            System.getenv("LANGUAGE"),
+            System.getenv("LC_ALL"),
+            System.getenv("LC_MESSAGES"),
+            System.getenv("LANG")
+        ).filterNotNull().flatMap { it.split(':') }
+        return (configured + Locale.getDefault().toLanguageTag() + "C")
+            .flatMap { listOf(it, it.substringBefore('.'), it.substringBefore('_')) }
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+    }
+
+    private fun chooseLocalizedName(
+        fallback: String?,
+        localizedNames: Map<String, String>,
+        localePreferences: List<String>
+    ): String? {
+        val preferred = localePreferences.asSequence()
+            .map { it.replace('-', '_') }
+            .flatMap { locale ->
+                sequenceOf(locale, locale.substringBefore('_'))
+            }
+            .mapNotNull { localizedNames[it] }
+            .firstOrNull { it.isNotBlank() }
+        return preferred ?: fallback?.takeIf { it.isNotBlank() }
+    }
+
+    private fun isVisibleOnCurrentDesktop(
+        onlyShowIn: List<String>,
+        notShowIn: List<String>
+    ): Boolean {
+        val current = listOf(
+            System.getenv("XDG_CURRENT_DESKTOP"),
+            System.getenv("XDG_SESSION_DESKTOP")
+        ).filterNotNull()
+            .flatMap { it.split(':', ';') }
+            .map { it.trim().lowercase(Locale.ROOT) }
+            .filter { it.isNotBlank() }
+            .toSet()
+        if (onlyShowIn.isNotEmpty() && current.isNotEmpty() &&
+            onlyShowIn.none { it.lowercase(Locale.ROOT) in current }
+        ) {
+            return false
+        }
+        if (notShowIn.any { it.lowercase(Locale.ROOT) in current }) return false
+        return true
+    }
+
+    private fun unescapeDesktopValue(value: String): String {
+        val result = StringBuilder()
+        var escaped = false
+        value.forEach { char ->
+            if (escaped) {
+                result.append(
+                    when (char) {
+                        'n' -> '\n'
+                        's' -> ' '
+                        't' -> '\t'
+                        'r' -> '\r'
+                        '\\' -> '\\'
+                        ';' -> ';'
+                        else -> char
+                    }
+                )
+                escaped = false
+            } else if (char == '\\') {
+                escaped = true
+            } else {
+                result.append(char)
+            }
+        }
+        if (escaped) result.append('\\')
+        return result.toString()
+    }
+
+    private fun isExecutableAvailable(value: String): Boolean {
+        val candidate = java.io.File(value)
+        if (candidate.isAbsolute) return candidate.isFile && candidate.canExecute()
+        val path = System.getenv("PATH").orEmpty()
+        return path.split(java.io.File.pathSeparator)
+            .filter { it.isNotBlank() }
+            .map { java.io.File(it, value) }
+            .any { it.isFile && it.canExecute() }
     }
 
     /**
@@ -469,13 +811,41 @@ object InstalledAppsScanner {
             val flatpakName = appId?.let(::flatpakProcessName)
                 ?.takeIf { SAFE_LINUX_PROCESS_NAME.matches(it) }
                 ?: return null
-            return NormalizedLinuxExec(flatpakName, command, exec)
+            return NormalizedLinuxExec(
+                processName = flatpakName,
+                command = command,
+                fullCommand = exec,
+                aliases = listOfNotNull(appId),
+                packageId = appId
+            )
+        }
+
+        if (commandName == "snap") {
+            val snapId = tokens.drop(index + 1)
+                .dropWhile { it == "run" || it.startsWith("-") }
+                .firstOrNull()
+                ?.takeIf { it.isNotBlank() }
+                ?.lowercase(Locale.ROOT)
+                ?.takeIf { SAFE_LINUX_PROCESS_NAME.matches(it) }
+                ?: return null
+            return NormalizedLinuxExec(
+                processName = snapId,
+                command = command,
+                fullCommand = exec,
+                aliases = listOf(snapId),
+                packageId = snapId
+            )
         }
 
         val processName = commandName
             .takeIf { SAFE_LINUX_PROCESS_NAME.matches(it) }
             ?: return null
-        return NormalizedLinuxExec(processName, command, exec)
+        return NormalizedLinuxExec(
+            processName = processName,
+            command = command,
+            fullCommand = exec,
+            aliases = listOf(processName)
+        )
     }
 
     private fun flatpakProcessName(appId: String): String {
@@ -523,6 +893,94 @@ object InstalledAppsScanner {
     /** Exposed to the Linux unit tests without making parser internals public. */
     internal fun normalizeLinuxExecForTesting(exec: String): String? =
         normalizeLinuxExec(exec)?.processName
+
+    internal fun parseLinuxDesktopContentForTesting(
+        content: String,
+        desktopId: String = "test.desktop",
+        source: AppSource = AppSource.NATIVE_DESKTOP,
+        localePreferences: List<String> = listOf("en_US")
+    ): AppDescriptor? {
+        val entry = parseLinuxDesktopContent(content, desktopId, localePreferences) ?: return null
+        return buildLinuxDescriptor(entry, source, desktopFilePath = null)
+    }
+
+    internal fun scanLinuxDesktopFilesForTesting(
+        roots: List<Pair<java.io.File, AppSource>>
+    ): List<AppDescriptor> {
+        return scanLinuxDesktopFiles(
+            roots.map { (directory, source) -> LinuxApplicationRoot(directory, source) }
+        )
+    }
+
+    internal fun mergeInstalledAndRunningForTesting(
+        installed: List<AppDescriptor>,
+        running: List<AppDescriptor>
+    ): List<AppDescriptor> = mergeInstalledAndRunning(installed, running)
+
+    private fun processAliasesForRunningProcess(
+        processName: String,
+        commandLine: String
+    ): List<String> {
+        val normalized = normalizeLinuxExec(commandLine)
+        return (listOf(processName) + normalized?.aliases.orEmpty() +
+            listOfNotNull(normalized?.packageId))
+            .map { it.lowercase(Locale.ROOT) }
+            .filter { it.isNotBlank() && it != "flatpak" && it != "snap" }
+            .distinct()
+    }
+
+    private fun mergeInstalledAndRunning(
+        installed: List<AppDescriptor>,
+        running: List<AppDescriptor>
+    ): List<AppDescriptor> {
+        val usedRunning = BooleanArray(running.size)
+        val mergedInstalled = installed.map { app ->
+            val runningIndex = running.indices.firstOrNull { index ->
+                !usedRunning[index] && appsMatch(app, running[index])
+            } ?: -1
+            if (runningIndex < 0) {
+                app
+            } else {
+                usedRunning[runningIndex] = true
+                val live = running[runningIndex]
+                app.copy(
+                    isRunning = true,
+                    exePath = live.exePath ?: app.exePath,
+                    processAliases = (app.processAliases + live.processAliases)
+                        .distinct()
+                )
+            }
+        }
+        val runningOnly = running.filterIndexed { index, _ -> !usedRunning[index] }
+            .map { it.copy(source = AppSource.RUNNING_ONLY) }
+        return (mergedInstalled + runningOnly)
+            .sortedWith(
+                compareBy<AppDescriptor> { it.displayName.lowercase(Locale.ROOT) }
+                    .thenBy { it.desktopId.orEmpty().lowercase(Locale.ROOT) }
+                    .thenBy { it.processName }
+            )
+    }
+
+    private fun appsMatch(installed: AppDescriptor, running: AppDescriptor): Boolean {
+        val installedCandidates = appMatchCandidates(installed)
+        val runningCandidates = appMatchCandidates(running)
+        if (installedCandidates.intersect(runningCandidates).isNotEmpty()) return true
+
+        val installedExecutable = installed.exePath
+            ?.let { java.io.File(it).name.lowercase(Locale.ROOT) }
+        val runningExecutable = running.exePath
+            ?.let { java.io.File(it).name.lowercase(Locale.ROOT) }
+        return installedExecutable != null &&
+            installedExecutable == runningExecutable &&
+            installedExecutable !in setOf("flatpak", "snap", "env")
+    }
+
+    private fun appMatchCandidates(app: AppDescriptor): Set<String> =
+        (listOf(app.processName, app.packageId) + app.processAliases)
+            .filterNotNull()
+            .map { it.trim().lowercase(Locale.ROOT) }
+            .filter { it.isNotBlank() }
+            .toSet()
 
     private fun friendlyName(exe: String): String =
         exe.substringBeforeLast(".")

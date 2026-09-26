@@ -1,0 +1,68 @@
+FocusFlow is a Kotlin/JVM Compose Desktop productivity application. The long-term product direction is Linux-only, but Windows support is still being preserved temporarily. Do not remove Windows code in this task.
+
+The authoritative plan is:
+
+work/linux-app-discovery-and-pickers-plan.md
+The related plans are:
+
+work/linux-enforcement-and-release-tests-plan.md
+work/shared-platform-boundary-plan.md
+work/stored-data-migration-plan.md
+Read replit.md, the authoritative app-discovery plan, and relevant files before editing. Also check .agents/memory/MEMORY.md and any linked memory topics that apply.
+
+Your assigned work
+You are assigned exactly:
+
+<ASSIGNED_SCOPE>
+Implement only the tracker items in that assigned scope. Do not begin unassigned work, even if you notice work that would be useful. Record later work as a blocker or follow-up note instead.
+
+Workstream goal
+Finish Linux installed-application discovery and make every app-selection flow use one Linux-aware catalog and picker.
+
+The catalog must eventually support:
+
+Native .desktop applications
+User-created desktop files
+Flatpak applications
+Snap applications
+Running-only processes
+Display name, desktop/application ID, package source, launch executable, process names, aliases, icon reference, and running state
+Refresh without restarting FocusFlow
+Stale or unresolved saved references
+Manual Linux process entry without automatically adding .exe
+Do not scan the entire home directory for arbitrary AppImage files unless the plan's explicit AppImage decision says to do so.
+
+Non-negotiable rules
+Work in a maximum seven-item batch.
+Keep the tracker accurate while working.
+Never tick a tracker item merely because the project compiles.
+Tick an item only after implementation and focused verification are done.
+If blocked, leave the item unchecked and document the exact blocker.
+Do not modify or delete user data.
+Do not add automatic .exe suffixes to Linux values.
+Keep scanner, icon, database, and process discovery I/O off Compose/UI threads. Use the existing project conventions and memory guidance.
+Preserve existing Windows behavior during this migration.
+Prefer small, reviewable changes over a rewrite.
+Required workflow
+Read the authoritative plan and identify the exact assigned tracker items.
+Inspect the current implementation and tests before editing.
+Implement only the assigned batch.
+Add or update focused tests for the completed behavior.
+Run the cheapest relevant checks during development.
+Run the complete verification appropriate to the batch before marking items complete.
+Tick only the completed APP-* items in work/linux-app-discovery-and-pickers-plan.md.
+Update the plan's status or completion record if the assigned scope requires one.
+Record verification evidence and blockers in the plan or final report.
+Do not claim completion for an item whose acceptance evidence is missing.
+Final response format
+At the end, report:
+
+Assigned scope
+Tracker items completed and ticked
+Files changed
+Tests/checks run and results
+Items left unchecked
+Blockers or limitations
+Suggested next scope
+Do not implement or tick outside the assigned scope.
+

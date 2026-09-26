@@ -16,7 +16,7 @@ enforcement engine, or declare the Linux release ready by itself.
 - Blocks: reliable Linux app blocking, task focus-app selection, and the later
   Windows-removal cleanup
 - Execution mode: **Five batches; maximum seven tracker items per batch**
-- Active batch: **APP-08–APP-14**
+- Active batch: **APP-15–APP-21**
 
 ## Batch execution protocol
 
@@ -28,7 +28,7 @@ at once.
 | Batch | Tracker IDs | Scope | Status |
 |---|---|---|---|
 | Batch 1 | APP-01–APP-07 | Catalog contract and source metadata | Complete |
-| Batch 2 | APP-08–APP-14 | Refresh state and shared picker foundation | In progress |
+| Batch 2 | APP-08–APP-14 | Refresh state and shared picker foundation | Complete |
 | Batch 3 | APP-15–APP-21 | Manual entry and first screen integrations | Not started |
 | Batch 4 | APP-22–APP-28 | Remaining screen integrations and compatibility | Not started |
 | Batch 5 | APP-29–APP-34 | Cross-platform verification and AppImage decision | Not started |
@@ -88,6 +88,18 @@ malformed entries, duplicate entries, localized names, hidden entries, Exec fiel
 codes, and desktop/executable paths containing spaces.
 Blocked or deferred items: APP-11–APP-14 remain unchecked.
 Next batch: APP-11–APP-14 (picker search, filters, status metadata, and refresh UX)
+
+Batch: APP-11–APP-14
+Date: 2026-09-27
+Completed tracker items: APP-11, APP-12, APP-13, APP-14
+Verification: Focused picker/filter tests and complete `gradle test` suite passed;
+Compose compilation and `git diff --check` passed. The shared picker now searches
+display name, process name, desktop ID, package ID, and aliases; filters installed
+and running apps by source; shows source badges, icons, running state, selection
+state, stale selections, refresh progress, and last-refresh time; and preserves
+search, filters, and controlled selections across refreshes.
+Blocked or deferred items: None within this batch. APP-15 onward remains unchecked.
+Next batch: APP-15–APP-21 (manual process entry and first screen integrations)
 
 The next agent must inspect the latest record before continuing.
 
@@ -323,12 +335,12 @@ Do not silently delete rules during catalog refresh.
 ### Shared picker
 
 - [x] **APP-10** Build the reusable Linux app-picker UI.
-- [ ] **APP-11** Add search across display name, process name, desktop ID, and
+- [x] **APP-11** Add search across display name, process name, desktop ID, and
   package ID.
-- [ ] **APP-12** Add Installed/Running filters and source badges.
-- [ ] **APP-13** Add icons, running indicators, selection state, and stale-rule
+- [x] **APP-12** Add Installed/Running filters and source badges.
+- [x] **APP-13** Add icons, running indicators, selection state, and stale-rule
   state.
-- [ ] **APP-14** Add refresh without losing search or selection.
+- [x] **APP-14** Add refresh without losing search or selection.
 - [ ] **APP-15** Add safe manual-process entry without automatic `.exe` suffixes.
 - [ ] **APP-16** Add accessible empty, loading, permission, and scan-error states.
 

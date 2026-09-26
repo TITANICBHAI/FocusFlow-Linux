@@ -15,3 +15,4 @@
 - [Compose lazy-list key namespaces](compose-lazy-key-namespaces.md) — Keys must be unique across the entire LazyColumn, including separate items/itemsIndexed sections.
 - [Linux batch execution protocol](linux-batch-execution-protocol.md) — Linux workstreams use batches of up to seven items with evidence required before ticking trackers.
 - [Linux workstream plan index](linux-workstream-plan-index.md) — Four separate Linux transition plans and matching generic agent prompts live under work/.
+- [Linux app discovery and picker scope](linux-app-discovery-picker-scope.md) — Unify app selection on a refreshable Linux-aware catalog while preserving Windows and avoiding UI-thread I/O.

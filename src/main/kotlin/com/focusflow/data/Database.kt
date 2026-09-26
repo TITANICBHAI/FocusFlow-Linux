@@ -1,5 +1,6 @@
 package com.focusflow.data
 
+import com.focusflow.ProcessNameNormalizer
 import com.focusflow.data.models.*
 import java.util.UUID
 import org.sqlite.SQLiteDataSource
@@ -512,7 +513,7 @@ object Database {
             ps.setString(14, task.completedAt?.format(dtFmt))
             ps.setInt(15, if (task.focusMode) 1 else 0)
             ps.setString(16, task.focusIntensity)
-            ps.setString(17, task.focusBlockedApps.joinToString(","))
+            ps.setString(17, normalizeStoredProcesses(task.focusBlockedApps).joinToString(","))
             ps.setInt(18, if (task.focusRequirePin) 1 else 0)
             ps.executeUpdate()
         }
@@ -750,7 +751,11 @@ object Database {
         return connection.createStatement().executeQuery(
             "SELECT process_name FROM block_rules WHERE enabled = 1"
         ).use { rs ->
-            val set = mutableSetOf<String>(); while (rs.next()) set.add(rs.getString("process_name").lowercase()); set
+            val set = mutableSetOf<String>()
+            while (rs.next()) {
+                normalizeStoredProcess(rs.getString("process_name"))?.let(set::add)
+            }
+            set
         }
     }
 
@@ -759,7 +764,8 @@ object Database {
             INSERT OR REPLACE INTO block_rules (id, process_name, display_name, enabled, block_network)
             VALUES (?,?,?,?,?)
         """.trimIndent()).use { ps ->
-            ps.setString(1, rule.id); ps.setString(2, rule.processName)
+            ps.setString(1, rule.id)
+            ps.setString(2, normalizeStoredProcess(rule.processName) ?: rule.processName)
             ps.setString(3, rule.displayName); ps.setInt(4, if (rule.enabled) 1 else 0)
             ps.setInt(5, if (rule.blockNetwork) 1 else 0); ps.executeUpdate()
         }
@@ -794,7 +800,7 @@ object Database {
             ps.setInt(4, s.startHour); ps.setInt(5, s.startMinute)
             ps.setInt(6, s.endHour); ps.setInt(7, s.endMinute)
             ps.setInt(8, if (s.enabled) 1 else 0)
-            ps.setString(9, s.processNames.joinToString(","))
+            ps.setString(9, normalizeStoredProcesses(s.processNames).joinToString(","))
             ps.executeUpdate()
         }
     }
@@ -813,7 +819,8 @@ object Database {
         ).use { rs ->
             val list = mutableListOf<DailyAllowance>()
             while (rs.next()) list.add(DailyAllowance(
-                rs.getString("process_name"),
+                normalizeStoredProcess(rs.getString("process_name"))
+                    ?: rs.getString("process_name"),
                 rs.getString("display_name"),
                 rs.getInt("allowance_minutes")
             ))
@@ -829,14 +836,16 @@ object Database {
             INSERT OR REPLACE INTO daily_allowances (process_name, display_name, allowance_minutes)
             VALUES (?,?,?)
         """.trimIndent()).use { ps ->
-            ps.setString(1, a.processName); ps.setString(2, a.displayName)
+            ps.setString(1, normalizeStoredProcess(a.processName) ?: a.processName)
+            ps.setString(2, a.displayName)
             ps.setInt(3, a.allowanceMinutes); ps.executeUpdate()
         }
     }
 
     @Synchronized fun deleteDailyAllowance(processName: String) {
         connection.prepareStatement("DELETE FROM daily_allowances WHERE process_name = ?").use { ps ->
-            ps.setString(1, processName); ps.executeUpdate()
+            ps.setString(1, normalizeStoredProcess(processName) ?: processName)
+            ps.executeUpdate()
         }
     }
 
@@ -850,7 +859,11 @@ object Database {
             ps.setString(1, date.format(dateFmt))
             ps.executeQuery().use { rs ->
                 val map = mutableMapOf<String, Long>()
-                while (rs.next()) map[rs.getString("process_name")] = rs.getLong("seconds_used")
+                while (rs.next()) {
+                    val process = normalizeStoredProcess(rs.getString("process_name"))
+                        ?: rs.getString("process_name")
+                    map[process] = rs.getLong("seconds_used")
+                }
                 map
             }
         }
@@ -863,7 +876,7 @@ object Database {
             VALUES (?, ?, ?)
         """.trimIndent()).use { ps ->
             ps.setString(1, date.format(dateFmt))
-            ps.setString(2, processName)
+            ps.setString(2, normalizeStoredProcess(processName) ?: processName)
             ps.setLong(3, seconds)
             ps.executeUpdate()
         }
@@ -949,7 +962,8 @@ object Database {
         connection.prepareStatement(
             "INSERT INTO temptation_log (process_name, display_name, timestamp) VALUES (?,?,?)"
         ).use { ps ->
-            ps.setString(1, processName); ps.setString(2, displayName)
+            ps.setString(1, normalizeStoredProcess(processName) ?: processName)
+            ps.setString(2, displayName)
             ps.setString(3, LocalDateTime.now().format(dtFmt)); ps.executeUpdate()
         }
         connection.createStatement().executeUpdate(
@@ -1201,7 +1215,7 @@ object Database {
             ps.setString(1, rule.id)
             ps.setString(2, rule.pattern)
             ps.setString(3, rule.mode.name)
-            ps.setString(4, rule.targetProcess)
+            ps.setString(4, normalizeStoredProcess(rule.targetProcess) ?: rule.targetProcess)
             ps.setString(5, rule.targetDisplayName)
             ps.setInt(6, if (rule.enabled) 1 else 0)
             ps.executeUpdate()
@@ -1241,7 +1255,7 @@ object Database {
             ps.setString(1, preset.id)
             ps.setString(2, preset.name)
             ps.setString(3, preset.emoji)
-            ps.setString(4, preset.processNames.joinToString(","))
+            ps.setString(4, normalizeStoredProcesses(preset.processNames).joinToString(","))
             ps.setString(5, preset.createdAt.format(dtFmt))
             ps.executeUpdate()
         }
@@ -1275,7 +1289,7 @@ object Database {
         """.trimIndent()).use { ps ->
             ps.setString(1, preset.id)
             ps.setString(2, preset.name)
-            ps.setString(3, preset.processNames.joinToString(","))
+            ps.setString(3, normalizeStoredProcesses(preset.processNames).joinToString(","))
             ps.setString(4, preset.createdAt.format(dtFmt))
             ps.executeUpdate()
         }
@@ -1330,7 +1344,8 @@ object Database {
                     while (rs.next()) {
                         add(
                             FocusLauncherSessionApp(
-                                processName = rs.getString("process_name"),
+                                processName = normalizeStoredProcess(rs.getString("process_name"))
+                                    ?: rs.getString("process_name"),
                                 displayName = rs.getString("display_name"),
                                 exePath = rs.getString("exe_path")
                             )
@@ -1379,7 +1394,7 @@ object Database {
             ).use { ps ->
                 session.apps.forEachIndexed { index, app ->
                     ps.setInt(1, index)
-                    ps.setString(2, app.processName)
+                    ps.setString(2, normalizeStoredProcess(app.processName) ?: app.processName)
                     ps.setString(3, app.displayName)
                     ps.setString(4, app.exePath)
                     ps.addBatch()
@@ -1414,6 +1429,12 @@ object Database {
         }
     }
 
+    private fun normalizeStoredProcess(value: String?): String? =
+        value?.let { ProcessNameNormalizer.normalizeStored(it) }
+
+    private fun normalizeStoredProcesses(values: List<String>): List<String> =
+        values.mapNotNull(::normalizeStoredProcess).distinct()
+
     // ── Row mappers ───────────────────────────────────────────────────────────
 
     private fun rowToTask(rs: java.sql.ResultSet): Task = Task(
@@ -1433,7 +1454,14 @@ object Database {
         completedAt       = rs.getString("completed_at")?.let { LocalDateTime.parse(it, dtFmt) },
         focusMode         = rs.getInt("focus_mode") == 1,
         focusIntensity    = rs.getString("focus_intensity") ?: "standard",
-        focusBlockedApps  = try { rs.getString("focus_blocked_apps")?.split(",")?.filter { it.isNotBlank() } ?: emptyList() } catch (_: Exception) { emptyList() },
+        focusBlockedApps  = try {
+            normalizeStoredProcesses(
+                rs.getString("focus_blocked_apps")
+                    ?.split(",")
+                    ?.filter { it.isNotBlank() }
+                    ?: emptyList()
+            )
+        } catch (_: Exception) { emptyList() },
         focusRequirePin   = try { rs.getInt("focus_require_pin") == 1 } catch (_: Exception) { false }
     )
 
@@ -1452,7 +1480,8 @@ object Database {
 
     private fun rowToBlockRule(rs: java.sql.ResultSet): BlockRule = BlockRule(
         id           = rs.getString("id"),
-        processName  = rs.getString("process_name"),
+        processName  = normalizeStoredProcess(rs.getString("process_name"))
+            ?: rs.getString("process_name"),
         displayName  = rs.getString("display_name"),
         enabled      = rs.getInt("enabled") == 1,
         blockNetwork = rs.getInt("block_network") == 1
@@ -1467,14 +1496,16 @@ object Database {
         endHour      = rs.getInt("end_hour"),
         endMinute    = rs.getInt("end_minute"),
         enabled      = rs.getInt("enabled") == 1,
-        processNames = rs.getString("process_names")?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
+        processNames = normalizeStoredProcesses(
+            rs.getString("process_names")?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
+        )
     )
 
     private fun rowToNetworkCutoffRule(rs: java.sql.ResultSet): NetworkCutoffRule = NetworkCutoffRule(
         id                 = rs.getString("id"),
         pattern            = rs.getString("pattern"),
         mode               = try { NetworkRuleMode.valueOf(rs.getString("mode")) } catch (_: Exception) { NetworkRuleMode.DOMAIN },
-        targetProcess      = rs.getString("target_process"),
+        targetProcess      = normalizeStoredProcess(rs.getString("target_process")),
         targetDisplayName  = rs.getString("target_display_name"),
         enabled            = rs.getInt("enabled") == 1
     )
@@ -1483,14 +1514,18 @@ object Database {
         id           = rs.getString("id"),
         name         = rs.getString("name"),
         emoji        = rs.getString("emoji") ?: "🚫",
-        processNames = rs.getString("process_names")?.split(",")?.filter { it.isNotBlank() } ?: emptyList(),
+        processNames = normalizeStoredProcesses(
+            rs.getString("process_names")?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
+        ),
         createdAt    = LocalDateTime.parse(rs.getString("created_at"), dtFmt)
     )
 
     private fun rowToFocusLauncherPreset(rs: java.sql.ResultSet): FocusLauncherPreset = FocusLauncherPreset(
         id           = rs.getString("id"),
         name         = rs.getString("name"),
-        processNames = rs.getString("process_names")?.split(",")?.filter { it.isNotBlank() } ?: emptyList(),
+        processNames = normalizeStoredProcesses(
+            rs.getString("process_names")?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
+        ),
         createdAt    = LocalDateTime.parse(rs.getString("created_at"), dtFmt)
     )
 }

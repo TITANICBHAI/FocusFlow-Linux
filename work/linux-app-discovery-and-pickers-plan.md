@@ -16,7 +16,7 @@ enforcement engine, or declare the Linux release ready by itself.
 - Blocks: reliable Linux app blocking, task focus-app selection, and the later
   Windows-removal cleanup
 - Execution mode: **Five batches; maximum seven tracker items per batch**
-- Active batch: **APP-15–APP-21**
+- Active batch: **APP-15–APP-21** (assigned subset complete; APP-17–APP-21 remain)
 
 ## Batch execution protocol
 
@@ -29,8 +29,8 @@ at once.
 |---|---|---|---|
 | Batch 1 | APP-01–APP-07 | Catalog contract and source metadata | Complete |
 | Batch 2 | APP-08–APP-14 | Refresh state and shared picker foundation | Complete |
-| Batch 3 | APP-15–APP-21 | Manual entry and first screen integrations | Not started |
-| Batch 4 | APP-22–APP-28 | Remaining screen integrations and compatibility | Not started |
+| Batch 3 | APP-15–APP-21 | Manual entry and first screen integrations | In progress |
+| Batch 4 | APP-22–APP-28 | Remaining screen integrations and compatibility | In progress |
 | Batch 5 | APP-29–APP-34 | Cross-platform verification and AppImage decision | Not started |
 
 ### Strict tracker rules
@@ -102,6 +102,23 @@ Blocked or deferred items: None within this batch. APP-15 onward remains uncheck
 Next batch: APP-15–APP-21 (manual process entry and first screen integrations)
 
 The next agent must inspect the latest record before continuing.
+
+Focused assigned subset: APP-15, APP-16, APP-26, APP-27, APP-28
+Date: 2026-09-27
+Completed tracker items: APP-15, APP-16, APP-26, APP-27, APP-28
+Verification: `ProcessNameNormalizerTest`, `InstalledAppsCatalogResolutionTest`, and
+`LinuxAppPickerFilterTest` passed as part of the complete `gradle test --no-daemon`
+suite; Compose compilation passed; `git diff --check` passed. Manual entry rejects
+unsafe path/shell input and does not add `.exe` on Linux. Picker state coverage
+includes loading, empty, permission, scan-error, no-match, and stale-reference
+preservation. Catalog resolution covers stable IDs, package IDs, display names,
+aliases, and known stale Windows-shaped values. Database process read/write
+boundaries use the centralized OS-aware normalizer without deleting unmatched
+rules or arbitrary user-entered `.exe` values.
+Blocked or deferred items: APP-17–APP-25 and APP-29 onward remain unchecked.
+The Batch 3 and Batch 4 batches are still incomplete.
+Next batch: Continue APP-17–APP-25 screen integration work, then APP-29–APP-34
+cross-platform verification and the AppImage decision.
 
 ## Current baseline
 
@@ -341,8 +358,8 @@ Do not silently delete rules during catalog refresh.
 - [x] **APP-13** Add icons, running indicators, selection state, and stale-rule
   state.
 - [x] **APP-14** Add refresh without losing search or selection.
-- [ ] **APP-15** Add safe manual-process entry without automatic `.exe` suffixes.
-- [ ] **APP-16** Add accessible empty, loading, permission, and scan-error states.
+- [x] **APP-15** Add safe manual-process entry without automatic `.exe` suffixes.
+- [x] **APP-16** Add accessible empty, loading, permission, and scan-error states.
 
 ### Screen integration
 
@@ -358,10 +375,10 @@ Do not silently delete rules during catalog refresh.
 
 ### Compatibility and verification
 
-- [ ] **APP-26** Centralize OS-aware process normalization.
-- [ ] **APP-27** Normalize known invalid Linux `.exe` process values without
+- [x] **APP-26** Centralize OS-aware process normalization.
+- [x] **APP-27** Normalize known invalid Linux `.exe` process values without
   deleting user rules.
-- [ ] **APP-28** Add unit tests for catalog resolution and stale references.
+- [x] **APP-28** Add unit tests for catalog resolution and stale references.
 - [ ] **APP-29** Test native, Flatpak, Snap, user desktop files, and
   running-only processes.
 - [ ] **APP-30** Test app selection on X11 and native Wayland sessions.

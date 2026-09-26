@@ -3,6 +3,9 @@ package com.focusflow.ui.screens
 import androidx.compose.foundation.Image
 import com.focusflow.ui.components.EmptyStateCard
 import com.focusflow.ui.components.FfVerticalScrollbar
+import com.focusflow.ui.components.LinuxAppPicker
+import com.focusflow.ui.components.rememberInstalledAppCatalogState
+import com.focusflow.ui.components.catalogKey
 import com.focusflow.ui.components.PinGateDialog
 import com.focusflow.ui.components.ShortcutTooltip
 import androidx.compose.foundation.background
@@ -42,11 +45,14 @@ import com.focusflow.i18n.LocalizationManager
 import com.focusflow.data.models.CustomBlockPreset
 import com.focusflow.data.models.DailyAllowance
 import com.focusflow.enforcement.AppIconExtractor
+import com.focusflow.enforcement.AppCatalogState
+import com.focusflow.enforcement.AppDescriptor
 import com.focusflow.enforcement.BlockPresets
 import com.focusflow.enforcement.InstalledAppsScanner
 import com.focusflow.enforcement.NetworkBlocker
 import com.focusflow.enforcement.ProcessMonitor
 import com.focusflow.enforcement.ScannedApp
+import com.focusflow.enforcement.isWindows
 import com.focusflow.services.DailyAllowanceTracker
 import com.focusflow.services.StandaloneBlockService
 import com.focusflow.ui.theme.*
@@ -274,6 +280,7 @@ private fun AlwaysBlockTab(onNavigateToBlockDefense: () -> Unit) {
     var globalPinSet by remember { mutableStateOf(false) }
     var showGlobalPinGate by remember { mutableStateOf(false) }
     var pendingGlobalAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val catalogState = rememberInstalledAppCatalogState(enabled = !isWindows)
 
     fun reload() {
         scope.launch {
@@ -760,35 +767,64 @@ private fun AlwaysBlockTab(onNavigateToBlockDefense: () -> Unit) {
     }
 
     if (showPicker) {
-        AppPickerDialog(
-            scannedApps       = scannedApps,
-            alreadyBlocked    = blockRules.map { it.processName.lowercase() }.toSet(),
-            title             = strings.blockerPickAlwaysTitle,
-            confirmLabel      = strings.blockerBlockSelected,
-            confirmColor      = Purple80,
-            showNetworkToggle = true,
-            showPresets       = true,
-            onDismiss = { showPicker = false },
-            onConfirm = { picked, networkMap ->
-                scope.launch {
-                    withContext(Dispatchers.IO) {
-                        picked.forEach { app ->
-                            Database.upsertBlockRule(
-                                BlockRule(
-                                    id           = UUID.randomUUID().toString(),
-                                    processName  = app.processName.lowercase(),
-                                    displayName  = app.displayName,
-                                    enabled      = true,
-                                    blockNetwork = networkMap[app.processName] ?: false
+        if (isWindows) {
+            AppPickerDialog(
+                scannedApps       = scannedApps,
+                alreadyBlocked    = blockRules.map { it.processName.lowercase() }.toSet(),
+                title             = strings.blockerPickAlwaysTitle,
+                confirmLabel      = strings.blockerBlockSelected,
+                confirmColor      = Purple80,
+                showNetworkToggle = true,
+                showPresets       = true,
+                onDismiss = { showPicker = false },
+                onConfirm = { picked, networkMap ->
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            picked.forEach { app ->
+                                Database.upsertBlockRule(
+                                    BlockRule(
+                                        id           = UUID.randomUUID().toString(),
+                                        processName  = app.processName.lowercase(),
+                                        displayName  = app.displayName,
+                                        enabled      = true,
+                                        blockNetwork = networkMap[app.processName] ?: false
+                                    )
                                 )
-                            )
+                            }
                         }
+                        showPicker = false
+                        reload()
                     }
-                    showPicker = false
-                    reload()
                 }
-            }
-        )
+            )
+        } else {
+            LinuxBlockPickerDialog(
+                state = catalogState,
+                selectedProcessNames = blockRules.map { it.processName }.toSet(),
+                title = strings.blockerPickAlwaysTitle,
+                confirmLabel = strings.blockerBlockSelected,
+                onDismiss = { showPicker = false },
+                onConfirm = { picked ->
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            picked.forEach { app ->
+                                Database.upsertBlockRule(
+                                    BlockRule(
+                                        id = UUID.randomUUID().toString(),
+                                        processName = app.processName.lowercase(),
+                                        displayName = app.displayName,
+                                        enabled = true,
+                                        blockNetwork = false
+                                    )
+                                )
+                            }
+                        }
+                        showPicker = false
+                        reload()
+                    }
+                }
+            )
+        }
     }
 
     if (showGlobalPinGate) {
@@ -922,6 +958,7 @@ private fun DailyAllowanceTab() {
     var showPicker  by remember { mutableStateOf(false) }
     var editTarget  by remember { mutableStateOf<DailyAllowance?>(null) }
     var tick        by remember { mutableStateOf(0) }
+    val catalogState = rememberInstalledAppCatalogState(enabled = !isWindows)
 
     fun reload() {
         scope.launch {
@@ -1049,23 +1086,43 @@ private fun DailyAllowanceTab() {
 
     // ── Add allowance flow ─────────────────────────────────────────────────────
     if (showPicker) {
-        AllowancePickerDialog(
-            scannedApps    = scannedApps,
-            alreadyAllowed = alreadyAllowed,
-            onDismiss      = { showPicker = false },
-            onConfirm      = { processName, displayName, minutes ->
-                scope.launch {
-                    withContext(Dispatchers.IO) {
-                        Database.upsertDailyAllowance(
-                            DailyAllowance(processName, displayName, minutes)
-                        )
+        if (isWindows) {
+            AllowancePickerDialog(
+                scannedApps    = scannedApps,
+                alreadyAllowed = alreadyAllowed,
+                onDismiss      = { showPicker = false },
+                onConfirm      = { processName, displayName, minutes ->
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            Database.upsertDailyAllowance(
+                                DailyAllowance(processName, displayName, minutes)
+                            )
+                        }
+                        DailyAllowanceTracker.reload()
+                        showPicker = false
+                        reload()
                     }
-                    DailyAllowanceTracker.reload()
-                    showPicker = false
-                    reload()
                 }
-            }
-        )
+            )
+        } else {
+            LinuxAllowancePickerDialog(
+                state = catalogState,
+                alreadyAllowed = alreadyAllowed,
+                onDismiss = { showPicker = false },
+                onConfirm = { processName, displayName, minutes ->
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            Database.upsertDailyAllowance(
+                                DailyAllowance(processName, displayName, minutes)
+                            )
+                        }
+                        DailyAllowanceTracker.reload()
+                        showPicker = false
+                        reload()
+                    }
+                }
+            )
+        }
     }
 
     // ── Edit allowance minutes ─────────────────────────────────────────────────
@@ -1224,6 +1281,180 @@ private fun formatMinutes(mins: Long): String {
         h > 0 && m > 0 -> "${h}h ${m}m"
         h > 0           -> "${h}h"
         else            -> "${m}m"
+    }
+}
+
+@Composable
+private fun LinuxBlockPickerDialog(
+    state: AppCatalogState,
+    selectedProcessNames: Set<String>,
+    title: String,
+    confirmLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: (List<AppDescriptor>) -> Unit
+) {
+    var selectedKeys by remember(state.apps, selectedProcessNames) {
+        mutableStateOf(
+            state.apps
+                .filter { app -> selectedProcessNames.any { it.equals(app.processName, ignoreCase = true) } }
+                .map { it.catalogKey() }
+                .toSet() + selectedProcessNames.filter { saved ->
+                    state.apps.none { it.processName.equals(saved, ignoreCase = true) }
+                }.toSet()
+        )
+    }
+    var manualEntries by remember { mutableStateOf<Map<String, AppDescriptor>>(emptyMap()) }
+    val staleSelections = remember(state.apps, selectedProcessNames) {
+        selectedProcessNames
+            .filter { saved -> state.apps.none { it.processName.equals(saved, ignoreCase = true) } }
+            .associateWith { saved -> InstalledAppsScanner.friendlyNameFor(saved) }
+    }
+    val scope = rememberCoroutineScope()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Surface2,
+        modifier = Modifier.width(560.dp),
+        title = { Text(title, color = OnSurface, fontWeight = FontWeight.Bold) },
+        text = {
+            Box(modifier = Modifier.height(420.dp)) {
+                LinuxAppPicker(
+                    state = state,
+                    selectedAppKeys = selectedKeys,
+                    onSelectionChanged = { selectedKeys = it },
+                    staleSelections = staleSelections,
+                    onRefresh = {
+                        scope.launch(Dispatchers.IO) { com.focusflow.enforcement.InstalledAppCatalog.refresh() }
+                    },
+                    onManualEntry = { manualEntries = manualEntries + (it.catalogKey() to it) },
+                    allowManualEntry = true
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val byKey = state.apps.associateBy { it.catalogKey() } + manualEntries
+                    val picked = selectedKeys.mapNotNull { key ->
+                        byKey[key] ?: AppDescriptor(
+                            processName = key,
+                            displayName = InstalledAppsScanner.friendlyNameFor(key),
+                            isRunning = false
+                        )
+                    }.distinctBy { it.processName.lowercase() }
+                    onConfirm(picked)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Purple80)
+            ) { Text(confirmLabel) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(LocalizationManager.strings.btnCancel, color = OnSurface2) }
+        }
+    )
+}
+
+@Composable
+private fun LinuxAllowancePickerDialog(
+    state: AppCatalogState,
+    alreadyAllowed: Set<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (processName: String, displayName: String, minutes: Int) -> Unit
+) {
+    var selectedKeys by remember(state.apps, alreadyAllowed) { mutableStateOf(emptySet<String>()) }
+    var selectedApp by remember { mutableStateOf<AppDescriptor?>(null) }
+    var minutes by remember { mutableStateOf(60) }
+    var customMinutes by remember { mutableStateOf("") }
+    var manualEntries by remember { mutableStateOf<Map<String, AppDescriptor>>(emptyMap()) }
+    val scope = rememberCoroutineScope()
+
+    if (selectedApp == null) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            containerColor = Surface2,
+            modifier = Modifier.width(560.dp),
+            title = { Text(LocalizationManager.strings.blockerChooseApp, color = OnSurface, fontWeight = FontWeight.Bold) },
+            text = {
+                Box(modifier = Modifier.height(420.dp)) {
+                    LinuxAppPicker(
+                        state = state,
+                        selectedAppKeys = selectedKeys,
+                        onSelectionChanged = { selectedKeys = it.take(1).toSet() },
+                        staleSelections = alreadyAllowed
+                            .filter { saved -> state.apps.none { it.processName.equals(saved, ignoreCase = true) } }
+                            .associateWith { InstalledAppsScanner.friendlyNameFor(it) },
+                        onRefresh = {
+                            scope.launch(Dispatchers.IO) { com.focusflow.enforcement.InstalledAppCatalog.refresh() }
+                        },
+                        onManualEntry = { manualEntries = manualEntries + (it.catalogKey() to it) },
+                        multiSelect = false,
+                        allowManualEntry = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val byKey = state.apps.associateBy { it.catalogKey() } + manualEntries
+                        selectedApp = selectedKeys.firstOrNull()?.let { key ->
+                            byKey[key] ?: AppDescriptor(
+                                processName = key,
+                                displayName = InstalledAppsScanner.friendlyNameFor(key),
+                                isRunning = false
+                            )
+                        }
+                    },
+                    enabled = selectedKeys.isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Warning.copy(alpha = 0.85f))
+                ) { Text("Next") }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) { Text(LocalizationManager.strings.btnCancel, color = OnSurface2) }
+            }
+        )
+    } else {
+        val app = selectedApp!!
+        val parsedCustom = customMinutes.toIntOrNull()
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            containerColor = Surface2,
+            modifier = Modifier.width(460.dp),
+            title = { Text("${LocalizationManager.strings.blockerSetDailyLimitFor} ${app.displayName}", color = OnSurface, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(LocalizationManager.strings.blockerStep2, color = OnSurface2, style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        allowanceOptions.forEach { (value, label) ->
+                            FilterChip(
+                                selected = minutes == value && customMinutes.isBlank(),
+                                onClick = { minutes = value; customMinutes = "" },
+                                label = { Text(label) }
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = customMinutes,
+                        onValueChange = { customMinutes = it.filter(Char::isDigit).take(4) },
+                        label = { Text("Custom minutes") },
+                        singleLine = true,
+                        isError = customMinutes.isNotBlank() && (parsedCustom == null || parsedCustom !in 1..1440),
+                        supportingText = if (customMinutes.isNotBlank() && (parsedCustom == null || parsedCustom !in 1..1440)) {
+                            { Text("Enter a number between 1 and 1440", color = Error) }
+                        } else null,
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Warning)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { onConfirm(app.processName, app.displayName, parsedCustom ?: minutes) },
+                    enabled = customMinutes.isBlank() || parsedCustom in 1..1440,
+                    colors = ButtonDefaults.buttonColors(containerColor = Warning.copy(alpha = 0.85f))
+                ) { Text(LocalizationManager.strings.btnSave) }
+            },
+            dismissButton = {
+                TextButton(onClick = { selectedApp = null }) { Text("Back", color = OnSurface2) }
+            }
+        )
     }
 }
 
@@ -1736,6 +1967,7 @@ private fun TimedBlockTab() {
     var selectedHours   by remember { mutableStateOf(1) }
     var selectedApps    by remember { mutableStateOf(setOf<String>()) }
     var isLoading       by remember { mutableStateOf(true) }
+    val catalogState = rememberInstalledAppCatalogState(enabled = !isWindows)
 
     // Mode: 0 = Duration, 1 = Date Range
     var scheduleMode by remember { mutableStateOf(0) }
@@ -2064,20 +2296,34 @@ private fun TimedBlockTab() {
     }
 
     if (showPicker) {
-        AppPickerDialog(
-            scannedApps       = scannedApps,
-            alreadyBlocked    = emptySet(),
-            title             = strings.blockerPickTimedTitle,
-            confirmLabel      = strings.blockerSelectApps,
-            confirmColor      = Error,
-            showNetworkToggle = false,
-            preSelected       = selectedApps,
-            onDismiss         = { showPicker = false },
-            onConfirm         = { picked, _ ->
-                selectedApps = picked.map { it.processName }.toSet()
-                showPicker = false
-            }
-        )
+        if (isWindows) {
+            AppPickerDialog(
+                scannedApps       = scannedApps,
+                alreadyBlocked    = emptySet(),
+                title             = strings.blockerPickTimedTitle,
+                confirmLabel      = strings.blockerSelectApps,
+                confirmColor      = Error,
+                showNetworkToggle = false,
+                preSelected       = selectedApps,
+                onDismiss         = { showPicker = false },
+                onConfirm         = { picked, _ ->
+                    selectedApps = picked.map { it.processName }.toSet()
+                    showPicker = false
+                }
+            )
+        } else {
+            LinuxBlockPickerDialog(
+                state = catalogState,
+                selectedProcessNames = selectedApps,
+                title = strings.blockerPickTimedTitle,
+                confirmLabel = strings.blockerSelectApps,
+                onDismiss = { showPicker = false },
+                onConfirm = { picked ->
+                    selectedApps = picked.map { it.processName }.toSet()
+                    showPicker = false
+                }
+            )
+        }
     }
 }
 

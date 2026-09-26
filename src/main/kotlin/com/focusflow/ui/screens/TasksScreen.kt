@@ -24,8 +24,13 @@ import androidx.compose.ui.unit.sp
 import com.focusflow.data.Database
 import com.focusflow.data.models.Task
 import com.focusflow.enforcement.InstalledAppsScanner
+import com.focusflow.enforcement.ScannedApp
+import com.focusflow.enforcement.isWindows
 import com.focusflow.i18n.LocalizationManager
 import com.focusflow.ui.components.ShortcutTooltip
+import com.focusflow.ui.components.LinuxAppPicker
+import com.focusflow.ui.components.catalogKey
+import com.focusflow.ui.components.rememberInstalledAppCatalogState
 import com.focusflow.ui.components.TaskCard
 import com.focusflow.ui.theme.*
 import androidx.compose.ui.focus.FocusRequester
@@ -397,8 +402,16 @@ fun AddTaskDialog(onDismiss: () -> Unit, onSave: (Task) -> Unit) {
     var recurringType       by remember { mutableStateOf("daily") }
     var selectedBlockedApps by remember { mutableStateOf(setOf<String>()) }
     var requirePin          by remember { mutableStateOf(false) }
-    val curatedApps         = remember { InstalledAppsScanner.getCuratedApps() }
+    var curatedApps         by remember { mutableStateOf<List<ScannedApp>>(emptyList()) }
+    val catalogState        = rememberInstalledAppCatalogState(enabled = !isWindows)
+    val pickerScope         = rememberCoroutineScope()
     val strings             = LocalizationManager.strings
+
+    LaunchedEffect(isWindows) {
+        if (isWindows) {
+            curatedApps = withContext(Dispatchers.IO) { InstalledAppsScanner.getCuratedApps() }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -407,7 +420,12 @@ fun AddTaskDialog(onDismiss: () -> Unit, onSave: (Task) -> Unit) {
         text = {
             val dialogScrollState = rememberScrollState()
             Box(modifier = Modifier.width(420.dp).heightIn(max = 520.dp)) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().verticalScroll(dialogScrollState).padding(end = 10.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth()
+                    .then(if (isWindows) Modifier.verticalScroll(dialogScrollState) else Modifier)
+                    .padding(end = 10.dp)
+            ) {
                 OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text(strings.tasksFieldTitle) }, modifier = Modifier.fillMaxWidth(), colors = fieldColors(), singleLine = true)
                 OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text(strings.tasksFieldDescOpt) }, modifier = Modifier.fillMaxWidth(), colors = fieldColors(), maxLines = 2)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -494,36 +512,65 @@ fun AddTaskDialog(onDismiss: () -> Unit, onSave: (Task) -> Unit) {
                             Icon(Icons.Default.Block, null, tint = Error.copy(alpha = 0.7f), modifier = Modifier.size(12.dp))
                             Text(strings.tasksExtraAppsDesc, style = MaterialTheme.typography.bodySmall, color = OnSurface2)
                         }
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            curatedApps.chunked(2).forEach { rowApps ->
-                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    rowApps.forEach { app ->
-                                        Row(
-                                            modifier = Modifier.weight(1f)
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .clickable {
-                                                    selectedBlockedApps = if (app.processName in selectedBlockedApps)
-                                                        selectedBlockedApps - app.processName
-                                                    else selectedBlockedApps + app.processName
-                                                }
-                                                .padding(horizontal = 4.dp, vertical = 2.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            Checkbox(
-                                                checked = app.processName in selectedBlockedApps,
-                                                onCheckedChange = { checked ->
-                                                    selectedBlockedApps = if (checked) selectedBlockedApps + app.processName
-                                                    else selectedBlockedApps - app.processName
-                                                },
-                                                modifier = Modifier.size(16.dp),
-                                                colors = CheckboxDefaults.colors(checkedColor = Error)
-                                            )
-                                            Text(app.displayName, style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp), color = OnSurface, maxLines = 1)
+                        if (isWindows) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                curatedApps.chunked(2).forEach { rowApps ->
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        rowApps.forEach { app ->
+                                            Row(
+                                                modifier = Modifier.weight(1f)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .clickable {
+                                                        selectedBlockedApps = if (app.processName in selectedBlockedApps)
+                                                            selectedBlockedApps - app.processName
+                                                        else selectedBlockedApps + app.processName
+                                                    }
+                                                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Checkbox(
+                                                    checked = app.processName in selectedBlockedApps,
+                                                    onCheckedChange = { checked ->
+                                                        selectedBlockedApps = if (checked) selectedBlockedApps + app.processName
+                                                        else selectedBlockedApps - app.processName
+                                                    },
+                                                    modifier = Modifier.size(16.dp),
+                                                    colors = CheckboxDefaults.colors(checkedColor = Error)
+                                                )
+                                                Text(app.displayName, style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp), color = OnSurface, maxLines = 1)
+                                            }
                                         }
+                                        if (rowApps.size == 1) Spacer(Modifier.weight(1f))
                                     }
-                                    if (rowApps.size == 1) Spacer(Modifier.weight(1f))
                                 }
+                            }
+                        } else {
+                            val selectedKeys = catalogState.apps
+                                .filter { app -> selectedBlockedApps.any { it.equals(app.processName, ignoreCase = true) } }
+                                .map { it.catalogKey() }
+                                .toSet() + selectedBlockedApps.filter { saved ->
+                                    catalogState.apps.none { it.processName.equals(saved, ignoreCase = true) }
+                                }.toSet()
+                            Box(modifier = Modifier.height(300.dp)) {
+                                LinuxAppPicker(
+                                    state = catalogState,
+                                    selectedAppKeys = selectedKeys,
+                                    onSelectionChanged = { keys ->
+                                        selectedBlockedApps = keys.map { key ->
+                                            catalogState.apps.firstOrNull { it.catalogKey() == key }?.processName ?: key
+                                        }.toSet()
+                                    },
+                                    staleSelections = selectedBlockedApps
+                                        .filter { saved -> catalogState.apps.none { it.processName.equals(saved, ignoreCase = true) } }
+                                        .associateWith { InstalledAppsScanner.friendlyNameFor(it) },
+                                    onRefresh = {
+                                        pickerScope.launch(Dispatchers.IO) {
+                                            com.focusflow.enforcement.InstalledAppCatalog.refresh()
+                                        }
+                                    },
+                                    allowManualEntry = true
+                                )
                             }
                         }
                         if (selectedBlockedApps.isNotEmpty()) {
@@ -597,8 +644,16 @@ fun EditTaskDialog(task: Task, onDismiss: () -> Unit, onSave: (Task) -> Unit, on
     var showConfirmDelete   by remember { mutableStateOf(false) }
     var selectedBlockedApps by remember { mutableStateOf(task.focusBlockedApps.toSet()) }
     var requirePin          by remember { mutableStateOf(task.focusRequirePin) }
-    val curatedApps         = remember { InstalledAppsScanner.getCuratedApps() }
+    var curatedApps         by remember { mutableStateOf<List<ScannedApp>>(emptyList()) }
+    val catalogState        = rememberInstalledAppCatalogState(enabled = !isWindows)
+    val pickerScope         = rememberCoroutineScope()
     val strings             = LocalizationManager.strings
+
+    LaunchedEffect(isWindows) {
+        if (isWindows) {
+            curatedApps = withContext(Dispatchers.IO) { InstalledAppsScanner.getCuratedApps() }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -616,7 +671,12 @@ fun EditTaskDialog(task: Task, onDismiss: () -> Unit, onSave: (Task) -> Unit, on
         text = {
             val dialogScrollState = rememberScrollState()
             Box(modifier = Modifier.width(420.dp).heightIn(max = 520.dp)) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().verticalScroll(dialogScrollState).padding(end = 10.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth()
+                    .then(if (isWindows) Modifier.verticalScroll(dialogScrollState) else Modifier)
+                    .padding(end = 10.dp)
+            ) {
                 OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text(strings.tasksFieldTitle) }, modifier = Modifier.fillMaxWidth(), colors = fieldColors(), singleLine = true)
                 OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text(strings.tasksFieldDesc) }, modifier = Modifier.fillMaxWidth(), colors = fieldColors(), maxLines = 2)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -703,36 +763,65 @@ fun EditTaskDialog(task: Task, onDismiss: () -> Unit, onSave: (Task) -> Unit, on
                             Icon(Icons.Default.Block, null, tint = Error.copy(alpha = 0.7f), modifier = Modifier.size(12.dp))
                             Text(strings.tasksExtraAppsDesc, style = MaterialTheme.typography.bodySmall, color = OnSurface2)
                         }
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            curatedApps.chunked(2).forEach { rowApps ->
-                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    rowApps.forEach { app ->
-                                        Row(
-                                            modifier = Modifier.weight(1f)
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .clickable {
-                                                    selectedBlockedApps = if (app.processName in selectedBlockedApps)
-                                                        selectedBlockedApps - app.processName
-                                                    else selectedBlockedApps + app.processName
-                                                }
-                                                .padding(horizontal = 4.dp, vertical = 2.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            Checkbox(
-                                                checked = app.processName in selectedBlockedApps,
-                                                onCheckedChange = { checked ->
-                                                    selectedBlockedApps = if (checked) selectedBlockedApps + app.processName
-                                                    else selectedBlockedApps - app.processName
-                                                },
-                                                modifier = Modifier.size(16.dp),
-                                                colors = CheckboxDefaults.colors(checkedColor = Error)
-                                            )
-                                            Text(app.displayName, style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp), color = OnSurface, maxLines = 1)
+                        if (isWindows) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                curatedApps.chunked(2).forEach { rowApps ->
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        rowApps.forEach { app ->
+                                            Row(
+                                                modifier = Modifier.weight(1f)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .clickable {
+                                                        selectedBlockedApps = if (app.processName in selectedBlockedApps)
+                                                            selectedBlockedApps - app.processName
+                                                        else selectedBlockedApps + app.processName
+                                                    }
+                                                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Checkbox(
+                                                    checked = app.processName in selectedBlockedApps,
+                                                    onCheckedChange = { checked ->
+                                                        selectedBlockedApps = if (checked) selectedBlockedApps + app.processName
+                                                        else selectedBlockedApps - app.processName
+                                                    },
+                                                    modifier = Modifier.size(16.dp),
+                                                    colors = CheckboxDefaults.colors(checkedColor = Error)
+                                                )
+                                                Text(app.displayName, style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp), color = OnSurface, maxLines = 1)
+                                            }
                                         }
+                                        if (rowApps.size == 1) Spacer(Modifier.weight(1f))
                                     }
-                                    if (rowApps.size == 1) Spacer(Modifier.weight(1f))
                                 }
+                            }
+                        } else {
+                            val selectedKeys = catalogState.apps
+                                .filter { app -> selectedBlockedApps.any { it.equals(app.processName, ignoreCase = true) } }
+                                .map { it.catalogKey() }
+                                .toSet() + selectedBlockedApps.filter { saved ->
+                                    catalogState.apps.none { it.processName.equals(saved, ignoreCase = true) }
+                                }.toSet()
+                            Box(modifier = Modifier.height(300.dp)) {
+                                LinuxAppPicker(
+                                    state = catalogState,
+                                    selectedAppKeys = selectedKeys,
+                                    onSelectionChanged = { keys ->
+                                        selectedBlockedApps = keys.map { key ->
+                                            catalogState.apps.firstOrNull { it.catalogKey() == key }?.processName ?: key
+                                        }.toSet()
+                                    },
+                                    staleSelections = selectedBlockedApps
+                                        .filter { saved -> catalogState.apps.none { it.processName.equals(saved, ignoreCase = true) } }
+                                        .associateWith { InstalledAppsScanner.friendlyNameFor(it) },
+                                    onRefresh = {
+                                        pickerScope.launch(Dispatchers.IO) {
+                                            com.focusflow.enforcement.InstalledAppCatalog.refresh()
+                                        }
+                                    },
+                                    allowManualEntry = true
+                                )
                             }
                         }
                         if (selectedBlockedApps.isNotEmpty()) {

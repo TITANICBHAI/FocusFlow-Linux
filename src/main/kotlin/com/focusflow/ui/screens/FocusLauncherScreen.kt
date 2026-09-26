@@ -26,6 +26,9 @@ import com.focusflow.enforcement.isWindows
 import com.focusflow.i18n.LocalizationManager
 import com.focusflow.services.FocusLauncherApp
 import com.focusflow.services.FocusLauncherService
+import com.focusflow.ui.components.LinuxAppPicker
+import com.focusflow.ui.components.catalogKey
+import com.focusflow.ui.components.rememberInstalledAppCatalogState
 import com.focusflow.ui.components.isRunningAsAdmin
 import com.focusflow.ui.components.ShortcutTooltip
 import com.focusflow.ui.components.relaunchAsAdmin
@@ -79,6 +82,8 @@ fun FocusLauncherScreen() {
     var launcherPresets    by remember { mutableStateOf<List<FocusLauncherPreset>>(emptyList()) }
     var showSavePreset     by remember { mutableStateOf(false) }
     var presetName         by remember { mutableStateOf("") }
+    var selectionLoaded    by remember { mutableStateOf(false) }
+    val catalogState = rememberInstalledAppCatalogState(enabled = !isWindows)
 
     // Checked once on composition — running "net session" is a blocking call so we
     // do it inside remember{} rather than on every recomposition.
@@ -89,40 +94,65 @@ fun FocusLauncherScreen() {
     val scope     = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
-        val apps = withContext(Dispatchers.IO) {
-            val fromRules = Database.getBlockRules().map { rule ->
-                FocusLauncherApp(
-                    processName = rule.processName,
-                    displayName = rule.displayName,
-                    exePath     = InstalledAppsScanner.getExePathFor(rule.processName)
-                )
-            }
-            val fromAllowances = Database.getDailyAllowances().map { da ->
-                FocusLauncherApp(
-                    processName = da.processName,
-                    displayName = da.displayName,
-                    exePath     = InstalledAppsScanner.getExePathFor(da.processName)
-                )
-            }
-            (fromRules + fromAllowances)
-                .distinctBy { it.processName.lowercase() }
-                .sortedBy { it.displayName }
-        }
-        availableApps = apps
-
         // Load persisted selection; fall back to all-selected if none saved yet
         val persisted = withContext(Dispatchers.IO) { Database.getSetting("launcher_selected_apps") }
         launcherPresets = withContext(Dispatchers.IO) { Database.getFocusLauncherPresets() }
-        selectedApps = if (persisted != null && persisted.isNotBlank()) {
-            val saved     = persisted.split(",").filter { it.isNotBlank() }.toSet()
-            val available = apps.map { it.processName.lowercase() }.toSet()
-            val matching  = available.intersect(saved)
-            if (matching.isEmpty()) available else matching
+        val saved = persisted.orEmpty().split(",").filter { it.isNotBlank() }.toSet()
+        if (isWindows) {
+            val apps = withContext(Dispatchers.IO) {
+                val fromRules = Database.getBlockRules().map { rule ->
+                    FocusLauncherApp(
+                        processName = rule.processName,
+                        displayName = rule.displayName,
+                        exePath = InstalledAppsScanner.getExePathFor(rule.processName)
+                    )
+                }
+                val fromAllowances = Database.getDailyAllowances().map { da ->
+                    FocusLauncherApp(
+                        processName = da.processName,
+                        displayName = da.displayName,
+                        exePath = InstalledAppsScanner.getExePathFor(da.processName)
+                    )
+                }
+                (fromRules + fromAllowances)
+                    .distinctBy { it.processName.lowercase() }
+                    .sortedBy { it.displayName }
+            }
+            availableApps = apps
+            selectedApps = if (saved.isNotEmpty()) {
+                val matching = apps.map { it.processName.lowercase() }.toSet().intersect(saved)
+                if (matching.isEmpty()) apps.map { it.processName.lowercase() }.toSet() else matching
+            } else {
+                apps.map { it.processName.lowercase() }.toSet()
+            }
         } else {
-            apps.map { it.processName.lowercase() }.toSet()
+            selectedApps = saved
         }
-
+        selectionLoaded = true
         isLoading = false
+    }
+
+    LaunchedEffect(catalogState.apps, selectionLoaded) {
+        if (!isWindows && selectionLoaded && catalogState.apps.isNotEmpty()) {
+            val savedOrAll = if (selectedApps.isNotEmpty()) {
+                selectedApps
+            } else {
+                catalogState.apps.map { it.processName.lowercase() }.toSet()
+            }
+            selectedApps = savedOrAll
+            availableApps = catalogState.apps.map {
+                FocusLauncherApp(it.processName, it.displayName, it.exePath)
+            }.filter { app ->
+                savedOrAll.any { it.equals(app.processName, ignoreCase = true) }
+            }.toMutableList().also { apps ->
+                savedOrAll.forEach { saved ->
+                    if (apps.none { it.processName.equals(saved, ignoreCase = true) }) {
+                        apps += FocusLauncherApp(saved, InstalledAppsScanner.friendlyNameFor(saved), null)
+                    }
+                }
+            }
+            isLoading = false
+        }
     }
 
     LaunchedEffect(searchQuery) {
@@ -323,11 +353,40 @@ fun FocusLauncherScreen() {
             Text(strings.launcherAppsToInclude, color = OnSurface, fontWeight = FontWeight.SemiBold,
                 style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(4.dp))
-            Text("Pulled from your FocusFlow lists. Uncheck any you don't want this session.",
+            Text(
+                if (isWindows) "Pulled from your FocusFlow lists. Uncheck any you don't want this session."
+                else "Browse installed applications and choose what this session may launch.",
                 color = OnSurface2, style = MaterialTheme.typography.bodySmall)
         }
 
-        if (isLoading) {
+        if (!isWindows) {
+            item(key = "linuxAppCatalogPicker") {
+                val selectedKeys = catalogState.apps
+                    .filter { app -> selectedApps.any { it.equals(app.processName, ignoreCase = true) } }
+                    .map { it.catalogKey() }
+                    .toSet() + selectedApps.filter { saved ->
+                        catalogState.apps.none { it.processName.equals(saved, ignoreCase = true) }
+                    }.toSet()
+                LinuxAppPicker(
+                    state = catalogState,
+                    selectedAppKeys = selectedKeys,
+                    onSelectionChanged = { keys ->
+                        selectedApps = keys.map { key ->
+                            catalogState.apps.firstOrNull { it.catalogKey() == key }?.processName ?: key
+                        }.toSet()
+                    },
+                    staleSelections = selectedApps
+                        .filter { saved -> catalogState.apps.none { it.processName.equals(saved, ignoreCase = true) } }
+                        .associateWith { InstalledAppsScanner.friendlyNameFor(it) },
+                    onRefresh = {
+                        scope.launch(Dispatchers.IO) {
+                            com.focusflow.enforcement.InstalledAppCatalog.refresh()
+                        }
+                    },
+                    allowManualEntry = true
+                )
+            }
+        } else if (isLoading) {
             item {
                 Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = Purple80, modifier = Modifier.size(28.dp))
@@ -346,7 +405,7 @@ fun FocusLauncherScreen() {
                         color = OnSurface2, style = MaterialTheme.typography.bodySmall)
                 }
             }
-        } else {
+        } else if (isWindows) {
             // LazyColumn keys share one namespace across every item in this list. The
             // available-app and search-result sections can contain the same process, so
             // prefix the section as well as the index. The index also handles duplicate
@@ -367,6 +426,7 @@ fun FocusLauncherScreen() {
         }
 
         // ── Search & add ──────────────────────────────────────────────────────
+        if (isWindows) {
         item {
             Spacer(Modifier.height(4.dp))
             Text(strings.launcherAddMoreApps, color = OnSurface, fontWeight = FontWeight.SemiBold,
@@ -391,7 +451,9 @@ fun FocusLauncherScreen() {
             )
         }
 
-        if (searchResults.isNotEmpty()) {
+        }
+
+        if (isWindows && searchResults.isNotEmpty()) {
             itemsIndexed(searchResults, key = { i, it ->
                 "search_result_${it.processName.lowercase()}_$i"
             }) { _, app ->

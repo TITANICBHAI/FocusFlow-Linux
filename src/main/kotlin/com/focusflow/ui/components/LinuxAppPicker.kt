@@ -29,8 +29,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,7 +42,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.Image
 import androidx.compose.material.icons.Icons
@@ -86,6 +92,62 @@ enum class AppPickerSourceFilter(val label: String, val source: AppSource? = nul
     SNAP("Snap", AppSource.SNAP),
     RUNNING_ONLY("Running-only", AppSource.RUNNING_ONLY),
     MANUAL("Manual", AppSource.MANUAL)
+}
+
+/**
+ * Collect the shared catalog and perform its first scan away from the UI
+ * thread. Multiple screens can call this safely; the catalog coalesces refresh
+ * requests while a scan is already in progress.
+ */
+@Composable
+fun rememberInstalledAppCatalogState(enabled: Boolean = true): AppCatalogState {
+    val state by InstalledAppCatalog.state.collectAsState()
+
+    LaunchedEffect(enabled) {
+        if (enabled && state.apps.isEmpty()) {
+            withContext(Dispatchers.IO) {
+                InstalledAppCatalog.refresh()
+            }
+        }
+    }
+
+    return state
+}
+
+internal enum class AppPickerContentState {
+    LOADING,
+    PERMISSION_ERROR,
+    SCAN_ERROR,
+    EMPTY,
+    NO_MATCHES,
+    CONTENT
+}
+
+internal fun appPickerContentState(
+    state: AppCatalogState,
+    filteredAppCount: Int,
+    visibleStaleCount: Int
+): AppPickerContentState = when {
+    state.isRefreshing && state.apps.isEmpty() && visibleStaleCount == 0 ->
+        AppPickerContentState.LOADING
+    state.permissionDenied && state.apps.isEmpty() ->
+        AppPickerContentState.PERMISSION_ERROR
+    state.errorMessage != null && state.apps.isEmpty() ->
+        AppPickerContentState.SCAN_ERROR
+    filteredAppCount == 0 && visibleStaleCount == 0 && state.apps.isEmpty() ->
+        AppPickerContentState.EMPTY
+    filteredAppCount == 0 && visibleStaleCount == 0 ->
+        AppPickerContentState.NO_MATCHES
+    else -> AppPickerContentState.CONTENT
+}
+
+internal fun mergeStaleAppSelections(
+    selectedAppKeys: Set<String>,
+    staleSelections: Map<String, String>,
+    catalogKeys: Set<String>
+): Map<String, String> = buildMap {
+    staleSelections.forEach { (key, label) -> put(key, label) }
+    (selectedAppKeys - catalogKeys).forEach { key -> putIfAbsent(key, key) }
 }
 
 internal fun filterAppCatalog(
@@ -140,24 +202,25 @@ fun LinuxAppPicker(
     enabled: Boolean = true,
     emptyMessage: String = "No applications available",
     staleSelections: Map<String, String> = emptyMap(),
-    onRefresh: () -> Unit = {}
+    onRefresh: () -> Unit = {},
+    allowManualEntry: Boolean = true,
+    onManualEntry: (AppDescriptor) -> Unit = {}
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var presenceValue by rememberSaveable { mutableStateOf(AppPickerPresenceFilter.ALL.name) }
     var sourceValue by rememberSaveable { mutableStateOf(AppPickerSourceFilter.ALL.name) }
+    var manualProcess by rememberSaveable { mutableStateOf("") }
+    var manualError by rememberSaveable { mutableStateOf<String?>(null) }
+    var manualEntries by remember { mutableStateOf(emptyList<AppDescriptor>()) }
 
     val presence = enumValueOf<AppPickerPresenceFilter>(presenceValue)
     val source = enumValueOf<AppPickerSourceFilter>(sourceValue)
-    val filteredApps = filterAppCatalog(state.apps, query, presence, source)
-    val catalogKeys = remember(state.apps) { state.apps.map { it.catalogKey() }.toSet() }
-    val staleEntries = remember(staleSelections, selectedAppKeys, catalogKeys) {
-        buildMap {
-            staleSelections.forEach { (key, label) -> put(key, label) }
-            (selectedAppKeys - catalogKeys).forEach { key ->
-                putIfAbsent(key, key)
-            }
-        }
+    val catalogApps = remember(state.apps, manualEntries) {
+        (manualEntries + state.apps).distinctBy { it.catalogKey() }
     }
+    val filteredApps = filterAppCatalog(catalogApps, query, presence, source)
+    val catalogKeys = remember(catalogApps) { catalogApps.map { it.catalogKey() }.toSet() }
+    val staleEntries = mergeStaleAppSelections(selectedAppKeys, staleSelections, catalogKeys)
     val visibleStaleEntries = staleEntries
         .filter { (key, label) ->
             presence == AppPickerPresenceFilter.ALL &&
@@ -180,30 +243,97 @@ fun LinuxAppPicker(
             onRefresh = onRefresh
         )
 
-        when {
-            state.isRefreshing && state.apps.isEmpty() && visibleStaleEntries.isEmpty() -> {
+        if (allowManualEntry) {
+            ManualProcessEntry(
+                value = manualProcess,
+                error = manualError,
+                enabled = enabled,
+                onValueChange = {
+                    manualProcess = it
+                    manualError = null
+                },
+                onAdd = {
+                    val manual = InstalledAppsScanner.createManualProcessEntry(manualProcess)
+                    if (manual == null) {
+                        manualError = "Enter a process name using letters, numbers, '.', '_' or '-'."
+                    } else {
+                        manualEntries = (manualEntries + manual)
+                            .distinctBy { it.catalogKey() }
+                        val key = manual.catalogKey()
+                        onSelectionChanged(
+                            if (multiSelect) selectedAppKeys + key else setOf(key)
+                        )
+                        onManualEntry(manual)
+                        manualProcess = ""
+                        manualError = null
+                    }
+                }
+            )
+        }
+
+        when (appPickerContentState(state, filteredApps.size, visibleStaleEntries.size)) {
+            AppPickerContentState.LOADING -> {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(24.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp)
+                        .semantics { liveRegion = LiveRegionMode.Polite },
                     horizontalArrangement = Arrangement.Center
                 ) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
+                        modifier = Modifier
+                            .size(24.dp)
+                            .semantics { contentDescription = "Loading applications" },
                         color = Purple80,
                         strokeWidth = 2.dp
                     )
                 }
             }
 
-            filteredApps.isEmpty() && visibleStaleEntries.isEmpty() -> {
+            AppPickerContentState.PERMISSION_ERROR -> {
+                PickerStateMessage(
+                    title = "Permission required",
+                    message = "FocusFlow could not read installed applications. Check application-directory permissions and refresh.",
+                    color = Warning
+                )
+            }
+
+            AppPickerContentState.SCAN_ERROR -> {
+                PickerStateMessage(
+                    title = "Application scan failed",
+                    message = state.errorMessage ?: "Installed applications could not be loaded. Try refreshing.",
+                    color = Error
+                )
+            }
+
+            AppPickerContentState.EMPTY -> {
                 Text(
-                    text = if (state.apps.isEmpty()) emptyMessage else "No matching applications",
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    text = emptyMessage,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .semantics {
+                            liveRegion = LiveRegionMode.Polite
+                            contentDescription = emptyMessage
+                        },
                     color = OnSurface2,
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
 
-            else -> {
+            AppPickerContentState.NO_MATCHES -> {
+                Text(
+                    text = "No matching applications",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .semantics { liveRegion = LiveRegionMode.Polite },
+                    color = OnSurface2,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+
+            AppPickerContentState.CONTENT -> {
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -249,14 +379,78 @@ fun LinuxAppPicker(
         }
 
         if (state.isPartial || state.errorMessage != null) {
-            Text(
-                text = state.errorMessage
-                    ?: "Some applications could not be loaded",
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                color = Error,
-                style = MaterialTheme.typography.bodySmall
+            PickerStateMessage(
+                title = if (state.permissionDenied) {
+                    "Some applications need permission"
+                } else {
+                    "Some applications could not be loaded"
+                },
+                message = state.errorMessage
+                    ?: "Some applications could not be loaded. Refresh to try again.",
+                color = if (state.permissionDenied) Warning else Error
             )
         }
+    }
+}
+
+@Composable
+private fun ManualProcessEntry(
+    value: String,
+    error: String?,
+    enabled: Boolean,
+    onValueChange: (String) -> Unit,
+    onAdd: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                enabled = enabled,
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                label = { Text("Manual process") },
+                placeholder = { Text("e.g. firefox or firefox.exe") },
+                isError = error != null,
+                supportingText = error?.let { { Text(it, color = Error) } }
+            )
+            TextButton(
+                onClick = onAdd,
+                enabled = enabled && value.isNotBlank()
+            ) {
+                Text("Add")
+            }
+        }
+    }
+}
+
+@Composable
+private fun PickerStateMessage(
+    title: String,
+    message: String,
+    color: Color
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .semantics {
+                liveRegion = LiveRegionMode.Polite
+                contentDescription = "$title. $message"
+            },
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(title, color = color, style = MaterialTheme.typography.titleSmall)
+        Text(message, color = OnSurface2, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -550,5 +744,5 @@ private fun formatRefreshTime(timestamp: Long): String =
         .withZone(ZoneId.systemDefault())
         .format(Instant.ofEpochMilli(timestamp))
 
-internal fun AppDescriptor.catalogKey(): String =
+fun AppDescriptor.catalogKey(): String =
     desktopId ?: packageId ?: processName.lowercase()

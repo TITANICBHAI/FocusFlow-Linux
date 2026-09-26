@@ -1,5 +1,6 @@
 package com.focusflow.enforcement
 
+import com.focusflow.ProcessNameNormalizer
 import com.sun.jna.platform.win32.Advapi32Util
 import com.sun.jna.platform.win32.WinReg
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -68,12 +69,14 @@ data class AppCatalogState(
     val isRefreshing: Boolean = false,
     val lastRefreshedAtMs: Long? = null,
     val isPartial: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val permissionDenied: Boolean = false
 )
 
 data class AppCatalogScanStatus(
     val isPartial: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val permissionDenied: Boolean = false
 )
 
 /** Compatibility name retained for current callers while the catalog adopts AppDescriptor. */
@@ -104,7 +107,8 @@ object InstalledAppCatalog : AppCatalogRepository {
                 current.copy(
                     apps = apps,
                     isPartial = scanStatus.isPartial,
-                    errorMessage = scanStatus.errorMessage
+                    errorMessage = scanStatus.errorMessage,
+                    permissionDenied = scanStatus.permissionDenied
                 )
             }
             apps
@@ -112,7 +116,8 @@ object InstalledAppCatalog : AppCatalogRepository {
             _state.update { current ->
                 current.copy(
                     isPartial = current.apps.isNotEmpty(),
-                    errorMessage = error.message ?: "Unable to read installed applications"
+                    errorMessage = error.message ?: "Unable to read installed applications",
+                    permissionDenied = error is SecurityException
                 )
             }
             _state.value.apps
@@ -127,7 +132,12 @@ object InstalledAppCatalog : AppCatalogRepository {
         if (!refreshing.compareAndSet(false, true)) return _state.value.apps
 
         _state.update {
-            it.copy(isRefreshing = true, isPartial = false, errorMessage = null)
+            it.copy(
+                isRefreshing = true,
+                isPartial = false,
+                errorMessage = null,
+                permissionDenied = false
+            )
         }
 
         return try {
@@ -139,7 +149,8 @@ object InstalledAppCatalog : AppCatalogRepository {
                     isRefreshing = false,
                     lastRefreshedAtMs = System.currentTimeMillis(),
                     isPartial = scanStatus.isPartial,
-                    errorMessage = scanStatus.errorMessage
+                    errorMessage = scanStatus.errorMessage,
+                    permissionDenied = scanStatus.permissionDenied
                 )
             }
             apps
@@ -148,7 +159,8 @@ object InstalledAppCatalog : AppCatalogRepository {
                 it.copy(
                     isRefreshing = false,
                     isPartial = it.apps.isNotEmpty(),
-                    errorMessage = error.message ?: "Unable to refresh installed applications"
+                    errorMessage = error.message ?: "Unable to refresh installed applications",
+                    permissionDenied = error is SecurityException
                 )
             }
             _state.value.apps
@@ -455,16 +467,33 @@ object InstalledAppsScanner {
      * case-insensitive because Linux process matching is normalized this way.
      */
     fun resolveApp(reference: String): AppDescriptor? {
-        val key = reference.trim().lowercase(Locale.ROOT)
-        if (key.isBlank()) return null
-        return getAppCatalog().firstOrNull { app ->
+        return resolveAppReference(reference, getAppCatalog())
+    }
+
+    /**
+     * Resolves a saved reference without requiring callers to know whether it
+     * contains a desktop ID, package ID, process alias, or display name.
+     * Known Windows-shaped values are considered under their Linux-compatible
+     * form as well, so stale `.exe` records can still resolve.
+     */
+    fun resolveAppReference(
+        reference: String,
+        apps: List<AppDescriptor>
+    ): AppDescriptor? {
+        val raw = ProcessNameNormalizer.normalize(reference) ?: return null
+        val stored = ProcessNameNormalizer.normalizeStored(reference)
+        val keys = listOfNotNull(raw, stored).toSet()
+        return apps.firstOrNull { app ->
             sequenceOf(
                 app.desktopId,
                 app.packageId,
                 app.processName,
                 app.displayName
-            ).filterNotNull().any { it.equals(key, ignoreCase = true) } ||
-                app.processAliases.any { it.equals(key, ignoreCase = true) }
+            ).filterNotNull().any { value ->
+                value.trim().lowercase(Locale.ROOT) in keys
+            } || app.processAliases.any {
+                it.trim().lowercase(Locale.ROOT) in keys
+            }
         }
     }
 
@@ -488,7 +517,7 @@ object InstalledAppsScanner {
         processName: String,
         displayName: String? = null
     ): AppDescriptor? {
-        val normalized = processName.trim().takeIf { it.isNotBlank() } ?: return null
+        val normalized = ProcessNameNormalizer.normalizeManual(processName) ?: return null
         return AppDescriptor(
             processName = normalized,
             displayName = displayName?.trim().takeIf { !it.isNullOrBlank() }
@@ -719,6 +748,7 @@ object InstalledAppsScanner {
         val result = LinkedHashMap<String, ScannedApp>()
         var skippedEntries = 0
         var firstError: String? = null
+        var permissionDenied = false
         for (root in roots) {
             val files = try {
                 if (!root.directory.isDirectory) {
@@ -731,8 +761,13 @@ object InstalledAppsScanner {
                 }
             } catch (error: Exception) {
                 skippedEntries++
+                if (error is SecurityException) permissionDenied = true
                 if (firstError == null) {
-                    firstError = error.message ?: "Unable to read an application directory"
+                    firstError = if (error is SecurityException) {
+                        "Permission denied while reading installed applications"
+                    } else {
+                        error.message ?: "Unable to read an application directory"
+                    }
                 }
                 emptyList()
             }
@@ -754,8 +789,13 @@ object InstalledAppsScanner {
                     cacheLinuxDescriptor(app)
                 } catch (error: Exception) {
                     skippedEntries++
+                    if (error is SecurityException) permissionDenied = true
                     if (firstError == null) {
-                        firstError = error.message ?: "Unable to read a desktop entry"
+                        firstError = if (error is SecurityException) {
+                            "Permission denied while reading an application entry"
+                        } else {
+                            error.message ?: "Unable to read a desktop entry"
+                        }
                     }
                     // A single malformed desktop file must not hide other apps.
                 }
@@ -764,7 +804,8 @@ object InstalledAppsScanner {
         lastScan.set(
             AppCatalogScanStatus(
                 isPartial = skippedEntries > 0,
-                errorMessage = firstError
+                errorMessage = firstError,
+                permissionDenied = permissionDenied
             )
         )
         return result.values.sortedBy { it.displayName.lowercase(Locale.ROOT) }
@@ -1146,6 +1187,11 @@ object InstalledAppsScanner {
         installed: List<AppDescriptor>,
         running: List<AppDescriptor>
     ): List<AppDescriptor> = mergeInstalledAndRunning(installed, running)
+
+    internal fun resolveAppReferenceForTesting(
+        reference: String,
+        apps: List<AppDescriptor>
+    ): AppDescriptor? = resolveAppReference(reference, apps)
 
     private fun mergeInstalledAndRunning(
         installed: List<AppDescriptor>,

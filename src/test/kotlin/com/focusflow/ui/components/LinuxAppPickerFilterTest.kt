@@ -1,6 +1,7 @@
 package com.focusflow.ui.components
 
 import com.focusflow.enforcement.AppDescriptor
+import com.focusflow.enforcement.AppCatalogState
 import com.focusflow.enforcement.AppSource
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -81,6 +82,61 @@ class LinuxAppPickerFilterTest {
         assertTrue(
             filterAppCatalog(catalog, "", AppPickerPresenceFilter.ALL, AppPickerSourceFilter.ALL)
                 .containsAll(catalog)
+        )
+    }
+
+    @Test
+    fun `picker keeps selected stale references visible and labels empty states`() {
+        val selected = setOf("missing.desktop")
+        val merged = mergeStaleAppSelections(
+            selectedAppKeys = selected,
+            staleSelections = mapOf("old-rule" to "Old Rule"),
+            catalogKeys = emptySet()
+        )
+
+        assertEquals(
+            mapOf("old-rule" to "Old Rule", "missing.desktop" to "missing.desktop"),
+            merged
+        )
+        assertEquals(
+            AppPickerContentState.LOADING,
+            appPickerContentState(
+                state = AppCatalogState(isRefreshing = true),
+                filteredAppCount = 0,
+                visibleStaleCount = 0
+            )
+        )
+        assertEquals(
+            AppPickerContentState.PERMISSION_ERROR,
+            appPickerContentState(
+                state = AppCatalogState(permissionDenied = true),
+                filteredAppCount = 0,
+                visibleStaleCount = 0
+            )
+        )
+        assertEquals(
+            AppPickerContentState.SCAN_ERROR,
+            appPickerContentState(
+                state = AppCatalogState(errorMessage = "scan failed"),
+                filteredAppCount = 0,
+                visibleStaleCount = 0
+            )
+        )
+        assertEquals(
+            AppPickerContentState.EMPTY,
+            appPickerContentState(
+                state = AppCatalogState(),
+                filteredAppCount = 0,
+                visibleStaleCount = 0
+            )
+        )
+        assertEquals(
+            AppPickerContentState.NO_MATCHES,
+            appPickerContentState(
+                state = AppCatalogState(apps = catalog),
+                filteredAppCount = 0,
+                visibleStaleCount = 0
+            )
         )
     }
 }

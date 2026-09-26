@@ -41,12 +41,16 @@ import androidx.compose.ui.text.style.TextAlign
 import com.focusflow.data.Database
 import com.focusflow.data.models.Task
 import com.focusflow.enforcement.InstalledAppsScanner
+import com.focusflow.enforcement.isWindows
 import com.focusflow.enforcement.NuclearMode
 import com.focusflow.enforcement.ProcessMonitor
 import com.focusflow.enforcement.ScannedApp
 import com.focusflow.i18n.LocalizationManager
 import com.focusflow.services.*
 import com.focusflow.ui.components.PinGateDialog
+import com.focusflow.ui.components.LinuxAppPicker
+import com.focusflow.ui.components.catalogKey
+import com.focusflow.ui.components.rememberInstalledAppCatalogState
 import com.focusflow.ui.components.ShortcutTooltip
 import com.focusflow.ui.theme.*
 import androidx.compose.ui.input.key.*
@@ -95,6 +99,7 @@ fun FocusScreen(preloadTask: Task? = null) {
     var sessionExtraApps     by remember { mutableStateOf(setOf<String>()) }
     var showSessionAppPicker by remember { mutableStateOf(false) }
     var scannedApps          by remember { mutableStateOf(listOf<ScannedApp>()) }
+    val catalogState = rememberInstalledAppCatalogState(enabled = !isWindows)
 
     val scope = rememberCoroutineScope()
 
@@ -525,7 +530,7 @@ fun FocusScreen(preloadTask: Task? = null) {
                             OutlinedButton(
                                 onClick = {
                                     showSessionAppPicker = true
-                                    if (scannedApps.isEmpty()) {
+                                    if (isWindows && scannedApps.isEmpty()) {
                                         scope.launch {
                                             val running = withContext(Dispatchers.IO) { InstalledAppsScanner.getRunningApps() }
                                             val curated = withContext(Dispatchers.IO) { InstalledAppsScanner.getCuratedApps() }
@@ -788,15 +793,27 @@ fun FocusScreen(preloadTask: Task? = null) {
     }
 
     if (showSessionAppPicker) {
-        SessionAppPickerDialog(
-            scannedApps  = scannedApps,
-            preSelected  = sessionExtraApps,
-            onDismiss    = { showSessionAppPicker = false },
-            onConfirm    = { picked ->
-                sessionExtraApps = picked
-                showSessionAppPicker = false
-            }
-        )
+        if (isWindows) {
+            SessionAppPickerDialog(
+                scannedApps  = scannedApps,
+                preSelected  = sessionExtraApps,
+                onDismiss    = { showSessionAppPicker = false },
+                onConfirm    = { picked ->
+                    sessionExtraApps = picked
+                    showSessionAppPicker = false
+                }
+            )
+        } else {
+            LinuxSessionAppPickerDialog(
+                state = catalogState,
+                selectedProcessNames = sessionExtraApps,
+                onDismiss = { showSessionAppPicker = false },
+                onConfirm = { picked ->
+                    sessionExtraApps = picked.map { it.processName }.toSet()
+                    showSessionAppPicker = false
+                }
+            )
+        }
     }
 }
 
@@ -1337,6 +1354,87 @@ private fun SessionAppPickerDialog(
                 colors   = ButtonDefaults.buttonColors(containerColor = Purple80)
             ) {
                 Text(if (selected.isEmpty()) "No extra apps" else "Block ${selected.size} app${if (selected.size == 1) "" else "s"} this session")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel", color = OnSurface2) }
+        }
+    )
+}
+
+@Composable
+private fun LinuxSessionAppPickerDialog(
+    state: com.focusflow.enforcement.AppCatalogState,
+    selectedProcessNames: Set<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (List<com.focusflow.enforcement.AppDescriptor>) -> Unit
+) {
+    var selectedKeys by remember(state.apps, selectedProcessNames) {
+        mutableStateOf(
+            state.apps
+                .filter { app -> selectedProcessNames.any { it.equals(app.processName, ignoreCase = true) } }
+                .map { it.catalogKey() }
+                .toSet() + selectedProcessNames.filter { saved ->
+                    state.apps.none { it.processName.equals(saved, ignoreCase = true) }
+                }.toSet()
+        )
+    }
+    var manualEntries by remember { mutableStateOf<Map<String, com.focusflow.enforcement.AppDescriptor>>(emptyMap()) }
+    val scope = rememberCoroutineScope()
+    val stale = selectedProcessNames
+        .filter { saved -> state.apps.none { it.processName.equals(saved, ignoreCase = true) } }
+        .associateWith { InstalledAppsScanner.friendlyNameFor(it) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Surface2,
+        modifier = Modifier.width(560.dp),
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.Apps, null, tint = Purple80, modifier = Modifier.size(20.dp))
+                    Text("Extra apps to block this session", color = OnSurface, fontWeight = FontWeight.Bold)
+                }
+                Text(
+                    "These apps will only be blocked for the duration of this session — not added to your permanent block list.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurface2
+                )
+            }
+        },
+        text = {
+            Box(modifier = Modifier.height(420.dp)) {
+                LinuxAppPicker(
+                    state = state,
+                    selectedAppKeys = selectedKeys,
+                    onSelectionChanged = { selectedKeys = it },
+                    staleSelections = stale,
+                    onRefresh = {
+                        scope.launch(Dispatchers.IO) {
+                            com.focusflow.enforcement.InstalledAppCatalog.refresh()
+                        }
+                    },
+                    onManualEntry = { manualEntries = manualEntries + (it.catalogKey() to it) },
+                    allowManualEntry = true
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val byKey = state.apps.associateBy { it.catalogKey() } + manualEntries
+                    val picked = selectedKeys.mapNotNull { key ->
+                        byKey[key] ?: com.focusflow.enforcement.AppDescriptor(
+                            processName = key,
+                            displayName = InstalledAppsScanner.friendlyNameFor(key),
+                            isRunning = false
+                        )
+                    }.distinctBy { it.processName.lowercase() }
+                    onConfirm(picked)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Purple80)
+            ) {
+                Text(if (selectedKeys.isEmpty()) "No extra apps" else "Block ${selectedKeys.size} app${if (selectedKeys.size == 1) "" else "s"} this session")
             }
         },
         dismissButton = {

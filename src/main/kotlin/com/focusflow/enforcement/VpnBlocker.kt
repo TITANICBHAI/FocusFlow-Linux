@@ -1,5 +1,6 @@
 package com.focusflow.enforcement
 
+import com.focusflow.ProcessNameNormalizer
 import com.focusflow.data.Database
 
 /**
@@ -149,9 +150,7 @@ object VpnBlocker {
     }
 
     fun addCustomProcess(processName: String) {
-        val lower = processName.trim().lowercase().let {
-            if (!it.endsWith(".exe")) "$it.exe" else it
-        }
+        val lower = ProcessNameNormalizer.normalizeManual(processName) ?: return
         val existing = getCustomProcesses().toMutableList()
         if (!existing.contains(lower)) {
             existing.add(lower)

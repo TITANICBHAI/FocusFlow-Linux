@@ -139,4 +139,49 @@ class LinuxAppPickerFilterTest {
             )
         )
     }
+
+    @Test
+    fun `stored process selections resolve through aliases and preserve stale values`() {
+        val aliasedEditor = nativeEditor.copy(processAliases = listOf("workspace-editor"))
+        val selectedKeys = selectedAppKeysForProcessNames(
+            apps = listOf(aliasedEditor),
+            processNames = setOf("workspace-editor", "missing-tool")
+        )
+
+        assertEquals(
+            setOf("org.example.Editor", "missing-tool"),
+            selectedKeys
+        )
+        assertEquals(
+            mapOf("missing-tool" to "Missing-tool"),
+            staleAppSelectionsForProcessNames(
+                apps = listOf(aliasedEditor),
+                processNames = setOf("workspace-editor", "missing-tool")
+            )
+        )
+    }
+
+    @Test
+    fun `known Windows-shaped stored names resolve to Linux catalog entries`() {
+        val linuxDiscord = AppDescriptor(
+            processName = "discord",
+            displayName = "Discord",
+            isRunning = false,
+            source = AppSource.NATIVE_DESKTOP
+        )
+
+        assertEquals(
+            setOf(linuxDiscord.catalogKey()),
+            selectedAppKeysForProcessNames(
+                apps = listOf(linuxDiscord),
+                processNames = setOf("discord.exe")
+            )
+        )
+        assertTrue(
+            staleAppSelectionsForProcessNames(
+                apps = listOf(linuxDiscord),
+                processNames = setOf("discord.exe")
+            ).isEmpty()
+        )
+    }
 }

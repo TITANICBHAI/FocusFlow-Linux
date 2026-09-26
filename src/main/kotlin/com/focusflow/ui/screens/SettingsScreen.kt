@@ -2,6 +2,7 @@ package com.focusflow.ui.screens
 
 import com.focusflow.ui.components.FfVerticalScrollbar
 import com.focusflow.ui.components.ShortcutTooltip
+import com.focusflow.ui.components.BlockScheduleEditorDialog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -38,6 +39,11 @@ import com.focusflow.services.NuclearPin
 import com.focusflow.services.SessionPin
 import com.focusflow.ui.components.NuclearPinGateDialog
 import com.focusflow.ui.components.NuclearPinSetupDialog
+import com.focusflow.ui.components.LinuxAppPicker
+import com.focusflow.ui.components.catalogKey
+import com.focusflow.ui.components.rememberInstalledAppCatalogState
+import com.focusflow.ui.components.selectedAppKeysForProcessNames
+import com.focusflow.ui.components.staleAppSelectionsForProcessNames
 import com.focusflow.services.SoundAversion
 import com.focusflow.services.TaskAlarmService
 import com.focusflow.ui.theme.*
@@ -1214,7 +1220,7 @@ fun SettingsScreen() {
     }
 
     if (showAddSchedule) {
-        AddScheduleDialog(
+        BlockScheduleEditorDialog(
             onDismiss = { showAddSchedule = false },
             onSave    = { sched ->
                 scope.launch {
@@ -1351,9 +1357,16 @@ private fun AddRuleDialog(onDismiss: () -> Unit, onSave: (BlockRule) -> Unit) {
     var blockNetwork by remember { mutableStateOf(false) }
     var showPicker   by remember { mutableStateOf(false) }
     var searchQuery  by remember { mutableStateOf("") }
+    var scannedApps  by remember { mutableStateOf(emptyList<com.focusflow.enforcement.ScannedApp>()) }
+    val catalogState = rememberInstalledAppCatalogState(enabled = isLinux)
+    val pickerScope = rememberCoroutineScope()
 
-    val scannedApps = remember {
-        com.focusflow.enforcement.InstalledAppsScanner.getRunningApps()
+    LaunchedEffect(Unit) {
+        if (isWindows) {
+            scannedApps = withContext(Dispatchers.IO) {
+                com.focusflow.enforcement.InstalledAppsScanner.getRunningApps()
+            }
+        }
     }
 
     AlertDialog(
@@ -1378,7 +1391,49 @@ private fun AddRuleDialog(onDismiss: () -> Unit, onSave: (BlockRule) -> Unit) {
             }
         },
         text = {
-            if (showPicker) {
+            if (showPicker && isLinux) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(modifier = Modifier.height(360.dp)) {
+                        LinuxAppPicker(
+                            state = catalogState,
+                            selectedAppKeys = selectedAppKeysForProcessNames(
+                                catalogState.apps,
+                                processName.takeIf { it.isNotBlank() }?.let { setOf(it) } ?: emptySet()
+                            ),
+                            onSelectionChanged = { keys ->
+                                val key = keys.firstOrNull() ?: return@LinuxAppPicker
+                                val app = catalogState.apps.firstOrNull { it.catalogKey() == key }
+                                processName = app?.processName ?: key
+                                displayName = app?.displayName
+                                    ?: com.focusflow.enforcement.InstalledAppsScanner.friendlyNameFor(key)
+                            },
+                            staleSelections = staleAppSelectionsForProcessNames(
+                                catalogState.apps,
+                                processName.takeIf { it.isNotBlank() }?.let { setOf(it) } ?: emptySet()
+                            ),
+                            onRefresh = {
+                                pickerScope.launch(Dispatchers.IO) {
+                                    com.focusflow.enforcement.InstalledAppCatalog.refresh()
+                                }
+                            },
+                            onManualEntry = { manual ->
+                                processName = manual.processName
+                                displayName = manual.displayName
+                            },
+                            multiSelect = false,
+                            allowManualEntry = true
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = blockNetwork, onCheckedChange = { blockNetwork = it })
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(strings.settingsAlsoBlockNetwork, color = OnSurface)
+                            Text(strings.settingsFirewallNote, style = MaterialTheme.typography.bodySmall, color = Warning)
+                        }
+                    }
+                }
+            } else if (showPicker) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = searchQuery,
@@ -1471,7 +1526,12 @@ private fun AddRuleDialog(onDismiss: () -> Unit, onSave: (BlockRule) -> Unit) {
             Button(
                 onClick = {
                     if (processName.isBlank()) return@Button
-                    val name = if (processName.endsWith(".exe")) processName else "$processName.exe"
+                    val name = if (isWindows) {
+                        if (processName.endsWith(".exe")) processName else "$processName.exe"
+                    } else {
+                        com.focusflow.ProcessNameNormalizer.normalizeManual(processName)
+                            ?: return@Button
+                    }
                     onSave(BlockRule(UUID.randomUUID().toString(), name.lowercase(), displayName.ifBlank { name }, true, blockNetwork))
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Purple80)

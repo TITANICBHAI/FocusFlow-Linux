@@ -4,8 +4,11 @@ import androidx.compose.foundation.Image
 import com.focusflow.ui.components.EmptyStateCard
 import com.focusflow.ui.components.FfVerticalScrollbar
 import com.focusflow.ui.components.LinuxAppPicker
+import com.focusflow.ui.components.LinuxAppPickerDialog
 import com.focusflow.ui.components.rememberInstalledAppCatalogState
 import com.focusflow.ui.components.catalogKey
+import com.focusflow.ui.components.selectedAppKeysForProcessNames
+import com.focusflow.ui.components.staleAppSelectionsForProcessNames
 import com.focusflow.ui.components.PinGateDialog
 import com.focusflow.ui.components.ShortcutTooltip
 import androidx.compose.foundation.background
@@ -412,13 +415,14 @@ private fun AlwaysBlockTab(onNavigateToBlockDefense: () -> Unit) {
 
             // ── Inline apps ──────────────────────────────────────────────────
             item {
-                Column(
-                    modifier = Modifier.fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Surface2)
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                if (isWindows) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Surface2)
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -575,18 +579,30 @@ private fun AlwaysBlockTab(onNavigateToBlockDefense: () -> Unit) {
                             }
                         }
                     }
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = { showPicker = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Purple80)
+                    ) {
+                        Icon(Icons.Default.Apps, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(strings.blockerPickFromList, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
 
             // ── Manual entry ─────────────────────────────────────────────────
             item {
-                Column(
-                    modifier = Modifier.fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Surface2)
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
+                if (isWindows) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Surface2)
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -640,6 +656,7 @@ private fun AlwaysBlockTab(onNavigateToBlockDefense: () -> Unit) {
                             Spacer(Modifier.width(4.dp))
                             Text(strings.blockerBlock, fontWeight = FontWeight.SemiBold)
                         }
+                    }
                     }
                 }
             }
@@ -1293,63 +1310,14 @@ private fun LinuxBlockPickerDialog(
     onDismiss: () -> Unit,
     onConfirm: (List<AppDescriptor>) -> Unit
 ) {
-    var selectedKeys by remember(state.apps, selectedProcessNames) {
-        mutableStateOf(
-            state.apps
-                .filter { app -> selectedProcessNames.any { it.equals(app.processName, ignoreCase = true) } }
-                .map { it.catalogKey() }
-                .toSet() + selectedProcessNames.filter { saved ->
-                    state.apps.none { it.processName.equals(saved, ignoreCase = true) }
-                }.toSet()
-        )
-    }
-    var manualEntries by remember { mutableStateOf<Map<String, AppDescriptor>>(emptyMap()) }
-    val staleSelections = remember(state.apps, selectedProcessNames) {
-        selectedProcessNames
-            .filter { saved -> state.apps.none { it.processName.equals(saved, ignoreCase = true) } }
-            .associateWith { saved -> InstalledAppsScanner.friendlyNameFor(saved) }
-    }
-    val scope = rememberCoroutineScope()
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Surface2,
-        modifier = Modifier.width(560.dp),
-        title = { Text(title, color = OnSurface, fontWeight = FontWeight.Bold) },
-        text = {
-            Box(modifier = Modifier.height(420.dp)) {
-                LinuxAppPicker(
-                    state = state,
-                    selectedAppKeys = selectedKeys,
-                    onSelectionChanged = { selectedKeys = it },
-                    staleSelections = staleSelections,
-                    onRefresh = {
-                        scope.launch(Dispatchers.IO) { com.focusflow.enforcement.InstalledAppCatalog.refresh() }
-                    },
-                    onManualEntry = { manualEntries = manualEntries + (it.catalogKey() to it) },
-                    allowManualEntry = true
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val byKey = state.apps.associateBy { it.catalogKey() } + manualEntries
-                    val picked = selectedKeys.mapNotNull { key ->
-                        byKey[key] ?: AppDescriptor(
-                            processName = key,
-                            displayName = InstalledAppsScanner.friendlyNameFor(key),
-                            isRunning = false
-                        )
-                    }.distinctBy { it.processName.lowercase() }
-                    onConfirm(picked)
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Purple80)
-            ) { Text(confirmLabel) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(LocalizationManager.strings.btnCancel, color = OnSurface2) }
-        }
+    LinuxAppPickerDialog(
+        state = state,
+        selectedAppKeys = selectedAppKeysForProcessNames(state.apps, selectedProcessNames),
+        staleSelections = staleAppSelectionsForProcessNames(state.apps, selectedProcessNames),
+        title = title,
+        confirmLabel = confirmLabel,
+        onDismiss = onDismiss,
+        onConfirm = onConfirm
     )
 }
 
@@ -1360,7 +1328,7 @@ private fun LinuxAllowancePickerDialog(
     onDismiss: () -> Unit,
     onConfirm: (processName: String, displayName: String, minutes: Int) -> Unit
 ) {
-    var selectedKeys by remember(state.apps, alreadyAllowed) { mutableStateOf(emptySet<String>()) }
+    var selectedKeys by remember { mutableStateOf(emptySet<String>()) }
     var selectedApp by remember { mutableStateOf<AppDescriptor?>(null) }
     var minutes by remember { mutableStateOf(60) }
     var customMinutes by remember { mutableStateOf("") }

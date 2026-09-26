@@ -21,6 +21,9 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -36,12 +39,14 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -59,6 +64,7 @@ import com.focusflow.enforcement.AppCatalogState
 import com.focusflow.enforcement.AppDescriptor
 import com.focusflow.enforcement.AppIconExtractor
 import com.focusflow.enforcement.AppSource
+import com.focusflow.enforcement.InstalledAppCatalog
 import com.focusflow.enforcement.InstalledAppsScanner
 import com.focusflow.ui.theme.Error
 import com.focusflow.ui.theme.OnSurface2
@@ -68,6 +74,7 @@ import com.focusflow.ui.theme.Surface2
 import com.focusflow.ui.theme.Surface3
 import com.focusflow.ui.theme.Warning
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.ZoneId
@@ -391,6 +398,136 @@ fun LinuxAppPicker(
             )
         }
     }
+}
+
+/**
+ * Converts the process names used by the existing database models into the
+ * stable keys used by the shared picker. Unmatched values are retained so
+ * stale rules remain selectable and understandable.
+ */
+internal fun selectedAppKeysForProcessNames(
+    apps: List<AppDescriptor>,
+    processNames: Set<String>
+): Set<String> {
+    val matchedKeys = apps
+        .filter { app ->
+            processNames.any { saved ->
+                InstalledAppsScanner.resolveAppReference(saved, listOf(app)) != null ||
+                    saved.equals(app.processName, ignoreCase = true) ||
+                    app.processAliases.any { alias ->
+                        alias.equals(saved, ignoreCase = true)
+                    }
+            }
+        }
+        .map { it.catalogKey() }
+        .toSet()
+    val matchedProcesses = apps
+        .filter { app ->
+            processNames.any { saved ->
+                InstalledAppsScanner.resolveAppReference(saved, listOf(app)) != null ||
+                    saved.equals(app.processName, ignoreCase = true) ||
+                    app.processAliases.any { alias ->
+                        alias.equals(saved, ignoreCase = true)
+                    }
+            }
+        }
+        .flatMap { app -> listOf(app.processName) + app.processAliases }
+        .map { it.lowercase() }
+        .toSet()
+    return matchedKeys + processNames.filterNot { it.lowercase() in matchedProcesses }
+}
+
+internal fun staleAppSelectionsForProcessNames(
+    apps: List<AppDescriptor>,
+    processNames: Set<String>
+): Map<String, String> = processNames
+    .filter { saved ->
+        apps.none { app ->
+            InstalledAppsScanner.resolveAppReference(saved, listOf(app)) != null ||
+                saved.equals(app.processName, ignoreCase = true) ||
+                app.processAliases.any { alias ->
+                    alias.equals(saved, ignoreCase = true)
+                }
+        }
+    }
+    .associateWith { InstalledAppsScanner.friendlyNameFor(it) }
+
+/**
+ * The dialog shell for all Linux multi-select app flows. Screens provide only
+ * the current selection and the action taken after confirmation; search,
+ * filtering, refresh, manual entry, stale references, and catalog resolution
+ * remain in the shared picker path.
+ */
+@Composable
+fun LinuxAppPickerDialog(
+    state: AppCatalogState,
+    selectedAppKeys: Set<String>,
+    title: String,
+    confirmLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: (List<AppDescriptor>) -> Unit,
+    staleSelections: Map<String, String> = emptyMap(),
+    multiSelect: Boolean = true,
+    allowManualEntry: Boolean = true
+) {
+    var selectedKeys by remember { mutableStateOf(selectedAppKeys) }
+    var manualEntries by remember { mutableStateOf<Map<String, AppDescriptor>>(emptyMap()) }
+    val refreshScope = rememberCoroutineScope()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Surface2,
+        modifier = Modifier.width(560.dp),
+        title = {
+            Text(title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Box(modifier = Modifier.height(420.dp)) {
+                LinuxAppPicker(
+                    state = state,
+                    selectedAppKeys = selectedKeys,
+                    onSelectionChanged = { selectedKeys = it },
+                    staleSelections = staleSelections,
+                    onRefresh = {
+                        refreshScope.launch(Dispatchers.IO) {
+                            InstalledAppCatalog.refresh()
+                        }
+                    },
+                    onManualEntry = {
+                        manualEntries = manualEntries + (it.catalogKey() to it)
+                    },
+                    multiSelect = multiSelect,
+                    allowManualEntry = allowManualEntry
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val byKey = (state.apps + manualEntries.values)
+                        .distinctBy { it.catalogKey() }
+                        .associateBy { it.catalogKey() }
+                    val picked = selectedKeys.map { key ->
+                        byKey[key] ?: AppDescriptor(
+                            processName = key,
+                            displayName = InstalledAppsScanner.friendlyNameFor(key),
+                            isRunning = false,
+                            source = AppSource.MANUAL
+                        )
+                    }.distinctBy { it.processName.lowercase() }
+                    onConfirm(picked)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Purple80)
+            ) {
+                Text(confirmLabel)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = OnSurface2)
+            }
+        }
+    )
 }
 
 @Composable

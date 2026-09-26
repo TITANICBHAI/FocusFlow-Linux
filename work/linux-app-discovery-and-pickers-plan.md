@@ -16,7 +16,7 @@ enforcement engine, or declare the Linux release ready by itself.
 - Blocks: reliable Linux app blocking, task focus-app selection, and the later
   Windows-removal cleanup
 - Execution mode: **Five batches; maximum seven tracker items per batch**
-- Active batch: **APP-15–APP-21** (assigned subset complete; APP-17–APP-21 remain)
+- Active batch: **APP-22–APP-28** (APP-22–APP-25 remain; APP-26–APP-28 complete)
 
 ## Batch execution protocol
 
@@ -29,7 +29,7 @@ at once.
 |---|---|---|---|
 | Batch 1 | APP-01–APP-07 | Catalog contract and source metadata | Complete |
 | Batch 2 | APP-08–APP-14 | Refresh state and shared picker foundation | Complete |
-| Batch 3 | APP-15–APP-21 | Manual entry and first screen integrations | In progress |
+| Batch 3 | APP-15–APP-21 | Manual entry and first screen integrations | Complete |
 | Batch 4 | APP-22–APP-28 | Remaining screen integrations and compatibility | In progress |
 | Batch 5 | APP-29–APP-34 | Cross-platform verification and AppImage decision | Not started |
 
@@ -115,10 +115,23 @@ preservation. Catalog resolution covers stable IDs, package IDs, display names,
 aliases, and known stale Windows-shaped values. Database process read/write
 boundaries use the centralized OS-aware normalizer without deleting unmatched
 rules or arbitrary user-entered `.exe` values.
-Blocked or deferred items: APP-17–APP-25 and APP-29 onward remain unchecked.
-The Batch 3 and Batch 4 batches are still incomplete.
-Next batch: Continue APP-17–APP-25 screen integration work, then APP-29–APP-34
+Blocked or deferred items: APP-22–APP-25 and APP-29 onward remain unchecked.
+The Batch 3 batch is now complete; Batch 4 remains incomplete.
+Next batch: Continue APP-22–APP-25 screen integration work, then APP-29–APP-34
 cross-platform verification and the AppImage decision.
+
+Batch: APP-17–APP-21
+Date: 2026-09-27
+Completed tracker items: APP-17, APP-18, APP-19, APP-20, APP-21
+Verification: Focused `LinuxAppPickerFilterTest` and complete `gradle test
+--no-daemon` passed; Compose compilation passed; `git diff --check` passed. The
+App Blocker, Focus Launcher, Daily Allowance, Timed Block, Focus Session, and
+Tasks Focus Mode Linux flows now use the shared catalog/picker. Shared dialog
+resolution preserves stable catalog keys, manual entries, and stale references;
+Focus Launcher preserves an intentionally empty selection across refreshes and
+includes manual Linux entries when starting a session.
+Blocked or deferred items: APP-22–APP-25 and APP-29 onward remain unchecked.
+Next batch: APP-22–APP-25 (remaining screen integrations), then APP-29–APP-34.
 
 ## Current baseline
 
@@ -363,11 +376,11 @@ Do not silently delete rules during catalog refresh.
 
 ### Screen integration
 
-- [ ] **APP-17** Replace App Blocker picker logic with the shared picker.
-- [ ] **APP-18** Upgrade Focus Launcher to browse all installed apps.
-- [ ] **APP-19** Upgrade Daily Allowance and Timed Block pickers.
-- [ ] **APP-20** Upgrade Focus Session extra-app selection.
-- [ ] **APP-21** Replace the Tasks Focus Mode grid with searchable selection.
+- [x] **APP-17** Replace App Blocker picker logic with the shared picker.
+- [x] **APP-18** Upgrade Focus Launcher to browse all installed apps.
+- [x] **APP-19** Upgrade Daily Allowance and Timed Block pickers.
+- [x] **APP-20** Upgrade Focus Session extra-app selection.
+- [x] **APP-21** Replace the Tasks Focus Mode grid with searchable selection.
 - [ ] **APP-22** Upgrade recurring schedule app selection.
 - [ ] **APP-23** Upgrade Settings blocked-app selection.
 - [ ] **APP-24** Add installed/running VPN target selection.

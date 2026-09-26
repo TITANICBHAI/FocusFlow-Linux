@@ -19,8 +19,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.focusflow.data.models.BlockSchedule
 import com.focusflow.data.models.hasValidTimeRange
+import com.focusflow.enforcement.AppDescriptor
 import com.focusflow.enforcement.InstalledAppsScanner
 import com.focusflow.enforcement.ScannedApp
+import com.focusflow.enforcement.isWindows
 import com.focusflow.i18n.LocalizationManager
 import com.focusflow.ui.theme.*
 import kotlinx.coroutines.Dispatchers
@@ -56,10 +58,14 @@ fun BlockScheduleEditorDialog(
     var searchQuery by remember { mutableStateOf("") }
     var apps by remember { mutableStateOf(listOf<ScannedApp>()) }
     var validationError by remember { mutableStateOf("") }
+    var showLinuxPicker by remember { mutableStateOf(false) }
+    val catalogState = rememberInstalledAppCatalogState(enabled = !isWindows)
     val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
     LaunchedEffect(Unit) {
-        apps = withContext(Dispatchers.IO) { InstalledAppsScanner.getCuratedApps() }
+        if (isWindows) {
+            apps = withContext(Dispatchers.IO) { InstalledAppsScanner.getCuratedApps() }
+        }
     }
 
     val visibleApps = apps.filter {
@@ -139,80 +145,97 @@ fun BlockScheduleEditorDialog(
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    label = { Text("Search installed apps") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Purple80,
-                        unfocusedBorderColor = OnSurface2
-                    )
-                )
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 56.dp, max = 230.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Surface3)
-                        .verticalScroll(rememberScrollState())
-                        .padding(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    if (visibleApps.isEmpty()) {
-                        Text(
-                            "No installed apps found. Add a process name below.",
-                            color = OnSurface2,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(8.dp)
+                if (isWindows) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        label = { Text("Search installed apps") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Purple80,
+                            unfocusedBorderColor = OnSurface2
                         )
-                    } else {
-                        visibleApps.forEach { app ->
-                            val processName = app.processName.lowercase()
-                            val selected = processName in selectedProcesses
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        selectedProcesses =
-                                            if (selected) selectedProcesses - processName
-                                            else selectedProcesses + processName
+                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 56.dp, max = 230.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Surface3)
+                            .verticalScroll(rememberScrollState())
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (visibleApps.isEmpty()) {
+                            Text(
+                                "No installed apps found. Add a process name below.",
+                                color = OnSurface2,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        } else {
+                            visibleApps.forEach { app ->
+                                val processName = app.processName.lowercase()
+                                val selected = processName in selectedProcesses
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            selectedProcesses =
+                                                if (selected) selectedProcesses - processName
+                                                else selectedProcesses + processName
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Checkbox(
+                                        checked = selected,
+                                        onCheckedChange = {
+                                            selectedProcesses =
+                                                if (selected) selectedProcesses - processName
+                                                else selectedProcesses + processName
+                                        },
+                                        colors = CheckboxDefaults.colors(checkedColor = Purple80)
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(app.displayName, color = OnSurface, style = MaterialTheme.typography.bodySmall)
+                                        Text(app.processName, color = OnSurface2, style = MaterialTheme.typography.labelSmall)
                                     }
-                                    .padding(horizontal = 8.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Checkbox(
-                                    checked = selected,
-                                    onCheckedChange = {
-                                        selectedProcesses =
-                                            if (selected) selectedProcesses - processName
-                                            else selectedProcesses + processName
-                                    },
-                                    colors = CheckboxDefaults.colors(checkedColor = Purple80)
-                                )
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(app.displayName, color = OnSurface, style = MaterialTheme.typography.bodySmall)
-                                    Text(app.processName, color = OnSurface2, style = MaterialTheme.typography.labelSmall)
                                 }
                             }
                         }
                     }
-                }
-                OutlinedTextField(
-                    value = customProcesses,
-                    onValueChange = { customProcesses = it; validationError = "" },
-                    label = { Text("Additional process names (optional)") },
-                    placeholder = { Text("example.exe, another.exe") },
-                    supportingText = { Text("Use this for an app not found in the installed-app list.") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Purple80,
-                        unfocusedBorderColor = OnSurface2
+                    OutlinedTextField(
+                        value = customProcesses,
+                        onValueChange = { customProcesses = it; validationError = "" },
+                        label = { Text("Additional process names (optional)") },
+                        placeholder = { Text("example.exe, another.exe") },
+                        supportingText = { Text("Use this for an app not found in the installed-app list.") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Purple80,
+                            unfocusedBorderColor = OnSurface2
+                        )
                     )
-                )
+                } else {
+                    Text(
+                        "${selectedProcesses.size} app${if (selectedProcesses.size == 1) "" else "s"} selected",
+                        color = OnSurface2,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedButton(
+                        onClick = { showLinuxPicker = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Purple80)
+                    ) {
+                        Icon(Icons.Default.Apps, null, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Choose apps from the Linux catalog")
+                    }
+                }
 
                 Text("Start and end time", color = OnSurface2, style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -257,11 +280,15 @@ fun BlockScheduleEditorDialog(
                     val sm = startMinute.toIntOrNull()
                     val eh = endHour.toIntOrNull()
                     val em = endMinute.toIntOrNull()
-                    val custom = customProcesses
-                        .split(",", "\n")
-                        .map { it.trim().lowercase() }
-                        .filter { it.isNotBlank() }
-                        .map { if (it.endsWith(".exe")) it else "$it.exe" }
+                    val custom = if (isWindows) {
+                        customProcesses
+                            .split(",", "\n")
+                            .map { it.trim().lowercase() }
+                            .filter { it.isNotBlank() }
+                            .map { if (it.endsWith(".exe")) it else "$it.exe" }
+                    } else {
+                        emptyList()
+                    }
                     val processes = (selectedProcesses + custom).toList().distinct()
                     val schedule = if (sh != null && sm != null && eh != null && em != null) {
                         BlockSchedule(
@@ -298,4 +325,20 @@ fun BlockScheduleEditorDialog(
             }
         }
     )
+
+    if (showLinuxPicker) {
+        LinuxAppPickerDialog(
+            state = catalogState,
+            selectedAppKeys = selectedAppKeysForProcessNames(catalogState.apps, selectedProcesses),
+            staleSelections = staleAppSelectionsForProcessNames(catalogState.apps, selectedProcesses),
+            title = "Choose apps for this recurring schedule",
+            confirmLabel = "Use selected apps",
+            onDismiss = { showLinuxPicker = false },
+            onConfirm = { picked ->
+                selectedProcesses = picked.map { it.processName.lowercase() }.toSet()
+                showLinuxPicker = false
+                validationError = ""
+            }
+        )
+    }
 }

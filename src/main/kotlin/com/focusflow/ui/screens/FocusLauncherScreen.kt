@@ -83,6 +83,9 @@ fun FocusLauncherScreen() {
     var showSavePreset     by remember { mutableStateOf(false) }
     var presetName         by remember { mutableStateOf("") }
     var selectionLoaded    by remember { mutableStateOf(false) }
+    var linuxSelectionInitialized by remember { mutableStateOf(false) }
+    var hasPersistedLinuxSelection by remember { mutableStateOf(false) }
+    var manualLinuxApps     by remember { mutableStateOf<List<FocusLauncherApp>>(emptyList()) }
     val catalogState = rememberInstalledAppCatalogState(enabled = !isWindows)
 
     // Checked once on composition — running "net session" is a blocking call so we
@@ -126,6 +129,7 @@ fun FocusLauncherScreen() {
                 apps.map { it.processName.lowercase() }.toSet()
             }
         } else {
+            hasPersistedLinuxSelection = persisted != null
             selectedApps = saved
         }
         selectionLoaded = true
@@ -134,18 +138,18 @@ fun FocusLauncherScreen() {
 
     LaunchedEffect(catalogState.apps, selectionLoaded) {
         if (!isWindows && selectionLoaded && catalogState.apps.isNotEmpty()) {
-            val savedOrAll = if (selectedApps.isNotEmpty()) {
-                selectedApps
-            } else {
-                catalogState.apps.map { it.processName.lowercase() }.toSet()
+            if (!linuxSelectionInitialized) {
+                if (!hasPersistedLinuxSelection) {
+                    selectedApps = catalogState.apps.map { it.processName.lowercase() }.toSet()
+                }
+                linuxSelectionInitialized = true
             }
-            selectedApps = savedOrAll
             availableApps = catalogState.apps.map {
                 FocusLauncherApp(it.processName, it.displayName, it.exePath)
             }.filter { app ->
-                savedOrAll.any { it.equals(app.processName, ignoreCase = true) }
+                selectedApps.any { it.equals(app.processName, ignoreCase = true) }
             }.toMutableList().also { apps ->
-                savedOrAll.forEach { saved ->
+                selectedApps.forEach { saved ->
                     if (apps.none { it.processName.equals(saved, ignoreCase = true) }) {
                         apps += FocusLauncherApp(saved, InstalledAppsScanner.friendlyNameFor(saved), null)
                     }
@@ -156,6 +160,7 @@ fun FocusLauncherScreen() {
     }
 
     LaunchedEffect(searchQuery) {
+        if (!isWindows) return@LaunchedEffect
         if (searchQuery.isBlank()) {
             searchResults = emptyList()
             return@LaunchedEffect
@@ -173,6 +178,30 @@ fun FocusLauncherScreen() {
                 .take(10)
                 .map { FocusLauncherApp(it.processName, it.displayName, it.exePath) }
         }
+    }
+
+    val linuxAppsForSession = if (!isWindows) {
+        val catalogApps = catalogState.apps
+            .filter { app -> selectedApps.any { it.equals(app.processName, ignoreCase = true) } }
+            .map { app -> FocusLauncherApp(app.processName, app.displayName, app.exePath) }
+        val selectedManualApps = manualLinuxApps.filter { app ->
+            selectedApps.any { it.equals(app.processName, ignoreCase = true) }
+        }
+        val knownNames = (catalogApps + selectedManualApps)
+            .map { it.processName.lowercase() }
+            .toSet()
+        val staleApps = selectedApps
+            .filter { it.lowercase() !in knownNames }
+            .map { FocusLauncherApp(it, InstalledAppsScanner.friendlyNameFor(it), null) }
+        (catalogApps + selectedManualApps + staleApps)
+            .distinctBy { it.processName.lowercase() }
+    } else {
+        emptyList()
+    }
+    val appsForSession = if (isWindows) {
+        availableApps.filter { it.processName.lowercase() in selectedApps }
+    } else {
+        linuxAppsForSession
     }
 
     if (isActive) {
@@ -378,6 +407,13 @@ fun FocusLauncherScreen() {
                     staleSelections = selectedApps
                         .filter { saved -> catalogState.apps.none { it.processName.equals(saved, ignoreCase = true) } }
                         .associateWith { InstalledAppsScanner.friendlyNameFor(it) },
+                        onManualEntry = { manual ->
+                            manualLinuxApps = (manualLinuxApps + FocusLauncherApp(
+                                processName = manual.processName,
+                                displayName = manual.displayName,
+                                exePath = manual.exePath
+                            )).distinctBy { it.processName.lowercase() }
+                        },
                     onRefresh = {
                         scope.launch(Dispatchers.IO) {
                             com.focusflow.enforcement.InstalledAppCatalog.refresh()
@@ -592,9 +628,6 @@ fun FocusLauncherScreen() {
         // ── Enter button ──────────────────────────────────────────────────────
         item {
             Spacer(Modifier.height(8.dp))
-            val appsForSession = availableApps.filter {
-                it.processName.lowercase() in selectedApps
-            }
             Button(
                 onClick = {
                     // Gate on admin elevation: registry lockdown and fast-user-switching
@@ -784,7 +817,6 @@ fun FocusLauncherScreen() {
 
     // ── Confirm dialog ────────────────────────────────────────────────────────
     if (confirmEnter) {
-        val appsForSession = availableApps.filter { it.processName.lowercase() in selectedApps }
         val duration       = if (durationIndex == CUSTOM_DURATION_INDEX) {
             customDurationMinutes
         } else {
@@ -839,7 +871,6 @@ fun FocusLauncherScreen() {
 
     // ── One-time session PIN ──────────────────────────────────────────────────
     if (showPinBeforeEnter) {
-        val appsForSession = availableApps.filter { it.processName.lowercase() in selectedApps }
         val duration = if (durationIndex == CUSTOM_DURATION_INDEX) {
             customDurationMinutes
         } else {

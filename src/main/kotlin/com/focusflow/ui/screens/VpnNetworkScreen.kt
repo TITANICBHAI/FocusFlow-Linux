@@ -33,6 +33,10 @@ import com.focusflow.enforcement.isWindows
 import com.focusflow.services.GlobalPin
 import com.focusflow.services.HostsBlocker
 import com.focusflow.ui.components.PinGateDialog
+import com.focusflow.ui.components.LinuxAppPickerDialog
+import com.focusflow.ui.components.rememberInstalledAppCatalogState
+import com.focusflow.ui.components.selectedAppKeysForProcessNames
+import com.focusflow.ui.components.staleAppSelectionsForProcessNames
 import com.focusflow.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -77,6 +81,8 @@ fun VpnNetworkScreen() {
     var appSpecific         by remember { mutableStateOf(false) }
     var newTargetProcess    by remember { mutableStateOf("") }
     var newTargetDisplay    by remember { mutableStateOf("") }
+    var showTargetPicker    by remember { mutableStateOf(false) }
+    val catalogState = rememberInstalledAppCatalogState(enabled = isLinux)
 
     var showPinGate         by remember { mutableStateOf(false) }
     var pendingAction       by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -249,7 +255,12 @@ fun VpnNetworkScreen() {
                         OutlinedTextField(
                             value = newCustomVpn,
                             onValueChange = { newCustomVpn = it },
-                            placeholder = { Text("e.g. myvpn.exe", color = OnSurface2) },
+                            placeholder = {
+                                Text(
+                                    if (isLinux) "e.g. myvpn" else "e.g. myvpn.exe",
+                                    color = OnSurface2
+                                )
+                            },
                             singleLine = true,
                             modifier = Modifier.weight(1f),
                             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Error, unfocusedBorderColor = OnSurface2)
@@ -436,12 +447,34 @@ fun VpnNetworkScreen() {
                     }
 
                     if (appSpecific) {
+                        if (isLinux) {
+                            OutlinedButton(
+                                onClick = { showTargetPicker = true },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Warning)
+                            ) {
+                                Icon(Icons.Default.Apps, null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    if (newTargetProcess.isBlank()) {
+                                        "Choose a target app from the Linux catalog"
+                                    } else {
+                                        "Change target app"
+                                    }
+                                )
+                            }
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
                                 value = newTargetProcess,
                                 onValueChange = { newTargetProcess = it },
                                 label = { Text(strings.vpnProcessNameLabel) },
-                                placeholder = { Text("e.g. chrome.exe", color = OnSurface2) },
+                                placeholder = {
+                                    Text(
+                                        if (isLinux) "e.g. firefox" else "e.g. chrome.exe",
+                                        color = OnSurface2
+                                    )
+                                },
                                 singleLine = true,
                                 modifier = Modifier.weight(1f),
                                 colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Warning, unfocusedBorderColor = OnSurface2)
@@ -464,7 +497,7 @@ fun VpnNetworkScreen() {
                             if (pat.isBlank()) return@Button
                             val targetProc = if (appSpecific && newTargetProcess.isNotBlank()) {
                                 newTargetProcess.trim().lowercase().let {
-                                    if (!it.endsWith(".exe")) "$it.exe" else it
+                                    if (isWindows && !it.endsWith(".exe")) "$it.exe" else it
                                 }
                             } else null
                             val targetDisp = if (appSpecific && newTargetDisplay.isNotBlank()) newTargetDisplay.trim()
@@ -629,6 +662,31 @@ fun VpnNetworkScreen() {
             onDismiss = {
                 showPinGate = false
                 pendingAction = null
+            }
+        )
+    }
+
+    if (showTargetPicker && isLinux) {
+        LinuxAppPickerDialog(
+            state = catalogState,
+            selectedAppKeys = selectedAppKeysForProcessNames(
+                catalogState.apps,
+                newTargetProcess.takeIf { it.isNotBlank() }?.let { setOf(it) } ?: emptySet()
+            ),
+            staleSelections = staleAppSelectionsForProcessNames(
+                catalogState.apps,
+                newTargetProcess.takeIf { it.isNotBlank() }?.let { setOf(it) } ?: emptySet()
+            ),
+            title = "Choose a VPN target app",
+            confirmLabel = "Use target app",
+            multiSelect = false,
+            onDismiss = { showTargetPicker = false },
+            onConfirm = { picked ->
+                picked.firstOrNull()?.let { app ->
+                    newTargetProcess = app.processName
+                    newTargetDisplay = app.displayName
+                }
+                showTargetPicker = false
             }
         )
     }

@@ -38,6 +38,7 @@ import com.focusflow.data.Database
 import com.focusflow.data.models.BlockRule
 import com.focusflow.enforcement.BlockPreset
 import com.focusflow.enforcement.BlockPresets
+import com.focusflow.enforcement.AppCatalogState
 import com.focusflow.enforcement.InstalledAppsScanner
 import com.focusflow.enforcement.WindowsStartupManager
 import com.focusflow.enforcement.isWindows
@@ -73,6 +74,7 @@ fun OnboardingDialog(onDismiss: () -> Unit) {
     var selectedTheme   by remember { mutableStateOf(if (isDarkTheme) "dark" else "light") }
     val scope = rememberCoroutineScope()
     val s = LocalizationManager.strings
+    val catalogState = rememberInstalledAppCatalogState(enabled = isLinux)
 
     val totalPages = 9
 
@@ -145,7 +147,7 @@ fun OnboardingDialog(onDismiss: () -> Unit) {
                             val suggestions = BlockPresets.goalSuggestions[goal] ?: emptyList()
                             selectedPresets = suggestions.toSet()
                         }
-                        6 -> PresetsPage(selectedPresets) { selectedPresets = it }
+                        6 -> PresetsPage(catalogState, selectedPresets) { selectedPresets = it }
                         7 -> FocusDurationPage(focusDuration) { focusDuration = it }
                         8 -> GuidePage()
                     }
@@ -662,7 +664,11 @@ private fun GoalPage(selectedGoal: String?, onGoalSelect: (String) -> Unit) {
 }
 
 @Composable
-private fun PresetsPage(selectedPresets: Set<String>, onToggle: (Set<String>) -> Unit) {
+private fun PresetsPage(
+    catalogState: AppCatalogState,
+    selectedPresets: Set<String>,
+    onToggle: (Set<String>) -> Unit
+) {
     val s = LocalizationManager.strings
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -703,6 +709,35 @@ private fun PresetsPage(selectedPresets: Set<String>, onToggle: (Set<String>) ->
             )
         }
 
+        if (isLinux) {
+            val selectedMissing = if (catalogState.apps.isNotEmpty()) {
+                BlockPresets.all
+                    .filter { it.id in selectedPresets }
+                    .flatMap { preset ->
+                        preset.processNames.filter { process ->
+                            InstalledAppsScanner.resolveAppReference(process, catalogState.apps) == null
+                        }
+                    }
+                    .distinct()
+            } else {
+                emptyList()
+            }
+            if (catalogState.isRefreshing && catalogState.apps.isEmpty()) {
+                Text(
+                    "Checking installed Linux applications…",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = OnSurface2
+                )
+            } else if (selectedMissing.isNotEmpty()) {
+                Text(
+                    "Not found on this Linux system: ${selectedMissing.joinToString()}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Warning,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
             modifier = Modifier.height(300.dp),
@@ -713,6 +748,13 @@ private fun PresetsPage(selectedPresets: Set<String>, onToggle: (Set<String>) ->
                 PresetCard(
                     preset = preset,
                     isSelected = preset.id in selectedPresets,
+                    missingApps = if (isLinux && catalogState.apps.isNotEmpty()) {
+                        preset.processNames.filter { process ->
+                            InstalledAppsScanner.resolveAppReference(process, catalogState.apps) == null
+                        }.distinct()
+                    } else {
+                        emptyList()
+                    },
                     onToggle = {
                         onToggle(
                             if (preset.id in selectedPresets)
@@ -728,7 +770,12 @@ private fun PresetsPage(selectedPresets: Set<String>, onToggle: (Set<String>) ->
 }
 
 @Composable
-private fun PresetCard(preset: BlockPreset, isSelected: Boolean, onToggle: () -> Unit) {
+private fun PresetCard(
+    preset: BlockPreset,
+    isSelected: Boolean,
+    missingApps: List<String>,
+    onToggle: () -> Unit
+) {
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(14.dp))
@@ -771,6 +818,14 @@ private fun PresetCard(preset: BlockPreset, isSelected: Boolean, onToggle: () ->
             color = OnSurface2,
             lineHeight = 16.sp
         )
+        if (missingApps.isNotEmpty()) {
+            Text(
+                "Missing: ${missingApps.joinToString()}",
+                style = MaterialTheme.typography.labelSmall,
+                color = Warning,
+                lineHeight = 14.sp
+            )
+        }
     }
 }
 

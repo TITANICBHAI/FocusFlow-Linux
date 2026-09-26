@@ -10,13 +10,13 @@ enforcement engine, or declare the Linux release ready by itself.
 
 ## Status
 
-- Overall: **Not started**
+- Overall: **In progress**
 - Owner: FocusFlow implementation work
 - Depends on: existing Linux platform detection and Compose UI
 - Blocks: reliable Linux app blocking, task focus-app selection, and the later
   Windows-removal cleanup
 - Execution mode: **Five batches; maximum seven tracker items per batch**
-- Active batch: **APP-01–APP-07**
+- Active batch: **APP-08–APP-14**
 
 ## Batch execution protocol
 
@@ -27,8 +27,8 @@ at once.
 
 | Batch | Tracker IDs | Scope | Status |
 |---|---|---|---|
-| Batch 1 | APP-01–APP-07 | Catalog contract and source metadata | Not started |
-| Batch 2 | APP-08–APP-14 | Refresh state and shared picker foundation | Not started |
+| Batch 1 | APP-01–APP-07 | Catalog contract and source metadata | Complete |
+| Batch 2 | APP-08–APP-14 | Refresh state and shared picker foundation | In progress |
 | Batch 3 | APP-15–APP-21 | Manual entry and first screen integrations | Not started |
 | Batch 4 | APP-22–APP-28 | Remaining screen integrations and compatibility | Not started |
 | Batch 5 | APP-29–APP-34 | Cross-platform verification and AppImage decision | Not started |
@@ -67,6 +67,27 @@ Verification:
 Blocked or deferred items:
 Next batch:
 ```
+
+Batch: APP-01–APP-07
+Date: 2026-09-27
+Completed tracker items: APP-01, APP-02, APP-03, APP-04, APP-05, APP-06, APP-07
+Verification: Focused `InstalledAppsScannerLinuxTest` and complete `gradle test`
+suite passed; `git diff --check` passed. Tests cover localized metadata, visibility,
+Flatpak/Snap source classification, duplicate desktop IDs, Exec normalization,
+startup-window aliases, running PID retention, alias-based merging, and manual
+entries without an automatic `.exe` suffix.
+Blocked or deferred items: None within this batch. APP-08 onward remains unchecked.
+Next batch: APP-08–APP-14 (refresh state and shared picker foundation)
+
+Batch: APP-08–APP-10
+Date: 2026-09-27
+Completed tracker items: APP-08, APP-09, APP-10
+Verification: Focused `InstalledAppsScannerLinuxTest` and complete `gradle test`
+suite passed; Compose compilation and `git diff --check` passed. Tests cover
+malformed entries, duplicate entries, localized names, hidden entries, Exec field
+codes, and desktop/executable paths containing spaces.
+Blocked or deferred items: APP-11–APP-14 remain unchecked.
+Next batch: APP-11–APP-14 (picker search, filters, status metadata, and refresh UX)
 
 The next agent must inspect the latest record before continuing.
 
@@ -283,25 +304,25 @@ Do not silently delete rules during catalog refresh.
 
 ### Catalog and scanner
 
-- [ ] **APP-01** Define the shared Linux app descriptor and source enum.
-- [ ] **APP-02** Add a catalog repository with read, refresh, and resolve APIs.
-- [ ] **APP-03** Discover XDG application directories, Flatpak exports, and
+- [x] **APP-01** Define the shared Linux app descriptor and source enum.
+- [x] **APP-02** Add a catalog repository with read, refresh, and resolve APIs.
+- [x] **APP-03** Discover XDG application directories, Flatpak exports, and
   Snap desktop entries without duplicate results.
-- [ ] **APP-04** Parse localized names, icon values, visibility keys, desktop
+- [x] **APP-04** Parse localized names, icon values, visibility keys, desktop
   IDs, package IDs, and `TryExec`.
-- [ ] **APP-05** Safely parse `Exec=` field codes and retain both launch command
+- [x] **APP-05** Safely parse `Exec=` field codes and retain both launch command
   and normalized executable information.
-- [ ] **APP-06** Map desktop entries to running processes using executable,
+- [x] **APP-06** Map desktop entries to running processes using executable,
   `/proc`, command-line, and known-alias signals.
-- [ ] **APP-07** Add native, Flatpak, Snap, running-only, and manual source
+- [x] **APP-07** Add native, Flatpak, Snap, running-only, and manual source
   metadata.
-- [ ] **APP-08** Add explicit refresh, loading, failure, and last-refresh state.
-- [ ] **APP-09** Add scanner tests for malformed files, duplicate entries,
+- [x] **APP-08** Add explicit refresh, loading, failure, and last-refresh state.
+- [x] **APP-09** Add scanner tests for malformed files, duplicate entries,
   localized names, hidden entries, field codes, and paths with spaces.
 
 ### Shared picker
 
-- [ ] **APP-10** Build the reusable Linux app-picker UI.
+- [x] **APP-10** Build the reusable Linux app-picker UI.
 - [ ] **APP-11** Add search across display name, process name, desktop ID, and
   package ID.
 - [ ] **APP-12** Add Installed/Running filters and source badges.

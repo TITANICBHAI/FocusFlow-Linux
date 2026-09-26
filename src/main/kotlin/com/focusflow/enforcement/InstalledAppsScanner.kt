@@ -2,9 +2,17 @@ package com.focusflow.enforcement
 
 import com.sun.jna.platform.win32.Advapi32Util
 import com.sun.jna.platform.win32.WinReg
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import java.nio.file.Files
+import java.nio.file.Path
 import java.util.LinkedHashMap
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 
 enum class AppSource {
     NATIVE_DESKTOP,
@@ -55,21 +63,106 @@ data class AppDescriptor(
     val detectionConfidence: AppDetectionConfidence = AppDetectionConfidence.UNKNOWN
 )
 
+data class AppCatalogState(
+    val apps: List<AppDescriptor> = emptyList(),
+    val isRefreshing: Boolean = false,
+    val lastRefreshedAtMs: Long? = null,
+    val isPartial: Boolean = false,
+    val errorMessage: String? = null
+)
+
+data class AppCatalogScanStatus(
+    val isPartial: Boolean = false,
+    val errorMessage: String? = null
+)
+
 /** Compatibility name retained for current callers while the catalog adopts AppDescriptor. */
 typealias ScannedApp = AppDescriptor
 
 interface AppCatalogRepository {
     fun read(): List<AppDescriptor>
+    fun readRunning(): List<AppDescriptor>
     fun refresh(): List<AppDescriptor>
     fun resolve(reference: String): AppDescriptor?
+    fun createManualProcessEntry(
+        processName: String,
+        displayName: String? = null
+    ): AppDescriptor?
 }
 
 /** Shared catalog entry point for future pickers; scanner APIs remain compatible. */
 object InstalledAppCatalog : AppCatalogRepository {
-    override fun read(): List<AppDescriptor> = InstalledAppsScanner.getAppCatalog()
-    override fun refresh(): List<AppDescriptor> = InstalledAppsScanner.refreshAppCatalog()
+    private val refreshing = AtomicBoolean(false)
+    private val _state = MutableStateFlow(AppCatalogState())
+    val state: StateFlow<AppCatalogState> = _state.asStateFlow()
+
+    override fun read(): List<AppDescriptor> {
+        return try {
+            val apps = InstalledAppsScanner.getAppCatalog()
+            val scanStatus = InstalledAppsScanner.lastScanStatus()
+            _state.update { current ->
+                current.copy(
+                    apps = apps,
+                    isPartial = scanStatus.isPartial,
+                    errorMessage = scanStatus.errorMessage
+                )
+            }
+            apps
+        } catch (error: Exception) {
+            _state.update { current ->
+                current.copy(
+                    isPartial = current.apps.isNotEmpty(),
+                    errorMessage = error.message ?: "Unable to read installed applications"
+                )
+            }
+            _state.value.apps
+        }
+    }
+
+    override fun readRunning(): List<AppDescriptor> = InstalledAppsScanner.getRunningApps()
+
+    override fun refresh(): List<AppDescriptor> {
+        // A second refresh request must not clear or replace a scan already in
+        // progress. The caller can observe state.isRefreshing and retry later.
+        if (!refreshing.compareAndSet(false, true)) return _state.value.apps
+
+        _state.update {
+            it.copy(isRefreshing = true, isPartial = false, errorMessage = null)
+        }
+
+        return try {
+            val apps = InstalledAppsScanner.refreshAppCatalog()
+            val scanStatus = InstalledAppsScanner.lastScanStatus()
+            _state.update {
+                it.copy(
+                    apps = apps,
+                    isRefreshing = false,
+                    lastRefreshedAtMs = System.currentTimeMillis(),
+                    isPartial = scanStatus.isPartial,
+                    errorMessage = scanStatus.errorMessage
+                )
+            }
+            apps
+        } catch (error: Exception) {
+            _state.update {
+                it.copy(
+                    isRefreshing = false,
+                    isPartial = it.apps.isNotEmpty(),
+                    errorMessage = error.message ?: "Unable to refresh installed applications"
+                )
+            }
+            _state.value.apps
+        } finally {
+            refreshing.set(false)
+        }
+    }
+
     override fun resolve(reference: String): AppDescriptor? =
         InstalledAppsScanner.resolveApp(reference)
+    override fun createManualProcessEntry(
+        processName: String,
+        displayName: String?
+    ): AppDescriptor? = InstalledAppsScanner.createManualProcessEntry(processName, displayName)
 }
 
 object InstalledAppsScanner {
@@ -182,9 +275,12 @@ object InstalledAppsScanner {
         "NetworkManager", "wpa_supplicant", "dhcpcd", "dhclient",
         // Polkit
         "polkitd", "polkit", "pk-launch",
+        // Sandbox/runtime helpers. A real application identity is recovered from
+        // their command line when possible; otherwise these are infrastructure.
+        "bwrap", "xdg-dbus-proxy",
         // FocusFlow itself
         "focusflow", "java", "kotlin"
-    )
+    ).map { it.lowercase(Locale.ROOT) }.toSet()
 
     private val systemIgnore: Set<String> get() = when {
         isWindows -> windowsSystemIgnore
@@ -205,6 +301,9 @@ object InstalledAppsScanner {
     private val installedCache = mutableListOf<ScannedApp>()
     private var installedScanned = false
     private val installLock = Any()
+    private val lastScan = AtomicReference(AppCatalogScanStatus())
+
+    fun lastScanStatus(): AppCatalogScanStatus = lastScan.get()
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -216,29 +315,58 @@ object InstalledAppsScanner {
                     // isPresent() returns true but the process exits before get() is called,
                     // causing NoSuchElementException on the second command() invocation.
                     val info = ph.info()
-                    val cmd = info.command().orElse(null) ?: return@mapNotNull null
+                    val pid = ph.pid()
+                    val command = info.command().orElse(null)
+                    val procExe = if (isLinux) readLinuxProcExe(pid) else null
+                    val cmd = procExe ?: command
                     val commandLine = info.commandLine().orElse("")
-                    val commandName = java.io.File(cmd).name.lowercase()
+                        .ifBlank { if (isLinux) readLinuxProcFile(pid, "cmdline").orEmpty() else "" }
+                    val comm = if (isLinux) readLinuxProcFile(pid, "comm") else null
+                    val commandName = java.io.File(cmd ?: comm ?: return@mapNotNull null)
+                        .name
+                        .lowercase(Locale.ROOT)
                     // Flatpak's host process is reported as "flatpak" by
                     // ProcessHandle.command(), while its command line contains
                     // the app ID. Use the same normalization as desktop files
                     // so installed and running entries share a process key.
-                    val exe = if (isLinux && commandName == "flatpak") {
-                        normalizeLinuxExec(commandLine)?.processName ?: commandName
+                    val normalized = if (isLinux) normalizeLinuxExec(commandLine) else null
+                    val sandboxPackage = if (
+                        isLinux && commandName in setOf("bwrap", "xdg-dbus-proxy")
+                    ) {
+                        linuxPackageIdFromCommandLine(commandLine)
                     } else {
-                        commandName
+                        null
                     }
+                    val exe = normalized?.processName
+                        ?: sandboxPackage?.let(::flatpakProcessName)
+                        ?: comm?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotBlank() }
+                        ?: commandName
                     val display = curated[exe] ?: friendlyName(exe)
+                    val aliases = (
+                        listOf(exe, commandName, comm.orEmpty()) +
+                            normalized?.aliases.orEmpty() +
+                            listOfNotNull(normalized?.packageId, sandboxPackage) +
+                            linuxCommandLineAliases(commandLine)
+                        )
+                        .map { it.trim().lowercase(Locale.ROOT) }
+                        .filter { it.isNotBlank() && it !in setOf("flatpak", "snap", "env") }
+                        .distinct()
                     ScannedApp(
                         processName = exe,
                         displayName = display,
                         isRunning = true,
                         exePath = cmd,
                         execCommand = commandLine.takeIf { it.isNotBlank() },
-                        processAliases = processAliasesForRunningProcess(exe, commandLine),
-                        packageId = normalizeLinuxExec(commandLine)
-                            ?.packageId,
-                        source = AppSource.RUNNING_ONLY
+                        processAliases = aliases,
+                        packageId = normalized?.packageId ?: sandboxPackage,
+                        source = AppSource.RUNNING_ONLY,
+                        runningPids = listOf(pid),
+                        detectionConfidence = when {
+                            normalized != null || sandboxPackage != null -> AppDetectionConfidence.HIGH
+                            comm != null && comm.equals(commandName, ignoreCase = true) ->
+                                AppDetectionConfidence.HIGH
+                            else -> AppDetectionConfidence.MEDIUM
+                        }
                     )
                 }
                 .filter { app ->
@@ -246,7 +374,28 @@ object InstalledAppsScanner {
                     app.processName !in systemIgnore &&
                     (isLinux || app.processName.endsWith(".exe"))
                 }
-                .distinctBy { it.processName }
+                .fold(LinkedHashMap<String, ScannedApp>()) { grouped, app ->
+                    val key = app.processName.lowercase(Locale.ROOT)
+                    val previous = grouped[key]
+                    grouped[key] = if (previous == null) {
+                        app
+                    } else {
+                        previous.copy(
+                            processAliases = (previous.processAliases + app.processAliases).distinct(),
+                            runningPids = (previous.runningPids + app.runningPids).distinct(),
+                            exePath = previous.exePath ?: app.exePath,
+                            execCommand = previous.execCommand ?: app.execCommand,
+                            packageId = previous.packageId ?: app.packageId,
+                            detectionConfidence = strongerConfidence(
+                                previous.detectionConfidence,
+                                app.detectionConfidence
+                            )
+                        )
+                    }
+                    grouped
+                }
+                .values
+                .toList()
         } catch (e: Exception) { emptyList() }
 
         // Populate path cache from running processes (most accurate paths)
@@ -328,6 +477,27 @@ object InstalledAppsScanner {
      */
     fun getCuratedApps(): List<ScannedApp> {
         return getAppCatalog()
+    }
+
+    /**
+     * Creates a descriptor for a user-entered process without inventing a
+     * platform-specific suffix. In particular, Linux values remain exactly the
+     * process name the user entered; callers can decide how to persist it.
+     */
+    fun createManualProcessEntry(
+        processName: String,
+        displayName: String? = null
+    ): AppDescriptor? {
+        val normalized = processName.trim().takeIf { it.isNotBlank() } ?: return null
+        return AppDescriptor(
+            processName = normalized,
+            displayName = displayName?.trim().takeIf { !it.isNullOrBlank() }
+                ?: friendlyNameFor(normalized),
+            isRunning = false,
+            processAliases = listOf(normalized.lowercase(Locale.ROOT)),
+            source = AppSource.MANUAL,
+            detectionConfidence = AppDetectionConfidence.UNKNOWN
+        )
     }
 
     /** Look up the exe path for a process name using the cache built by any prior scan. */
@@ -449,7 +619,8 @@ object InstalledAppsScanner {
         val packageId: String?,
         val iconName: String?,
         val tryExec: String?,
-        val categories: List<String>
+        val categories: List<String>,
+        val startupWmClass: String?
     )
 
     private data class NormalizedLinuxExec(
@@ -507,8 +678,34 @@ object InstalledAppsScanner {
                     AppSource.SNAP
                 )
             )
+            add(
+                LinuxApplicationRoot(
+                    java.io.File("/snap/desktop/applications"),
+                    AppSource.SNAP
+                )
+            )
+            add(
+                LinuxApplicationRoot(
+                    java.io.File(home, "snap/desktop/applications"),
+                    AppSource.SNAP
+                )
+            )
+            // These are part of the Linux application search path even when a
+            // user has customized XDG_DATA_DIRS.
+            add(
+                LinuxApplicationRoot(
+                    java.io.File("/usr/local/share/applications"),
+                    AppSource.NATIVE_DESKTOP
+                )
+            )
+            add(
+                LinuxApplicationRoot(
+                    java.io.File("/usr/share/applications"),
+                    AppSource.NATIVE_DESKTOP
+                )
+            )
         }
-        return roots.distinctBy { "${it.source}:${it.directory.absolutePath}" }
+        return roots.distinctBy { it.directory.absoluteFile.normalize().path }
     }
 
     /**
@@ -520,6 +717,8 @@ object InstalledAppsScanner {
         roots: List<LinuxApplicationRoot> = linuxApplicationRoots()
     ): List<ScannedApp> {
         val result = LinkedHashMap<String, ScannedApp>()
+        var skippedEntries = 0
+        var firstError: String? = null
         for (root in roots) {
             val files = try {
                 if (!root.directory.isDirectory) {
@@ -530,13 +729,17 @@ object InstalledAppsScanner {
                         .sortedBy { it.absolutePath }
                         .toList()
                 }
-            } catch (_: Exception) {
+            } catch (error: Exception) {
+                skippedEntries++
+                if (firstError == null) {
+                    firstError = error.message ?: "Unable to read an application directory"
+                }
                 emptyList()
             }
 
             for (file in files) {
                 try {
-                    val entry = parseLinuxDesktopFile(file) ?: continue
+                    val entry = parseLinuxDesktopFile(file, root.directory) ?: continue
                     val app = buildLinuxDescriptor(
                         entry = entry,
                         source = root.source,
@@ -549,20 +752,34 @@ object InstalledAppsScanner {
                     if (result.containsKey(identity)) continue
                     result[identity] = app
                     cacheLinuxDescriptor(app)
-                } catch (_: Exception) {
+                } catch (error: Exception) {
+                    skippedEntries++
+                    if (firstError == null) {
+                        firstError = error.message ?: "Unable to read a desktop entry"
+                    }
                     // A single malformed desktop file must not hide other apps.
                 }
             }
         }
+        lastScan.set(
+            AppCatalogScanStatus(
+                isPartial = skippedEntries > 0,
+                errorMessage = firstError
+            )
+        )
         return result.values.sortedBy { it.displayName.lowercase(Locale.ROOT) }
     }
 
-    private fun parseLinuxDesktopFile(file: java.io.File): LinuxDesktopEntry? {
+    private fun parseLinuxDesktopFile(
+        file: java.io.File,
+        applicationRoot: java.io.File
+    ): LinuxDesktopEntry? {
         return parseLinuxDesktopContent(
             content = file.readText(),
-            desktopId = file.relativeToOrNull(file.parentFile ?: file)
+            desktopId = file.relativeToOrNull(applicationRoot)
                 ?.path
                 ?.removeSuffix(".desktop")
+                ?.replace(java.io.File.separatorChar, '/')
                 ?: file.nameWithoutExtension
         )
     }
@@ -620,7 +837,8 @@ object InstalledAppsScanner {
             packageId = packageId,
             iconName = values["Icon"]?.takeIf { it.isNotBlank() },
             tryExec = values["TryExec"]?.takeIf { it.isNotBlank() },
-            categories = splitDesktopList(values["Categories"])
+            categories = splitDesktopList(values["Categories"]),
+            startupWmClass = values["StartupWMClass"]?.takeIf { it.isNotBlank() }
         )
     }
 
@@ -632,10 +850,22 @@ object InstalledAppsScanner {
         val normalized = normalizeLinuxExec(entry.exec) ?: return null
         if (entry.tryExec != null && !isExecutableAvailable(entry.tryExec)) return null
         val packageId = entry.packageId ?: normalized.packageId
-        val aliases = (normalized.aliases + listOfNotNull(packageId))
+        val aliases = (
+            normalized.aliases +
+                listOfNotNull(packageId, entry.startupWmClass)
+            )
             .map { it.lowercase(Locale.ROOT) }
             .filter { it.isNotBlank() }
             .distinct()
+        val effectiveSource = when {
+            normalized.packageId != null &&
+                java.io.File(normalized.command).name.equals("flatpak", ignoreCase = true) ->
+                AppSource.FLATPAK
+            normalized.packageId != null &&
+                java.io.File(normalized.command).name.equals("snap", ignoreCase = true) ->
+                AppSource.SNAP
+            else -> source
+        }
         return ScannedApp(
             processName = normalized.processName,
             displayName = entry.name,
@@ -649,7 +879,7 @@ object InstalledAppsScanner {
             iconName = entry.iconName,
             tryExec = entry.tryExec,
             categories = entry.categories,
-            source = source
+            source = effectiveSource
         )
     }
 
@@ -917,18 +1147,6 @@ object InstalledAppsScanner {
         running: List<AppDescriptor>
     ): List<AppDescriptor> = mergeInstalledAndRunning(installed, running)
 
-    private fun processAliasesForRunningProcess(
-        processName: String,
-        commandLine: String
-    ): List<String> {
-        val normalized = normalizeLinuxExec(commandLine)
-        return (listOf(processName) + normalized?.aliases.orEmpty() +
-            listOfNotNull(normalized?.packageId))
-            .map { it.lowercase(Locale.ROOT) }
-            .filter { it.isNotBlank() && it != "flatpak" && it != "snap" }
-            .distinct()
-    }
-
     private fun mergeInstalledAndRunning(
         installed: List<AppDescriptor>,
         running: List<AppDescriptor>
@@ -946,8 +1164,12 @@ object InstalledAppsScanner {
                 app.copy(
                     isRunning = true,
                     exePath = live.exePath ?: app.exePath,
-                    processAliases = (app.processAliases + live.processAliases)
-                        .distinct()
+                    processAliases = (app.processAliases + live.processAliases).distinct(),
+                    runningPids = (app.runningPids + live.runningPids).distinct(),
+                    detectionConfidence = strongerConfidence(
+                        app.detectionConfidence,
+                        live.detectionConfidence
+                    )
                 )
             }
         }
@@ -981,6 +1203,47 @@ object InstalledAppsScanner {
             .map { it.trim().lowercase(Locale.ROOT) }
             .filter { it.isNotBlank() }
             .toSet()
+
+    private fun readLinuxProcExe(pid: Long): String? = try {
+        Files.readSymbolicLink(Path.of("/proc", pid.toString(), "exe")).toString()
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun readLinuxProcFile(pid: Long, name: String): String? = try {
+        Files.readString(Path.of("/proc", pid.toString(), name))
+            .replace('\u0000', ' ')
+            .trim()
+            .takeIf { it.isNotBlank() }
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun linuxPackageIdFromCommandLine(commandLine: String): String? =
+        tokenizeDesktopExec(commandLine)
+            .firstOrNull {
+                it.matches(Regex("^[A-Za-z0-9][A-Za-z0-9_.-]*\\.[A-Za-z0-9_.-]+$"))
+            }
+            ?.takeIf { it.contains('.') }
+
+    private fun linuxCommandLineAliases(commandLine: String): List<String> =
+        tokenizeDesktopExec(commandLine)
+            .filter { it.matches(Regex("^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$")) }
+            .map { it.lowercase(Locale.ROOT) }
+            .filter { it.length > 1 }
+            .distinct()
+
+    private fun strongerConfidence(
+        first: AppDetectionConfidence,
+        second: AppDetectionConfidence
+    ): AppDetectionConfidence = if (confidenceRank(first) >= confidenceRank(second)) first else second
+
+    private fun confidenceRank(confidence: AppDetectionConfidence): Int = when (confidence) {
+        AppDetectionConfidence.UNKNOWN -> 0
+        AppDetectionConfidence.LOW -> 1
+        AppDetectionConfidence.MEDIUM -> 2
+        AppDetectionConfidence.HIGH -> 3
+    }
 
     private fun friendlyName(exe: String): String =
         exe.substringBeforeLast(".")

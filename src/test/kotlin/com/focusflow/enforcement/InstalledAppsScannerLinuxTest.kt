@@ -54,6 +54,63 @@ class InstalledAppsScannerLinuxTest {
     }
 
     @Test
+    fun `ignores malformed desktop entries while keeping valid entries`() {
+        val root = Files.createTempDirectory("focusflow-malformed-desktop-test").toFile()
+        try {
+            File(root, "malformed.desktop").writeText(
+                """
+                    [Desktop Entry]
+                    Type=Application
+                    Name=Missing executable
+                """.trimIndent()
+            )
+            File(root, "valid.desktop").writeText(
+                """
+                    [Desktop Entry]
+                    Type=Application
+                    Name=Valid
+                    Exec="/opt/My App/bin/valid" %U %F %i %c %k
+                """.trimIndent()
+            )
+
+            val apps = InstalledAppsScanner.scanLinuxDesktopFilesForTesting(
+                listOf(root to AppSource.NATIVE_DESKTOP)
+            )
+
+            assertEquals(1, apps.size)
+            assertEquals("valid", apps.single().processName)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `supports desktop files and executable paths containing spaces`() {
+        val root = Files.createTempDirectory("focusflow-spaced-desktop-test").toFile()
+        val desktop = File(root, "My App.desktop")
+        try {
+            desktop.writeText(
+                """
+                    [Desktop Entry]
+                    Type=Application
+                    Name=Spaced App
+                    Exec="/opt/My App/bin/spaced-app" --profile "Work Profile" %U
+                """.trimIndent()
+            )
+
+            val app = InstalledAppsScanner.scanLinuxDesktopFilesForTesting(
+                listOf(root to AppSource.NATIVE_DESKTOP)
+            ).single()
+
+            assertEquals("spaced-app", app.processName)
+            assertEquals("/opt/My App/bin/spaced-app", app.exePath)
+            assertEquals(desktop.absolutePath, app.desktopFilePath)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `parses localized desktop metadata and visibility fields`() {
         val app = InstalledAppsScanner.parseLinuxDesktopContentForTesting(
             content = """
@@ -65,6 +122,7 @@ class InstalledAppsScannerLinuxTest {
                 Icon=editor-symbolic
                 TryExec=/bin/sh
                 Categories=Development;Utility;
+                StartupWMClass=EditorWindow
             """.trimIndent(),
             desktopId = "org.example.Editor.desktop",
             localePreferences = listOf("en_US")
@@ -78,6 +136,7 @@ class InstalledAppsScannerLinuxTest {
         assertEquals(listOf("Development", "Utility"), app.categories)
         assertEquals(AppSource.NATIVE_DESKTOP, app.source)
         assertEquals("editor", app.processName)
+        assertTrue("editorwindow" in app.processAliases)
     }
 
     @Test
@@ -200,7 +259,9 @@ class InstalledAppsScannerLinuxTest {
             exePath = "/usr/bin/flatpak",
             packageId = "org.telegram.desktop",
             processAliases = listOf("org.telegram.desktop"),
-            source = AppSource.RUNNING_ONLY
+            source = AppSource.RUNNING_ONLY,
+            runningPids = listOf(1234L),
+            detectionConfidence = AppDetectionConfidence.HIGH
         )
         val unrelated = AppDescriptor(
             processName = "custom-tool",
@@ -217,7 +278,19 @@ class InstalledAppsScannerLinuxTest {
 
         assertTrue(catalog.first { it.processName == "telegram-desktop" }.isRunning)
         assertEquals(AppSource.FLATPAK, catalog.first { it.processName == "telegram-desktop" }.source)
+        assertEquals(listOf(1234L), catalog.first { it.processName == "telegram-desktop" }.runningPids)
         assertTrue(catalog.any { it.processName == "custom-tool" && it.source == AppSource.RUNNING_ONLY })
         assertFalse(catalog.any { it.processName == "telegram-desktop" && it.source == AppSource.RUNNING_ONLY })
+    }
+
+    @Test
+    fun `catalog creates manual entries without adding a Linux exe suffix`() {
+        val manual = InstalledAppCatalog.createManualProcessEntry("focus-helper")
+
+        assertNotNull(manual)
+        assertEquals("focus-helper", manual.processName)
+        assertEquals(AppSource.MANUAL, manual.source)
+        assertEquals(listOf("focus-helper"), manual.processAliases)
+        assertFalse(manual.processName.endsWith(".exe"))
     }
 }

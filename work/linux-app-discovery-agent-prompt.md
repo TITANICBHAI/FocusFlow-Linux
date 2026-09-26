@@ -1,7 +1,7 @@
 # Prompt for the Linux App Discovery and Pickers Agent
 
-Copy the prompt below to a new agent. Replace `<BATCH>` with the assigned
-batch, normally `Batch 1 — APP-01–APP-07`.
+Copy the prompt below to a new agent. Replace `<ASSIGNED_SCOPE>` with the
+tracker IDs or phase you want that agent to handle.
 
 ---
 
@@ -36,12 +36,12 @@ topics that apply.
 You are assigned exactly:
 
 ```text
-<BATCH>
+<ASSIGNED_SCOPE>
 ```
 
-Implement only the tracker items in that batch. Do not begin later batches,
-even if you notice work that would be useful there. Record later work as a
-blocker or follow-up note instead.
+Implement only the tracker items in that assigned scope. Do not begin
+unassigned work, even if you notice work that would be useful. Record later
+work as a blocker or follow-up note instead.
 
 ## Workstream goal
 
@@ -66,7 +66,7 @@ plan's explicit AppImage decision says to do so.
 
 ## Non-negotiable rules
 
-1. Work in a maximum seven-item batch.
+1. Stay inside the assigned tracker scope.
 2. Keep the tracker accurate while working.
 3. Never tick a tracker item merely because the project compiles.
 4. Tick an item only after implementation and focused verification are done.
@@ -82,40 +82,31 @@ plan's explicit AppImage decision says to do so.
 
 1. Read the authoritative plan and identify the exact assigned tracker items.
 2. Inspect the current implementation and tests before editing.
-3. Implement only the assigned batch.
+3. Implement only the assigned scope.
 4. Add or update focused tests for the completed behavior.
 5. Run the cheapest relevant checks during development.
-6. Run the complete verification appropriate to the batch before marking items
+6. Run the complete verification appropriate to the scope before marking items
    complete.
 7. Tick only the completed `APP-*` items in
    `work/linux-app-discovery-and-pickers-plan.md`.
-8. Update the batch table status in that same file.
-9. Add a batch completion record using the plan's template.
+8. Update the plan's status or completion record if the assigned scope requires
+   one.
+9. Record verification evidence and blockers in the plan or final report.
 10. Do not claim completion for an item whose acceptance evidence is missing.
-
-## Batch boundaries
-
-```text
-Batch 1: APP-01–APP-07
-Batch 2: APP-08–APP-14
-Batch 3: APP-15–APP-21
-Batch 4: APP-22–APP-28
-Batch 5: APP-29–APP-34
-```
 
 ## Final response format
 
 At the end, report:
 
-- Assigned batch
+- Assigned scope
 - Tracker items completed and ticked
 - Files changed
 - Tests/checks run and results
 - Items left unchecked
 - Blockers or limitations
-- Next batch to assign
+- Suggested next scope
 
-Do not implement or tick later batches.
+Do not implement or tick outside the assigned scope.
 
 ---
 
@@ -124,5 +115,5 @@ Do not implement or tick later batches.
 Replace this line before sending the prompt:
 
 ```text
-Assigned batch: <BATCH>
+Assigned scope: <ASSIGNED_SCOPE>
 ```

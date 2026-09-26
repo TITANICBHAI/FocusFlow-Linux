@@ -14,3 +14,4 @@
 - [GitHub artifact executable permissions](github-artifact-permissions.md) — Artifact upload/download may drop executable modes; restore them before validation or release packaging.
 - [Compose lazy-list key namespaces](compose-lazy-key-namespaces.md) — Keys must be unique across the entire LazyColumn, including separate items/itemsIndexed sections.
 - [Linux batch execution protocol](linux-batch-execution-protocol.md) — Linux workstreams use batches of up to seven items with evidence required before ticking trackers.
+- [Linux workstream plan index](linux-workstream-plan-index.md) — Four separate Linux transition plans and matching generic agent prompts live under work/.

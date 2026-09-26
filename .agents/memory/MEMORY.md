@@ -13,3 +13,4 @@
 - [Linux release-readiness tests](linux-release-readiness-tests.md) — Privileged hosts/firewall checks must be opt-in and disposable; keep the default suite non-destructive.
 - [GitHub artifact executable permissions](github-artifact-permissions.md) — Artifact upload/download may drop executable modes; restore them before validation or release packaging.
 - [Compose lazy-list key namespaces](compose-lazy-key-namespaces.md) — Keys must be unique across the entire LazyColumn, including separate items/itemsIndexed sections.
+- [Linux batch execution protocol](linux-batch-execution-protocol.md) — Linux workstreams use batches of up to seven items with evidence required before ticking trackers.

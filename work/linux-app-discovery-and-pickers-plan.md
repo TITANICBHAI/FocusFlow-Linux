@@ -15,6 +15,60 @@ enforcement engine, or declare the Linux release ready by itself.
 - Depends on: existing Linux platform detection and Compose UI
 - Blocks: reliable Linux app blocking, task focus-app selection, and the later
   Windows-removal cleanup
+- Execution mode: **Five batches; maximum seven tracker items per batch**
+- Active batch: **APP-01–APP-07**
+
+## Batch execution protocol
+
+This plan is executed in small, ordered batches. Do not implement all 34 items
+at once.
+
+### Batch order
+
+| Batch | Tracker IDs | Scope | Status |
+|---|---|---|---|
+| Batch 1 | APP-01–APP-07 | Catalog contract and source metadata | Not started |
+| Batch 2 | APP-08–APP-14 | Refresh state and shared picker foundation | Not started |
+| Batch 3 | APP-15–APP-21 | Manual entry and first screen integrations | Not started |
+| Batch 4 | APP-22–APP-28 | Remaining screen integrations and compatibility | Not started |
+| Batch 5 | APP-29–APP-34 | Cross-platform verification and AppImage decision | Not started |
+
+### Strict tracker rules
+
+1. A new agent receives exactly one batch and must not implement items outside
+   that batch.
+2. Read this plan, the current code, `replit.md`, and relevant memory before
+   editing.
+3. Keep the assigned tracker items in the same order unless a dependency makes
+   that impossible.
+4. Do not tick an item when work is merely started, compiled, or partially
+   implemented.
+5. Tick an item only after its implementation, focused verification, and
+   acceptance evidence are complete.
+6. Update the batch table status and the item checkbox in the same change.
+7. If an item is blocked, leave it unchecked and record the blocker below the
+   tracker rather than pretending it is complete.
+8. Do not silently rewrite later tracker items to make the current batch appear
+   complete.
+9. At the end of a batch, report changed files, checks run, unchecked items,
+   known limitations, and the next batch.
+10. A batch is complete only when every assigned item is either checked with
+    evidence or explicitly documented as blocked.
+
+### Batch completion record
+
+For each completed batch, add a short dated record here:
+
+```text
+Batch:
+Date:
+Completed tracker items:
+Verification:
+Blocked or deferred items:
+Next batch:
+```
+
+The next agent must inspect the latest record before continuing.
 
 ## Current baseline
 

@@ -1,5 +1,8 @@
 package com.focusflow.enforcement
 
+import com.focusflow.ProcessNameNormalizer
+import com.focusflow.ProcessPlatform
+
 data class BlockPreset(
     val id: String,
     val name: String,
@@ -98,4 +101,48 @@ object BlockPresets {
 
     fun presetForProcessName(processName: String): BlockPreset? =
         all.find { it.processNames.contains(processName.lowercase()) }
+}
+
+/**
+ * Resolves the process references contributed by onboarding presets.
+ *
+ * Linux presets historically contain Windows-shaped names. When the catalog
+ * knows the application, persist its canonical process name; when it does
+ * not, retain a normalized stale reference so the user's choice is visible
+ * and can resolve after a later catalog refresh.
+ */
+data class PresetProcessResolution(
+    val processNames: List<String>,
+    val missingReferences: List<String>
+)
+
+fun resolvePresetProcessNames(
+    selectedPresetIds: Set<String>,
+    catalog: List<AppDescriptor>,
+    platform: ProcessPlatform = ProcessNameNormalizer.currentPlatform()
+): PresetProcessResolution {
+    val references = selectedPresetIds
+        .mapNotNull { BlockPresets.findById(it) }
+        .flatMap { it.processNames }
+        .distinct()
+
+    val missing = mutableListOf<String>()
+    val resolved = references.mapNotNull { reference ->
+        if (platform == ProcessPlatform.LINUX) {
+            val app = InstalledAppsScanner.resolveAppReference(reference, catalog)
+            if (app != null) {
+                app.processName.lowercase()
+            } else {
+                missing += reference
+                ProcessNameNormalizer.normalizeStored(reference, platform)
+            }
+        } else {
+            ProcessNameNormalizer.normalizeStored(reference, platform)
+        }
+    }.distinct()
+
+    return PresetProcessResolution(
+        processNames = resolved,
+        missingReferences = missing.distinct()
+    )
 }

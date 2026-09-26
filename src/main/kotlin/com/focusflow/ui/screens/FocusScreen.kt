@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextAlign
 import com.focusflow.data.Database
 import com.focusflow.data.models.Task
 import com.focusflow.enforcement.InstalledAppsScanner
+import com.focusflow.enforcement.isLinux
 import com.focusflow.enforcement.isWindows
 import com.focusflow.enforcement.NuclearMode
 import com.focusflow.enforcement.ProcessMonitor
@@ -1242,7 +1243,13 @@ private fun SessionAppPickerDialog(
                 OutlinedTextField(
                     value         = search,
                     onValueChange = { search = it },
-                    placeholder   = { Text("Search by name or .exe…", color = OnSurface2, fontSize = 12.sp) },
+                    placeholder   = {
+                        Text(
+                            if (isLinux) "Search by app or process name…" else "Search by name or .exe…",
+                            color = OnSurface2,
+                            fontSize = 12.sp
+                        )
+                    },
                     leadingIcon   = { Icon(Icons.Default.Search, null, tint = OnSurface2, modifier = Modifier.size(16.dp)) },
                     trailingIcon  = if (search.isNotBlank()) {
                         { IconButton(onClick = { search = "" }, modifier = Modifier.size(28.dp)) {

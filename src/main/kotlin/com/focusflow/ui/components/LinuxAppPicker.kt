@@ -409,32 +409,21 @@ internal fun selectedAppKeysForProcessNames(
     apps: List<AppDescriptor>,
     processNames: Set<String>
 ): Set<String> {
-    val matchedKeys = apps
-        .filter { app ->
-            processNames.any { saved ->
-                InstalledAppsScanner.resolveAppReference(saved, listOf(app)) != null ||
-                    saved.equals(app.processName, ignoreCase = true) ||
-                    app.processAliases.any { alias ->
-                        alias.equals(saved, ignoreCase = true)
-                    }
+    fun matches(app: AppDescriptor, saved: String): Boolean =
+        InstalledAppsScanner.resolveAppReference(saved, listOf(app)) != null ||
+            saved.equals(app.processName, ignoreCase = true) ||
+            app.processAliases.any { alias ->
+                alias.equals(saved, ignoreCase = true)
             }
-        }
+
+    val matchedKeys = apps
+        .filter { app -> processNames.any { saved -> matches(app, saved) } }
         .map { it.catalogKey() }
         .toSet()
-    val matchedProcesses = apps
-        .filter { app ->
-            processNames.any { saved ->
-                InstalledAppsScanner.resolveAppReference(saved, listOf(app)) != null ||
-                    saved.equals(app.processName, ignoreCase = true) ||
-                    app.processAliases.any { alias ->
-                        alias.equals(saved, ignoreCase = true)
-                    }
-            }
-        }
-        .flatMap { app -> listOf(app.processName) + app.processAliases }
-        .map { it.lowercase() }
-        .toSet()
-    return matchedKeys + processNames.filterNot { it.lowercase() in matchedProcesses }
+    val unmatchedProcesses = processNames.filter { saved ->
+        apps.none { app -> matches(app, saved) }
+    }
+    return matchedKeys + unmatchedProcesses
 }
 
 internal fun staleAppSelectionsForProcessNames(
@@ -556,7 +545,7 @@ private fun ManualProcessEntry(
                 modifier = Modifier.weight(1f),
                 singleLine = true,
                 label = { Text("Manual process") },
-                placeholder = { Text("e.g. firefox or firefox.exe") },
+                placeholder = { Text("e.g. firefox") },
                 isError = error != null,
                 supportingText = error?.let { { Text(it, color = Error) } }
             )

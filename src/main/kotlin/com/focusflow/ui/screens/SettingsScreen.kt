@@ -47,6 +47,7 @@ import com.focusflow.ui.components.staleAppSelectionsForProcessNames
 import com.focusflow.services.SoundAversion
 import com.focusflow.services.TaskAlarmService
 import com.focusflow.ui.theme.*
+import com.focusflow.ProcessNameNormalizer
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -56,11 +57,13 @@ import kotlinx.coroutines.withContext
 fun SettingsScreen() {
     val strings = LocalizationManager.strings
     val scope = rememberCoroutineScope()
+    val catalogState = rememberInstalledAppCatalogState(enabled = isLinux)
 
     var blockRules       by remember { mutableStateOf(listOf<BlockRule>()) }
     var blockSchedules   by remember { mutableStateOf(listOf<BlockSchedule>()) }
     var dailyAllowances  by remember { mutableStateOf(listOf<DailyAllowance>()) }
     var showAddSchedule  by remember { mutableStateOf(false) }
+    var scheduleBeingEdited by remember { mutableStateOf<BlockSchedule?>(null) }
     var showAddAllowance by remember { mutableStateOf(false) }
     var alwaysOn         by remember { mutableStateOf(false) }
     var startWithWin     by remember { mutableStateOf(false) }
@@ -549,7 +552,11 @@ fun SettingsScreen() {
         item {
             SectionCard(title = "${strings.settingsBlockedApps} (${blockRules.size})") {
                 Text(
-                    "These apps are killed instantly when detected during a session. You can type a process name or pick from running apps.",
+                    if (isLinux) {
+                        "These apps are blocked when detected during a session. Browse the installed Linux catalog or enter a process name."
+                    } else {
+                        "These apps are killed instantly when detected during a session. You can type a process name or pick from running apps."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = OnSurface2
                 )
@@ -572,13 +579,25 @@ fun SettingsScreen() {
                     presets.chunked(4).forEach { row ->
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             row.forEach { (name, proc) ->
-                                val alreadyAdded = blockRules.any { it.processName.equals(proc, ignoreCase = true) }
+                                val resolvedProc = if (isLinux) {
+                                    InstalledAppsScanner.resolveAppReference(proc, catalogState.apps)?.processName
+                                        ?: when (proc.lowercase()) {
+                                            "battle.net launcher.exe" -> "battle.net"
+                                            else -> ProcessNameNormalizer.normalizeStored(proc)
+                                        }
+                                        ?: proc.lowercase()
+                                } else {
+                                    proc
+                                }
+                                val alreadyAdded = blockRules.any {
+                                    it.processName.equals(resolvedProc, ignoreCase = true)
+                                }
                                 OutlinedButton(
                                     onClick = {
                                         if (!alreadyAdded) scope.launch {
                                             withContext(Dispatchers.IO) {
                                                 Database.upsertBlockRule(
-                                                    BlockRule(UUID.randomUUID().toString(), proc.lowercase(), name, true, false)
+                                                    BlockRule(UUID.randomUUID().toString(), resolvedProc, name, true, false)
                                                 )
                                             }
                                             reload()
@@ -925,6 +944,12 @@ fun SettingsScreen() {
                                         },
                                         modifier = Modifier.height(24.dp)
                                     )
+                                    IconButton(
+                                        onClick = { scheduleBeingEdited = sched },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(Icons.Default.Edit, "Edit schedule", tint = OnSurface2, modifier = Modifier.size(16.dp))
+                                    }
                                     ShortcutTooltip("Delete schedule") {
                                         IconButton(
                                             onClick = {
@@ -1233,6 +1258,21 @@ fun SettingsScreen() {
         )
     }
 
+    scheduleBeingEdited?.let { schedule ->
+        BlockScheduleEditorDialog(
+            initialSchedule = schedule,
+            onDismiss = { scheduleBeingEdited = null },
+            onSave = { updated ->
+                scope.launch {
+                    withContext(Dispatchers.IO) { Database.upsertBlockSchedule(updated) }
+                    BlockScheduleService.forceCheck()
+                    reload()
+                }
+                scheduleBeingEdited = null
+            }
+        )
+    }
+
     if (showAddAllowance) {
         AddAllowanceDialog(
             onDismiss = { showAddAllowance = false },
@@ -1500,7 +1540,9 @@ private fun AddRuleDialog(onDismiss: () -> Unit, onSave: (BlockRule) -> Unit) {
                     OutlinedTextField(
                         value         = processName,
                         onValueChange = { processName = it },
-                        label         = { Text("Process name (e.g. chrome.exe)") },
+                        label         = {
+                            Text(if (isLinux) "Process name (e.g. firefox)" else "Process name (e.g. chrome.exe)")
+                        },
                         modifier      = Modifier.fillMaxWidth(),
                         colors        = OutlinedTextFieldDefaults.colors(focusedBorderColor = Purple80, unfocusedBorderColor = OnSurface2)
                     )

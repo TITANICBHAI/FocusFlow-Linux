@@ -265,23 +265,50 @@ val isMac: Boolean get() = System.getProperty("os.name").lowercase().contains("m
  * True if running on Linux under Wayland.
  * Detects via WAYLAND_DISPLAY or XDG_SESSION_TYPE env variables.
  */
-val isWayland: Boolean get() = isLinux && (
-    System.getenv("WAYLAND_DISPLAY") != null ||
-    System.getenv("XDG_SESSION_TYPE")?.lowercase() == "wayland"
+internal enum class LinuxSessionKind {
+    X11,
+    XWAYLAND,
+    NATIVE_WAYLAND,
+    HEADLESS
+}
+
+internal fun classifyLinuxSession(
+    sessionType: String?,
+    waylandDisplay: String?,
+    display: String?
+): LinuxSessionKind {
+    val wayland = sessionType?.equals("wayland", ignoreCase = true) == true ||
+        !waylandDisplay.isNullOrBlank()
+    return when {
+        wayland && !display.isNullOrBlank() -> LinuxSessionKind.XWAYLAND
+        wayland -> LinuxSessionKind.NATIVE_WAYLAND
+        !display.isNullOrBlank() -> LinuxSessionKind.X11
+        else -> LinuxSessionKind.HEADLESS
+    }
+}
+
+private val currentLinuxSession: LinuxSessionKind
+    get() = classifyLinuxSession(
+        sessionType = System.getenv("XDG_SESSION_TYPE"),
+        waylandDisplay = System.getenv("WAYLAND_DISPLAY"),
+        display = System.getenv("DISPLAY")
+    )
+
+val isWayland: Boolean get() = isLinux && currentLinuxSession in setOf(
+    LinuxSessionKind.XWAYLAND,
+    LinuxSessionKind.NATIVE_WAYLAND
 )
 
 /** True when a Wayland session also exposes an X11 display through XWayland. */
-val isXWayland: Boolean get() = isLinux && isWayland && hasX11Display
+val isXWayland: Boolean get() = isLinux && currentLinuxSession == LinuxSessionKind.XWAYLAND
 
 /** True when no X11/XWayland display is available for active-window queries. */
-val isNativeWayland: Boolean get() = isLinux && isWayland && !hasX11Display
-
-private val hasX11Display: Boolean get() = !System.getenv("DISPLAY").isNullOrBlank()
+val isNativeWayland: Boolean get() = isLinux && currentLinuxSession == LinuxSessionKind.NATIVE_WAYLAND
 
 /**
  * True if running on Linux under X11 (Xorg or XWayland).
  */
-val isX11: Boolean get() = isLinux && !isWayland && hasX11Display
+val isX11: Boolean get() = isLinux && currentLinuxSession == LinuxSessionKind.X11
 
 /**
  * True if xdotool is installed and callable. Evaluated once at startup.

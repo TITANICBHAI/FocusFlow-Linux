@@ -40,6 +40,7 @@ import com.focusflow.enforcement.BlockPreset
 import com.focusflow.enforcement.BlockPresets
 import com.focusflow.enforcement.AppCatalogState
 import com.focusflow.enforcement.InstalledAppsScanner
+import com.focusflow.enforcement.resolvePresetProcessNames
 import com.focusflow.enforcement.WindowsStartupManager
 import com.focusflow.enforcement.isWindows
 import com.focusflow.enforcement.isLinux
@@ -200,7 +201,12 @@ fun OnboardingDialog(onDismiss: () -> Unit) {
                                 navigate(1)
                             } else {
                                 scope.launch {
-                                    applyOnboardingSelections(selectedPresets, focusDuration, selectedTheme)
+                                    applyOnboardingSelections(
+                                        selectedPresets,
+                                        focusDuration,
+                                        selectedTheme,
+                                        catalogState.apps
+                                    )
                                     onDismiss()
                                 }
                             }
@@ -228,13 +234,14 @@ fun OnboardingDialog(onDismiss: () -> Unit) {
 private suspend fun applyOnboardingSelections(
     selectedPresets: Set<String>,
     focusDuration: Int,
-    theme: String
+    theme: String,
+    catalogApps: List<com.focusflow.enforcement.AppDescriptor>
 ) {
     withContext(Dispatchers.IO) {
-        val processesToBlock = selectedPresets
-            .mapNotNull { BlockPresets.findById(it) }
-            .flatMap { it.processNames }
-            .distinct()
+        val processesToBlock = resolvePresetProcessNames(
+            selectedPresetIds = selectedPresets,
+            catalog = catalogApps
+        ).processNames
 
         val existing = Database.getBlockRules().map { it.processName.lowercase() }.toSet()
         processesToBlock.forEach { proc ->
@@ -242,7 +249,7 @@ private suspend fun applyOnboardingSelections(
                 Database.upsertBlockRule(
                     BlockRule(
                         id = UUID.randomUUID().toString(),
-                        processName = proc.lowercase(),
+                        processName = proc,
                         displayName = InstalledAppsScanner.friendlyNameFor(proc),
                         enabled = true,
                         blockNetwork = false
@@ -727,6 +734,13 @@ private fun PresetsPage(
                     "Checking installed Linux applications…",
                     style = MaterialTheme.typography.labelMedium,
                     color = OnSurface2
+                )
+            } else if (catalogState.errorMessage != null && catalogState.apps.isEmpty()) {
+                Text(
+                    "Could not verify installed Linux applications. Selected preset entries will remain as stale rules.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Warning,
+                    textAlign = TextAlign.Center
                 )
             } else if (selectedMissing.isNotEmpty()) {
                 Text(

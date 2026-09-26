@@ -33,6 +33,26 @@ class WinApiBindingsLinuxTest {
     }
 
     @Test
+    fun `classifies X11 XWayland native Wayland and headless sessions`() {
+        assertEquals(
+            LinuxSessionKind.X11,
+            classifyLinuxSession(sessionType = "x11", waylandDisplay = null, display = ":0")
+        )
+        assertEquals(
+            LinuxSessionKind.XWAYLAND,
+            classifyLinuxSession(sessionType = "wayland", waylandDisplay = "wayland-0", display = ":0")
+        )
+        assertEquals(
+            LinuxSessionKind.NATIVE_WAYLAND,
+            classifyLinuxSession(sessionType = "wayland", waylandDisplay = "wayland-0", display = null)
+        )
+        assertEquals(
+            LinuxSessionKind.HEADLESS,
+            classifyLinuxSession(sessionType = null, waylandDisplay = null, display = null)
+        )
+    }
+
+    @Test
     fun `getLinuxForegroundProcess returns null or a pair without throwing`() {
         assumeTrue(isLinux, "Linux-only test")
         // In a headless CI environment this will return null — that is correct.

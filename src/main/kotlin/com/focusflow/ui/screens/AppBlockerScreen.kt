@@ -55,6 +55,7 @@ import com.focusflow.enforcement.InstalledAppsScanner
 import com.focusflow.enforcement.NetworkBlocker
 import com.focusflow.enforcement.ProcessMonitor
 import com.focusflow.enforcement.ScannedApp
+import com.focusflow.enforcement.isLinux
 import com.focusflow.enforcement.isWindows
 import com.focusflow.services.DailyAllowanceTracker
 import com.focusflow.services.StandaloneBlockService
@@ -460,7 +461,13 @@ private fun AlwaysBlockTab(onNavigateToBlockDefense: () -> Unit) {
                     OutlinedTextField(
                         value         = inlineSearch,
                         onValueChange = { inlineSearch = it },
-                        placeholder   = { Text("Search by name or .exe…", color = OnSurface2, fontSize = 12.sp) },
+                        placeholder   = {
+                            Text(
+                                if (isLinux) "Search by app or process name…" else "Search by name or .exe…",
+                                color = OnSurface2,
+                                fontSize = 12.sp
+                            )
+                        },
                         leadingIcon   = { Icon(Icons.Default.Search, null, tint = OnSurface2, modifier = Modifier.size(16.dp)) },
                         trailingIcon  = if (inlineSearch.isNotBlank()) {
                             { IconButton(onClick = { inlineSearch = "" }, modifier = Modifier.size(28.dp)) {

@@ -15,4 +15,16 @@ Shared picker dialogs must keep in-progress selection state independent of catal
 
 **How to apply:** Initialize selection once when opening a dialog, preserve it while `AppCatalogState` changes, and resolve stable catalog keys only when confirming.
 
+Selection and stale-reference bookkeeping must use the same catalog resolver. A
+reference resolved through a known Linux equivalent, such as `discord.exe` to
+`discord`, must not be added back as a stale entry during a separate
+process-name comparison.
+
+**Why:** A picker can correctly select the catalog entry while its stale pass
+still displays the original Windows-shaped value as missing, which is
+confusing and can duplicate the selection.
+
+**How to apply:** Reuse the resolver predicate for matched keys, stale entries,
+and confirmation fallback whenever a picker accepts stored process references.
+
 The authoritative plan for this scope is `work/linux-app-discovery-and-pickers-plan.md`; related work belongs in the enforcement/release-tests, shared-platform-boundary, and stored-data-migration plans. Tracker items require focused implementation evidence before being checked; compilation alone is insufficient. When blocked, leave the item unchecked and record the exact blocker.

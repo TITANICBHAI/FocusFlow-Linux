@@ -242,6 +242,106 @@ class InstalledAppsScannerLinuxTest {
     }
 
     @Test
+    fun `catalog keeps native user desktop flatpak snap and running-only sources distinct`() {
+        val userRoot = Files.createTempDirectory("focusflow-user-apps-test").toFile()
+        val flatpakRoot = Files.createTempDirectory("focusflow-flatpak-apps-test").toFile()
+        val snapRoot = Files.createTempDirectory("focusflow-snap-apps-test").toFile()
+        try {
+            File(userRoot, "user-editor.desktop").writeText(
+                """
+                    [Desktop Entry]
+                    Type=Application
+                    Name=User Editor
+                    Exec=/home/test/bin/user-editor
+                """.trimIndent()
+            )
+            File(flatpakRoot, "org.example.Reader.desktop").writeText(
+                """
+                    [Desktop Entry]
+                    Type=Application
+                    Name=Flatpak Reader
+                    Exec=flatpak run org.example.Reader
+                """.trimIndent()
+            )
+            File(snapRoot, "snap-reader.desktop").writeText(
+                """
+                    [Desktop Entry]
+                    Type=Application
+                    Name=Snap Reader
+                    Exec=snap run snap-reader
+                """.trimIndent()
+            )
+
+            val installed = InstalledAppsScanner.scanLinuxDesktopFilesForTesting(
+                listOf(
+                    userRoot to AppSource.NATIVE_DESKTOP,
+                    flatpakRoot to AppSource.FLATPAK,
+                    snapRoot to AppSource.SNAP
+                )
+            )
+            val runningOnly = AppDescriptor(
+                processName = "terminal-tool",
+                displayName = "Terminal Tool",
+                isRunning = true,
+                source = AppSource.RUNNING_ONLY,
+                runningPids = listOf(4040L)
+            )
+            val catalog = InstalledAppsScanner.mergeInstalledAndRunningForTesting(
+                installed = installed,
+                running = listOf(runningOnly)
+            )
+
+            assertEquals(
+                AppSource.NATIVE_DESKTOP,
+                catalog.first { it.processName == "user-editor" }.source
+            )
+            assertEquals(
+                AppSource.FLATPAK,
+                catalog.first { it.packageId == "org.example.Reader" }.source
+            )
+            assertEquals(
+                AppSource.SNAP,
+                catalog.first { it.packageId == "snap-reader" }.source
+            )
+            assertEquals(
+                AppSource.RUNNING_ONLY,
+                catalog.first { it.processName == "terminal-tool" }.source
+            )
+        } finally {
+            userRoot.deleteRecursively()
+            flatpakRoot.deleteRecursively()
+            snapRoot.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `rescan reflects desktop application install and removal`() {
+        val root = Files.createTempDirectory("focusflow-refresh-test").toFile()
+        val desktop = File(root, "refreshable.desktop")
+        try {
+            fun scan() = InstalledAppsScanner.scanLinuxDesktopFilesForTesting(
+                listOf(root to AppSource.NATIVE_DESKTOP)
+            )
+
+            assertTrue(scan().none { it.processName == "refreshable" })
+            desktop.writeText(
+                """
+                    [Desktop Entry]
+                    Type=Application
+                    Name=Refreshable App
+                    Exec=/usr/bin/refreshable
+                """.trimIndent()
+            )
+            assertEquals("refreshable", scan().single().processName)
+
+            desktop.delete()
+            assertTrue(scan().none { it.processName == "refreshable" })
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `merges running processes through executable and package aliases`() {
         val installed = AppDescriptor(
             processName = "telegram-desktop",

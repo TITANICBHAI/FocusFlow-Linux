@@ -459,7 +459,7 @@ fun VpnNetworkScreen() {
                                     if (newTargetProcess.isBlank()) {
                                         "Choose a target app from the Linux catalog"
                                     } else {
-                                        "Change target app"
+                                        "Target: ${newTargetDisplay.ifBlank { newTargetProcess }}"
                                     }
                                 )
                             }
@@ -467,7 +467,10 @@ fun VpnNetworkScreen() {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
                                 value = newTargetProcess,
-                                onValueChange = { newTargetProcess = it },
+                                onValueChange = {
+                                    newTargetProcess = it
+                                    newTargetDisplay = ""
+                                },
                                 label = { Text(strings.vpnProcessNameLabel) },
                                 placeholder = {
                                     Text(

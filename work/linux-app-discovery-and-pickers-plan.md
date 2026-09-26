@@ -16,7 +16,7 @@ enforcement engine, or declare the Linux release ready by itself.
 - Blocks: reliable Linux app blocking, task focus-app selection, and the later
   Windows-removal cleanup
 - Execution mode: **Five batches; maximum seven tracker items per batch**
-- Active batch: **APP-22–APP-28** (APP-22–APP-25 remain; APP-26–APP-28 complete)
+- Active batch: **APP-29–APP-34** (APP-29, APP-31–APP-34 complete; APP-30 blocked)
 
 ## Batch execution protocol
 
@@ -30,8 +30,8 @@ at once.
 | Batch 1 | APP-01–APP-07 | Catalog contract and source metadata | Complete |
 | Batch 2 | APP-08–APP-14 | Refresh state and shared picker foundation | Complete |
 | Batch 3 | APP-15–APP-21 | Manual entry and first screen integrations | Complete |
-| Batch 4 | APP-22–APP-28 | Remaining screen integrations and compatibility | In progress |
-| Batch 5 | APP-29–APP-34 | Cross-platform verification and AppImage decision | Not started |
+| Batch 4 | APP-22–APP-28 | Remaining screen integrations and compatibility | Complete |
+| Batch 5 | APP-29–APP-34 | Cross-platform verification and AppImage decision | Complete with APP-30 blocked |
 
 ### Strict tracker rules
 
@@ -132,6 +132,42 @@ Focus Launcher preserves an intentionally empty selection across refreshes and
 includes manual Linux entries when starting a session.
 Blocked or deferred items: APP-22–APP-25 and APP-29 onward remain unchecked.
 Next batch: APP-22–APP-25 (remaining screen integrations), then APP-29–APP-34.
+
+Batch: APP-22–APP-25
+Date: 2026-09-27
+Completed tracker items: APP-22, APP-23, APP-24, APP-25
+Verification: `gradle compileKotlin --no-daemon`, focused
+`LinuxAppPickerFilterTest`, `InstalledAppsCatalogResolutionTest`, and
+`BlockPresetsTest`, complete `gradle test --no-daemon`, and `git diff --check`
+passed. Recurring schedules now use the shared Linux catalog for add/edit;
+Settings quick-add and manual selection normalize Linux values without adding
+`.exe`; VPN target selection supports installed, running-only, manual, and
+stale catalog references; onboarding reports missing Linux preset apps and
+resolves known catalog entries before saving, retaining unresolved choices as
+normalized stale rules.
+Blocked or deferred items: None within this batch. APP-29–APP-34 remain
+unchecked; real X11/Wayland and package/session verification are deferred to
+Batch 5.
+Next batch: APP-29–APP-34 (cross-platform verification and AppImage decision).
+
+Batch: APP-29–APP-34
+Date: 2026-09-27
+Completed tracker items: APP-29, APP-31, APP-32, APP-33, APP-34
+Verification: Focused scanner/session/picker tests and complete `gradle test
+--no-daemon` passed; `gradle compileKotlin --no-daemon` and `git diff --check`
+passed. Scanner fixtures cover native user desktop files, Flatpak, Snap, and
+running-only entries. Rescan coverage observes an added and removed desktop
+file. Linux session classification has deterministic X11, XWayland, native
+Wayland, and headless tests. Picker source audit found no Linux path that adds
+`.exe`; database, scanner, and icon reads in the audited Compose flows are
+under `Dispatchers.IO`. The AppImage policy is documented in
+`work/appimage-discovery-decision.md`.
+Blocked or deferred items: APP-30 remains unchecked because this unprivileged
+headless Replit container has no X11 or native Wayland session. The
+classification seam is tested, but real desktop-session app selection still
+needs a disposable X11 and native Wayland environment.
+Next batch: None in this plan; run APP-30 in a real Linux session before
+declaring the workstream fully verified.
 
 ## Current baseline
 
@@ -381,10 +417,10 @@ Do not silently delete rules during catalog refresh.
 - [x] **APP-19** Upgrade Daily Allowance and Timed Block pickers.
 - [x] **APP-20** Upgrade Focus Session extra-app selection.
 - [x] **APP-21** Replace the Tasks Focus Mode grid with searchable selection.
-- [ ] **APP-22** Upgrade recurring schedule app selection.
-- [ ] **APP-23** Upgrade Settings blocked-app selection.
-- [ ] **APP-24** Add installed/running VPN target selection.
-- [ ] **APP-25** Make onboarding presets report missing Linux applications.
+- [x] **APP-22** Upgrade recurring schedule app selection.
+- [x] **APP-23** Upgrade Settings blocked-app selection.
+- [x] **APP-24** Add installed/running VPN target selection.
+- [x] **APP-25** Make onboarding presets report missing Linux applications.
 
 ### Compatibility and verification
 
@@ -392,14 +428,14 @@ Do not silently delete rules during catalog refresh.
 - [x] **APP-27** Normalize known invalid Linux `.exe` process values without
   deleting user rules.
 - [x] **APP-28** Add unit tests for catalog resolution and stale references.
-- [ ] **APP-29** Test native, Flatpak, Snap, user desktop files, and
+- [x] **APP-29** Test native, Flatpak, Snap, user desktop files, and
   running-only processes.
 - [ ] **APP-30** Test app selection on X11 and native Wayland sessions.
-- [ ] **APP-31** Test refresh after installing/uninstalling an application.
-- [ ] **APP-32** Verify all picker screens no longer force `.exe` on Linux.
-- [ ] **APP-33** Verify Compose screens do not perform scanner or database I/O
+- [x] **APP-31** Test refresh after installing/uninstalling an application.
+- [x] **APP-32** Verify all picker screens no longer force `.exe` on Linux.
+- [x] **APP-33** Verify Compose screens do not perform scanner or database I/O
   directly on the UI thread.
-- [ ] **APP-34** Document AppImage discovery decision and manual fallback.
+- [x] **APP-34** Document AppImage discovery decision and manual fallback.
 
 ## Acceptance criteria
 

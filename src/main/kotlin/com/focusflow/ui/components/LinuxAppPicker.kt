@@ -218,6 +218,7 @@ fun LinuxAppPicker(
     selectedAppKeys: Set<String>,
     onSelectionChanged: (Set<String>) -> Unit,
     modifier: Modifier = Modifier,
+    scrollable: Boolean = true,
     multiSelect: Boolean = true,
     enabled: Boolean = true,
     emptyMessage: String = "No applications available",
@@ -391,12 +392,53 @@ fun LinuxAppPicker(
             }
 
             AppPickerContentState.CONTENT -> {
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    visibleStaleEntries.forEach { (key, label) ->
-                        item(key = "stale:$key") {
+                if (scrollable) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        visibleStaleEntries.forEach { (key, label) ->
+                            item(key = "stale:$key") {
+                                StaleAppRow(
+                                    label = label,
+                                    selected = key in selectedAppKeys,
+                                    enabled = enabled,
+                                    multiSelect = multiSelect,
+                                    onClick = {
+                                        onSelectionChanged(selectedAppKeys - key)
+                                    },
+                                    onRelink = {
+                                        relinkTargetKey = key
+                                    }
+                                )
+                            }
+                        }
+                        items(
+                            items = filteredApps,
+                            key = { "app:${it.catalogKey()}" }
+                        ) { app ->
+                            val key = app.catalogKey()
+                            val selected = key in selectedAppKeys
+                            CatalogAppRow(
+                                app = app,
+                                selected = selected,
+                                enabled = enabled,
+                                multiSelect = multiSelect,
+                                onClick = {
+                                    selectCatalogKey(key)
+                                }
+                            )
+                        }
+                    }
+                } else {
+                    // A picker can be embedded in another vertical scroller,
+                    // such as FocusLauncher's outer LazyColumn. In that case a
+                    // nested LazyColumn receives infinite height constraints.
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        visibleStaleEntries.forEach { (key, label) ->
                             StaleAppRow(
                                 label = label,
                                 selected = key in selectedAppKeys,
@@ -410,22 +452,19 @@ fun LinuxAppPicker(
                                 }
                             )
                         }
-                    }
-                    items(
-                        items = filteredApps,
-                        key = { "app:${it.catalogKey()}" }
-                    ) { app ->
-                        val key = app.catalogKey()
-                        val selected = key in selectedAppKeys
-                        CatalogAppRow(
-                            app = app,
-                            selected = selected,
-                            enabled = enabled,
-                            multiSelect = multiSelect,
-                            onClick = {
-                                selectCatalogKey(key)
-                            }
-                        )
+                        filteredApps.forEach { app ->
+                            val key = app.catalogKey()
+                            val selected = key in selectedAppKeys
+                            CatalogAppRow(
+                                app = app,
+                                selected = selected,
+                                enabled = enabled,
+                                multiSelect = multiSelect,
+                                onClick = {
+                                    selectCatalogKey(key)
+                                }
+                            )
+                        }
                     }
                 }
             }

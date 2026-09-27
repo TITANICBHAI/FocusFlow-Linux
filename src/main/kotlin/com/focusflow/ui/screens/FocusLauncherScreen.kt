@@ -404,6 +404,10 @@ fun FocusLauncherScreen() {
                             catalogState.apps.firstOrNull { it.catalogKey() == key }?.processName ?: key
                         }.toSet()
                     },
+                        // The launcher already owns the outer LazyColumn. Keeping
+                        // a second vertical LazyColumn here causes an infinite
+                        // height measurement on Linux.
+                        scrollable = false,
                     staleSelections = selectedApps
                         .filter { saved -> catalogState.apps.none { it.processName.equals(saved, ignoreCase = true) } }
                         .associateWith { InstalledAppsScanner.friendlyNameFor(it) },

@@ -3,6 +3,7 @@ package com.focusflow
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class ProcessNameNormalizerTest {
     @Test
@@ -65,6 +66,52 @@ class ProcessNameNormalizerTest {
                 "legacy-tool",
                 ProcessPlatform.LINUX
             )
+        )
+    }
+
+    @Test
+    fun `executable basename handles trusted unix and windows paths`() {
+        assertEquals(
+            "firefox.exe",
+            ProcessNameNormalizer.executableBasename(
+                "\"C:\\Program Files\\Mozilla Firefox\\firefox.exe\""
+            )
+        )
+        assertEquals(
+            "firefox",
+            ProcessNameNormalizer.executableBasename("/usr/bin/firefox")
+        )
+        assertNull(ProcessNameNormalizer.executableBasename("/usr/bin/firefox --private-window"))
+        assertNull(ProcessNameNormalizer.executableBasename("/usr/bin/"))
+    }
+
+    @Test
+    fun `aliases normalize with stable first-seen deduplication`() {
+        assertEquals(
+            listOf("discord", "discord-helper", "legacy-tool.exe"),
+            ProcessNameNormalizer.normalizeAliases(
+                listOf("Discord.exe", "discord", "DISCORD-HELPER", " ", "legacy-tool.exe"),
+                ProcessPlatform.LINUX
+            )
+        )
+    }
+
+    @Test
+    fun `malformed comma lists ignore empty values without throwing`() {
+        assertEquals(
+            listOf("chrome", "firefox", "legacy-tool.exe"),
+            ProcessNameNormalizer.normalizeStoredList(
+                " chrome.exe,, ,firefox.exe,legacy-tool.exe,chrome.exe,",
+                ProcessPlatform.LINUX
+            )
+        )
+        assertEquals(
+            emptyList(),
+            ProcessNameNormalizer.normalizeStoredList(",,,   ", ProcessPlatform.LINUX)
+        )
+        assertTrue(
+            ProcessNameNormalizer.normalizeStoredList("one;two", ProcessPlatform.LINUX)
+                .single() == "one;two"
         )
     }
 }

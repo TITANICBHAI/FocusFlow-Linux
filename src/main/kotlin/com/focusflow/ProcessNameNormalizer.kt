@@ -117,6 +117,22 @@ object ProcessNameNormalizer {
     }
 
     /**
+     * Extracts only the executable basename from an explicit filesystem path.
+     *
+     * This is intentionally separate from [normalizeStored]. A persisted
+     * process value is not rewritten just because it contains a slash; callers
+     * must opt into path interpretation at a trusted catalog/desktop-entry
+     * boundary.
+     */
+    fun executableBasename(value: String): String? {
+        val trimmed = value.trim().removeSurrounding("\"").removeSurrounding("'")
+        if (trimmed.isBlank()) return null
+        val basename = trimmed.substringAfterLast('/').substringAfterLast('\\')
+        if (basename.isBlank() || basename.any(Char::isWhitespace)) return null
+        return basename.takeIf { manualProcessPattern.matches(it.lowercase(Locale.ROOT)) }
+    }
+
+    /**
      * Reads an existing stored process reference without dropping it. On Linux,
      * only known Windows-generated values lose their invalid `.exe` suffix.
      */
@@ -149,6 +165,38 @@ object ProcessNameNormalizer {
         val normalizedSecond = normalizeStored(second, platform) ?: return false
         return normalizedFirst.equals(normalizedSecond, ignoreCase = true)
     }
+
+    /**
+     * Normalizes a comma-separated process list without throwing on empty or
+     * malformed elements. The comma is the only supported storage delimiter;
+     * arbitrary text is not split or reinterpreted.
+     */
+    fun normalizeStoredList(
+        raw: String?,
+        platform: ProcessPlatform = currentPlatform()
+    ): List<String> =
+        raw.orEmpty()
+            .split(',')
+            .mapNotNull { normalizeStored(it, platform) }
+            .distinct()
+
+    /** Same list contract for values that have already been split by a caller. */
+    fun normalizeStoredList(
+        values: Iterable<String>,
+        platform: ProcessPlatform = currentPlatform()
+    ): List<String> =
+        values
+            .mapNotNull { normalizeStored(it, platform) }
+            .distinct()
+
+    /**
+     * Canonicalizes catalog-provided aliases. Alias meaning comes from the
+     * catalog; this helper only applies process syntax and stable ordering.
+     */
+    fun normalizeAliases(
+        aliases: Iterable<String>,
+        platform: ProcessPlatform = currentPlatform()
+    ): List<String> = normalizeStoredList(aliases, platform)
 
     fun isKnownWindowsExecutable(value: String): Boolean =
         value.trim().lowercase(Locale.ROOT) in knownWindowsExecutableNames

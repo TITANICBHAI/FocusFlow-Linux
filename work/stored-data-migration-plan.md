@@ -326,15 +326,33 @@ Evidence for DATA-01 through DATA-05:
 
 ### Canonical app/process identity
 
-- [ ] **DATA-06** Define canonical process normalization rules.
-- [ ] **DATA-07** Define canonical app-reference fields with the app-catalog
+- [x] **DATA-06** Define canonical process normalization rules.
+- [x] **DATA-07** Define canonical app-reference fields with the app-catalog
   workstream.
-- [ ] **DATA-08** Define source and resolution-status values for catalog,
+- [x] **DATA-08** Define source and resolution-status values for catalog,
   manual, stale, and unresolved references.
-- [ ] **DATA-09** Define conflict behavior when normalization produces duplicate
+- [x] **DATA-09** Define conflict behavior when normalization produces duplicate
   rules or allowances.
-- [ ] **DATA-10** Add unit tests for paths, case, `.exe` compatibility,
+- [x] **DATA-10** Add unit tests for paths, case, `.exe` compatibility,
   aliases, empty values, and malformed lists.
+
+Evidence for DATA-06 through DATA-10:
+
+- `work/canonical-app-process-identity.md` defines canonical process rules,
+  app-reference fields, source/status wire values, and deterministic
+  duplicate/conflict behavior.
+- `ProcessNameNormalizer` now provides trusted path basename extraction,
+  normalized process-list handling, and catalog-alias normalization without
+  rewriting unknown stored `.exe` values.
+- `CanonicalAppReference` defines the future stable identity shape while
+  retaining a primary process name for enforcement; no schema version was
+  changed.
+- `ProcessNameNormalizerTest` and `CanonicalAppReferenceTest` cover the
+  required paths, case, suffix, alias, empty, malformed-list, and contract
+  cases. Existing catalog-resolution tests cover stable IDs, aliases, stale
+  values, and unresolved values.
+- Verification: focused normalization/catalog/reference tests and the complete
+  Gradle test suite passed.
 
 ### Schema and migration
 

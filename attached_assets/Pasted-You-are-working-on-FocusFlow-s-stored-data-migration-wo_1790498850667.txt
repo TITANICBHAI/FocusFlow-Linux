@@ -1,0 +1,73 @@
+You are working on FocusFlow's stored-data migration workstream.
+
+Project context
+FocusFlow is a Kotlin/JVM Compose Desktop productivity application. The long-term product direction is Linux-only, but Windows support and existing user data must be preserved during the migration.
+
+The authoritative plan is:
+
+work/stored-data-migration-plan.md
+Related plans:
+
+work/linux-app-discovery-and-pickers-plan.md
+work/linux-enforcement-and-release-tests-plan.md
+work/shared-platform-boundary-plan.md
+Read replit.md, the authoritative plan, Database.kt, relevant models and repositories, .agents/memory/MEMORY.md, and linked memory topics before editing.
+
+Assigned work
+You are assigned exactly:
+
+<ASSIGNED_SCOPE>
+Implement only that scope. Do not change unrelated schema, delete legacy data, or remove Windows compatibility unless explicitly assigned.
+
+Workstream goal
+Safely migrate saved FocusFlow data while moving from process-only app references toward stable Linux application identities.
+
+Data that must be preserved includes:
+
+Block rules
+Block schedules
+Daily allowances and usage
+Tasks and task focus-app lists
+Focus-session history
+Network cutoff rules
+Custom presets
+Focus Launcher data
+VPN custom processes
+Shared settings
+User history and notes
+The database currently uses versioned SQLite migrations and has a schema target of version 8. Follow the existing migration conventions.
+
+Non-negotiable rules
+Back up the database before migration.
+Keep migrations transactional and retryable.
+Never silently delete a user rule or historical record.
+Normalize only fields that are known to contain app/process identifiers.
+Do not rewrite arbitrary notes, task text, domains, keywords, or user descriptions.
+Preserve stale or unresolved app references visibly.
+Do not make desktop/application ID the only enforcement value; retain process names or aliases where required.
+Do not put secrets or unnecessary personal content in migration logs.
+Do not increment the schema version until every migration step succeeds.
+Never tick a tracker item based on compilation alone.
+Required workflow
+Read the authoritative plan and identify the exact assigned tracker items.
+Inspect existing schema versions, fixtures, backup behavior, and repository reads/writes.
+Implement only the assigned scope.
+Add focused migration, rollback, fixture, and repository tests.
+Test successful migration, failed migration, retry, and restore behavior as appropriate to the scope.
+Tick only verified DATA-* items in work/stored-data-migration-plan.md.
+Leave blocked items unchecked and record the exact data or schema blocker.
+Report changed files, migration versions, checks run, data-safety evidence, and suggested next scope.
+Do not claim migration readiness until old supported schema versions and Windows-shaped data have been tested.
+Final response format
+At the end, report:
+
+Assigned scope
+Tracker items completed and ticked
+Schema/migration versions affected
+Files changed
+Tests/checks run and results
+Backup/rollback evidence
+Items left unchecked
+Blockers or data-safety risks
+Suggested next scope
+Do not implement or tick outside the assigned scope.

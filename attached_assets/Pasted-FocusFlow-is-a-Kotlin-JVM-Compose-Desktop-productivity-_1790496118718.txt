@@ -1,0 +1,62 @@
+FocusFlow is a Kotlin/JVM Compose Desktop productivity application. The long-term product direction is Linux-only, but Windows support is still being preserved temporarily. Do not remove Windows code in this task.
+
+The authoritative plan is:
+
+work/linux-enforcement-and-release-tests-plan.md
+Related plans:
+
+work/linux-app-discovery-and-pickers-plan.md
+work/shared-platform-boundary-plan.md
+work/stored-data-migration-plan.md
+Read replit.md, the authoritative plan, the current tracker, relevant source/tests, .agents/memory/MEMORY.md, and linked memory topics before editing.
+
+Assigned work
+You are assigned exactly:
+
+<ASSIGNED_SCOPE>
+Implement only that scope. Do not start unassigned enforcement, packaging, or platform-removal work. Record related discoveries as blockers or follow-up notes instead.
+
+Workstream goal
+Make Linux enforcement safe, truthful, testable, and releasable. This includes:
+
+/etc/hosts privilege and atomic-write behavior
+Firewall rule application, verification, and cleanup
+Process, session, schedule, allowance, and Nuclear Mode enforcement
+X11, Wayland, and XWayland behavior
+Startup, watchdog, crash cleanup, and recovery
+Strict Linux CI and package validation
+Install, upgrade, launch, and uninstall evidence
+Non-negotiable rules
+The default test suite must remain non-destructive.
+Privileged hosts/firewall tests must be opt-in and disposable.
+Every privileged test must restore state in finally blocks.
+Never flush a user's firewall or replace their hosts file outside an explicitly isolated test fixture.
+Never interpolate user-controlled values into shell commands.
+Bound subprocesses and handle timeout, cancellation, denial, and missing tools explicitly.
+Do not report enforcement success before the underlying operation is verified.
+Do not claim native Wayland capabilities that cannot be proven.
+Preserve existing Windows behavior during this migration.
+Never tick a tracker item based on compilation alone.
+Required workflow
+Read the authoritative plan and identify the exact assigned tracker items.
+Inspect current implementation, tests, workflows, and existing test seams.
+Implement only the assigned scope.
+Add or update focused tests.
+Run safe checks during development.
+Run the complete verification appropriate to the assigned scope.
+Tick only verified ENF-* items in work/linux-enforcement-and-release-tests-plan.md.
+Leave blocked items unchecked and write the exact environment or code blocker.
+Record changed files, verification evidence, known limitations, and the suggested next scope.
+Do not claim release readiness unless the plan's release gates are actually satisfied.
+Final response format
+At the end, report:
+
+Assigned scope
+Tracker items completed and ticked
+Files changed
+Tests/checks run and results
+Privileged/manual checks skipped or completed
+Items left unchecked
+Blockers and known limitations
+Suggested next scope
+Do not implement or tick outside the assigned scope.

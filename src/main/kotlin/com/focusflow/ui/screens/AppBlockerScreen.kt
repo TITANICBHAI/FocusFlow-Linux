@@ -47,6 +47,7 @@ import com.focusflow.data.models.BlockRule
 import com.focusflow.i18n.LocalizationManager
 import com.focusflow.data.models.CustomBlockPreset
 import com.focusflow.data.models.DailyAllowance
+import com.focusflow.ProcessNameNormalizer
 import com.focusflow.enforcement.AppIconExtractor
 import com.focusflow.enforcement.AppCatalogState
 import com.focusflow.enforcement.AppDescriptor
@@ -314,11 +315,14 @@ private fun AlwaysBlockTab(onNavigateToBlockDefense: () -> Unit) {
     }
 
     fun addManual(raw: String) {
-        val trimmed = raw.trim()
-        if (trimmed.isBlank()) { manualError = "Enter a process name (e.g. chrome.exe)"; return }
-        val proc = trimmed.lowercase().let { if (it.endsWith(".exe")) it else "$it.exe" }
-        if (proc == ".exe" || proc.length <= 4) { manualError = "Name must end in .exe (e.g. chrome.exe)"; return }
-        if (blockRules.any { it.processName.equals(proc, ignoreCase = true) }) {
+        val example = if (isLinux) "firefox" else "chrome.exe"
+        val manual = InstalledAppsScanner.createManualProcessEntry(raw)
+        if (manual == null) {
+            manualError = "Enter a valid process name (e.g. $example)"
+            return
+        }
+        val proc = manual.processName
+        if (blockRules.any { ProcessNameNormalizer.equivalentStored(it.processName, proc) }) {
             manualError = "\"$proc\" is already in your block list"; return
         }
         manualError = null
@@ -1600,14 +1604,10 @@ private fun AllowancePickerDialog(
                                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                                         keyboardActions = KeyboardActions(onDone = {
                                             if (manualExe.isNotBlank()) {
-                                                val proc = manualExe.trim().lowercase()
-                                                    .let { if (it.endsWith(".exe")) it else "$it.exe" }
-                                                pickedApp = ScannedApp(
-                                                    processName = proc,
-                                                    displayName = InstalledAppsScanner.friendlyNameFor(proc),
-                                                    isRunning   = false
-                                                )
-                                                step = 1
+                                                InstalledAppsScanner.createManualProcessEntry(manualExe)?.let {
+                                                    pickedApp = it
+                                                    step = 1
+                                                }
                                             }
                                         }),
                                         colors = OutlinedTextFieldDefaults.colors(
@@ -1620,14 +1620,10 @@ private fun AllowancePickerDialog(
                                     TextButton(
                                         onClick = {
                                             if (manualExe.isNotBlank()) {
-                                                val proc = manualExe.trim().lowercase()
-                                                    .let { if (it.endsWith(".exe")) it else "$it.exe" }
-                                                pickedApp = ScannedApp(
-                                                    processName = proc,
-                                                    displayName = InstalledAppsScanner.friendlyNameFor(proc),
-                                                    isRunning   = false
-                                                )
-                                                step = 1
+                                                InstalledAppsScanner.createManualProcessEntry(manualExe)?.let {
+                                                    pickedApp = it
+                                                    step = 1
+                                                }
                                             }
                                         },
                                         enabled = manualExe.isNotBlank()

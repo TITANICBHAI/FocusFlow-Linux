@@ -590,7 +590,7 @@ fun SettingsScreen() {
                                     proc
                                 }
                                 val alreadyAdded = blockRules.any {
-                                    it.processName.equals(resolvedProc, ignoreCase = true)
+                                    ProcessNameNormalizer.equivalentStored(it.processName, resolvedProc)
                                 }
                                 OutlinedButton(
                                     onClick = {

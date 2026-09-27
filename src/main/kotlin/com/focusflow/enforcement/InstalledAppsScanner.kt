@@ -490,9 +490,15 @@ object InstalledAppsScanner {
                 app.processName,
                 app.displayName
             ).filterNotNull().any { value ->
-                value.trim().lowercase(Locale.ROOT) in keys
+                listOfNotNull(
+                    ProcessNameNormalizer.normalize(value),
+                    ProcessNameNormalizer.normalizeStored(value)
+                ).any { it in keys }
             } || app.processAliases.any {
-                it.trim().lowercase(Locale.ROOT) in keys
+                listOfNotNull(
+                    ProcessNameNormalizer.normalize(it),
+                    ProcessNameNormalizer.normalizeStored(it)
+                ).any { it in keys }
             }
         }
     }
@@ -1246,8 +1252,12 @@ object InstalledAppsScanner {
     private fun appMatchCandidates(app: AppDescriptor): Set<String> =
         (listOf(app.processName, app.packageId) + app.processAliases)
             .filterNotNull()
-            .map { it.trim().lowercase(Locale.ROOT) }
-            .filter { it.isNotBlank() }
+            .flatMap { value ->
+                listOfNotNull(
+                    ProcessNameNormalizer.normalize(value),
+                    ProcessNameNormalizer.normalizeStored(value)
+                )
+            }
             .toSet()
 
     private fun readLinuxProcExe(pid: Long): String? = try {

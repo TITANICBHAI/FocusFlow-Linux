@@ -169,6 +169,18 @@ needs a disposable X11 and native Wayland environment.
 Next batch: None in this plan; run APP-30 in a real Linux session before
 declaring the workstream fully verified.
 
+Batch: APP-06, APP-26–APP-28
+Date: 2026-09-27
+Completed tracker items: APP-06, APP-26, APP-27, APP-28
+Verification: Added shared stored-reference equivalence, normalized known legacy
+values during catalog matching, routed manual App Blocker and VPN entries
+through the shared process normalizer, and added executable-alias matching
+coverage. Focused process/catalog/picker/preset tests, complete `gradle test
+--no-daemon`, and `git diff --check` passed.
+Blocked or deferred items: APP-30 remains blocked by the lack of a real X11 or
+native Wayland session in the current Replit environment.
+Next batch: APP-30 real desktop-session selection verification.
+
 ## Current baseline
 
 `InstalledAppsScanner` already discovers some Linux applications from desktop

@@ -25,6 +25,7 @@ import com.focusflow.data.Database
 import com.focusflow.data.models.NetworkCutoffRule
 import com.focusflow.data.models.NetworkRuleMode
 import com.focusflow.i18n.LocalizationManager
+import com.focusflow.ProcessNameNormalizer
 import com.focusflow.enforcement.NetworkBlocker
 import com.focusflow.enforcement.ProcessMonitor
 import com.focusflow.enforcement.VpnBlocker
@@ -499,9 +500,8 @@ fun VpnNetworkScreen() {
                             val pat = newPattern.trim().lowercase()
                             if (pat.isBlank()) return@Button
                             val targetProc = if (appSpecific && newTargetProcess.isNotBlank()) {
-                                newTargetProcess.trim().lowercase().let {
-                                    if (isWindows && !it.endsWith(".exe")) "$it.exe" else it
-                                }
+                                ProcessNameNormalizer.normalizeManual(newTargetProcess)
+                                    ?: return@Button
                             } else null
                             val targetDisp = if (appSpecific && newTargetDisplay.isNotBlank()) newTargetDisplay.trim()
                                              else targetProc?.removeSuffix(".exe")?.replaceFirstChar { it.uppercase() }

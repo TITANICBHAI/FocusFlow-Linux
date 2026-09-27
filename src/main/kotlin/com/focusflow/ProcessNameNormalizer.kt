@@ -133,6 +133,23 @@ object ProcessNameNormalizer {
         }
     }
 
+    /**
+     * Compares two persisted process references using the same compatibility
+     * normalization used by database reads and catalog resolution.
+     *
+     * Unknown values are intentionally not rewritten, so an arbitrary
+     * user-entered `legacy-tool.exe` remains distinct from `legacy-tool`.
+     */
+    fun equivalentStored(
+        first: String,
+        second: String,
+        platform: ProcessPlatform = currentPlatform()
+    ): Boolean {
+        val normalizedFirst = normalizeStored(first, platform) ?: return false
+        val normalizedSecond = normalizeStored(second, platform) ?: return false
+        return normalizedFirst.equals(normalizedSecond, ignoreCase = true)
+    }
+
     fun isKnownWindowsExecutable(value: String): Boolean =
         value.trim().lowercase(Locale.ROOT) in knownWindowsExecutableNames
 }

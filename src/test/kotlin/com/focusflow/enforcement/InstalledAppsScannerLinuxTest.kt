@@ -384,6 +384,37 @@ class InstalledAppsScannerLinuxTest {
     }
 
     @Test
+    fun `merges a running process through a known executable alias`() {
+        val installed = AppDescriptor(
+            processName = "editor",
+            displayName = "Editor",
+            isRunning = false,
+            exePath = "/opt/editor/editor",
+            processAliases = listOf("editor-bin"),
+            source = AppSource.NATIVE_DESKTOP
+        )
+        val running = AppDescriptor(
+            processName = "editor-bin",
+            displayName = "editor-bin",
+            isRunning = true,
+            exePath = "/opt/editor/editor-bin",
+            source = AppSource.RUNNING_ONLY,
+            runningPids = listOf(4321L)
+        )
+
+        val catalog = InstalledAppsScanner.mergeInstalledAndRunningForTesting(
+            installed = listOf(installed),
+            running = listOf(running)
+        )
+
+        val merged = catalog.single()
+        assertEquals("editor", merged.processName)
+        assertTrue(merged.isRunning)
+        assertEquals(listOf(4321L), merged.runningPids)
+        assertFalse(catalog.any { it.source == AppSource.RUNNING_ONLY })
+    }
+
+    @Test
     fun `catalog creates manual entries without adding a Linux exe suffix`() {
         val manual = InstalledAppCatalog.createManualProcessEntry("focus-helper")
 

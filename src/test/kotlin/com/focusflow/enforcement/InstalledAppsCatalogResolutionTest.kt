@@ -46,4 +46,18 @@ class InstalledAppsCatalogResolutionTest {
             InstalledAppsScanner.resolveAppReferenceForTesting("legacy-tool.exe", listOf(app))
         )
     }
+
+    @Test
+    fun `resolves known stale values through app aliases as well as process names`() {
+        val chrome = firefox.copy(
+            processName = "chrome",
+            displayName = "Chrome",
+            processAliases = listOf("chrome.exe")
+        )
+
+        assertEquals(
+            chrome,
+            InstalledAppsScanner.resolveAppReferenceForTesting("chrome.exe", listOf(chrome))
+        )
+    }
 }

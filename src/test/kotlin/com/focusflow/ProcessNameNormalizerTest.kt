@@ -47,4 +47,24 @@ class ProcessNameNormalizerTest {
             ProcessNameNormalizer.normalizeStored("legacy-tool.exe", ProcessPlatform.WINDOWS)
         )
     }
+
+    @Test
+    fun `stored equivalence maps known windows values but preserves arbitrary exe values`() {
+        assertEquals(
+            true,
+            ProcessNameNormalizer.equivalentStored(
+                "Chrome.exe",
+                "chrome",
+                ProcessPlatform.LINUX
+            )
+        )
+        assertEquals(
+            false,
+            ProcessNameNormalizer.equivalentStored(
+                "legacy-tool.exe",
+                "legacy-tool",
+                ProcessPlatform.LINUX
+            )
+        )
+    }
 }

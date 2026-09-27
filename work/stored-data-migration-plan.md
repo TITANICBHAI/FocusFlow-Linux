@@ -12,7 +12,7 @@ are removed.
 
 ## Status
 
-- Overall: **Phase A complete (DATA-01 through DATA-05); later phases not started**
+- Overall: **DATA-01 through DATA-25 complete; rollback/restore tests, runtime, and upgrade validation remain**
 - Owner: FocusFlow data and migration work
 - Depends on: the shared app identity contract from the Linux app-picker plan
 - Coordinates with: `work/shared-platform-boundary-plan.md`
@@ -24,7 +24,7 @@ are removed.
 `Database.kt` already has a transactional, versioned SQLite migration system:
 
 - `PRAGMA user_version` tracks schema state.
-- The current target schema is version 8.
+- The current target schema is version 10.
 - Migrations run in a transaction.
 - Failed migrations roll back and are retried.
 - Broken databases are backed up before recovery.
@@ -356,38 +356,111 @@ Evidence for DATA-06 through DATA-10:
 
 ### Schema and migration
 
-- [ ] **DATA-11** Add the next versioned schema migration without editing
+- [x] **DATA-11** Add the next versioned schema migration without editing
   completed migration functions.
-- [ ] **DATA-12** Add stable app identity storage without making desktop ID the
+- [x] **DATA-12** Add stable app identity storage without making desktop ID the
   only enforcement key.
-- [ ] **DATA-13** Add resolution status and last-resolved metadata where
+- [x] **DATA-13** Add resolution status and last-resolved metadata where
   required.
-- [ ] **DATA-14** Migrate block rules while preserving IDs, display names,
+- [x] **DATA-14** Migrate block rules while preserving IDs, display names,
   enabled state, and network settings.
-- [ ] **DATA-15** Migrate schedules without dropping stale individual entries.
-- [ ] **DATA-16** Migrate daily allowances with explicit duplicate/conflict
+- [x] **DATA-15** Migrate schedules without dropping stale individual entries.
+- [x] **DATA-16** Migrate daily allowances with explicit duplicate/conflict
   handling.
-- [ ] **DATA-17** Migrate task focus-app lists and preserve task/session
+- [x] **DATA-17** Migrate task focus-app lists and preserve task/session
   history.
-- [ ] **DATA-18** Migrate network cutoff target processes without changing
+- [x] **DATA-18** Migrate network cutoff target processes without changing
   domain/keyword patterns.
-- [ ] **DATA-19** Migrate custom presets, launcher data, and saved app lists.
-- [ ] **DATA-20** Migrate VPN custom-process settings without forcing `.exe`.
-- [ ] **DATA-21** Preserve or safely retire Windows-only settings through a
+- [x] **DATA-19** Migrate custom presets, launcher data, and saved app lists.
+- [x] **DATA-20** Migrate VPN custom-process settings without forcing `.exe`.
+- [x] **DATA-21** Preserve or safely retire Windows-only settings through a
   versioned decision.
+
+Evidence for DATA-11 through DATA-17:
+
+- Schema v9 adds `app_references`, an additive per-owner/per-position table.
+  Existing process columns remain untouched and continue to provide the
+  compatibility enforcement value.
+- Each migrated reference stores the original process value, canonical primary
+  process name, optional display name, stable-app-ID slot, process-alias slot,
+  legacy source, unresolved status, last-resolved timestamp slot, and
+  deterministic conflict metadata.
+- Block rules retain source IDs, display names, enabled/network values, and
+  original process values. Schedules retain all timing/day/enabled fields and
+  preserve each nonblank stale process entry independently.
+- Daily allowance rows are retained, including legacy duplicate rows where the
+  source schema permits them. Normalized duplicate groups are marked as
+  mergeable duplicates or allowance conflicts without selecting a minutes or
+  display-name value.
+- Task rows and focus-session history are not rewritten. Every nonblank
+  `focus_blocked_apps` entry is represented in order, including unresolved
+  values and known Windows-to-Linux compatibility normalization.
+- `StoredDataMigrationV9Test` covers preservation, stable identity slots,
+  unresolved status, known `.exe` normalization, stale schedule/task entries,
+  duplicate allowance conflicts, history retention, and idempotent retry.
+- Verification: `gradle test --no-daemon --tests
+  com.focusflow.data.StoredDataMigrationV9Test` and the complete
+  `gradle test --no-daemon` suite passed.
+
+Evidence for DATA-18 through DATA-21:
+
+- Schema v10 extends `app_references` for network cutoff targets, custom block
+  presets, Focus Launcher presets and recovery apps, `launcher_selected_apps`,
+  and `vpn_custom_processes`.
+- Network rule source rows retain IDs, patterns, modes, target display names,
+  enabled state, and target process text exactly; domain and keyword patterns
+  are never normalized as process values.
+- Preset, launcher, and saved-list source values remain unchanged while each
+  nonblank process entry gets an ordered unresolved app reference. VPN values
+  use known compatibility normalization only in `primary_process_name`; the
+  original setting remains untouched and unknown `.exe` values are preserved.
+- Windows-only and platform-specific setting policies are recorded in the
+  versioned `setting_migration_decisions` table with `preserve_legacy` actions.
+  Existing settings, including unknown keys, are not deleted or rewritten.
+- `StoredDataMigrationV10Test` covers network-pattern preservation, stale and
+  known Windows-shaped references, preset/launcher/session data, saved app
+  lists, VPN suffix behavior, Windows-only setting preservation, and
+  idempotence.
+- Verification: `gradle test --no-daemon --tests
+  com.focusflow.data.StoredDataMigrationV10Test` and the complete
+  `gradle test --no-daemon` suite passed.
 
 ### Backup and failure behavior
 
-- [ ] **DATA-22** Add a verified pre-migration SQLite backup including WAL state.
-- [ ] **DATA-23** Refuse migration when the required backup cannot be created.
-- [ ] **DATA-24** Keep migration transaction boundaries and version updates
+- [x] **DATA-22** Add a verified pre-migration SQLite backup including WAL state.
+- [x] **DATA-23** Refuse migration when the required backup cannot be created.
+- [x] **DATA-24** Keep migration transaction boundaries and version updates
   atomic.
-- [ ] **DATA-25** Add local migration summary diagnostics without sensitive
+- [x] **DATA-25** Add local migration summary diagnostics without sensitive
   values.
 - [ ] **DATA-26** Test failed migration rollback and safe retry.
 - [ ] **DATA-27** Test locked, corrupt, read-only, and insufficient-space
   database behavior.
 - [ ] **DATA-28** Test restore into a clean database.
+
+Evidence for DATA-22 through DATA-25:
+
+- Before any schema transaction starts, migration creates a uniquely named
+  `VACUUM INTO` snapshot under `.focusflow/migration-backups/`. SQLite
+  materializes committed WAL pages into this single-file backup.
+- The snapshot is independently reopened and checked with `PRAGMA quick_check`,
+  verified to be nonempty, and checked to carry the source `user_version`.
+  Partial backup files are removed on failure.
+- Migration aborts without replacing the live database when the verified
+  backup cannot be created. Migration SQL failures also roll back and avoid the
+  corrupt-database recovery path.
+- `user_version` is updated only after all migrations succeed and commit.
+  Diagnostics are written after commit or after rollback/refusal, without
+  changing transaction outcomes.
+- `migration-summary.log` records schema versions, aggregate reference counts,
+  rollback/outcome status, backup filename, and WAL presence/size. It does not
+  record database paths, process values, PIN/hash values, passwords, or tokens.
+- `MigrationSafetyTest` verifies WAL-backed data is present in the snapshot,
+  backup failure is explicit with no partial snapshot, and diagnostics contain
+  only aggregate non-sensitive fields.
+- Verification: `gradle test --no-daemon --tests
+  com.focusflow.data.MigrationSafetyTest` and the complete
+  `gradle test --no-daemon` suite passed.
 
 ### Runtime and UI compatibility
 

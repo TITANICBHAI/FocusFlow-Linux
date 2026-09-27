@@ -11,7 +11,7 @@ migration: no data is rewritten by this work.
 
 The live database is SQLite at `~/.focusflow/focusflow.db` on Linux and
 `%USERPROFILE%\.focusflow\focusflow.db` on Windows. SQLite `PRAGMA user_version`
-is the schema version. The current target is version 8.
+is the schema version. The current target is version 9.
 
 ### Tables and columns
 
@@ -34,6 +34,8 @@ is the schema version. The current target is version 8.
 | `focus_launcher_presets` | `id TEXT PRIMARY KEY`; `name TEXT NOT NULL`; `process_names TEXT NOT NULL DEFAULT ''`; `created_at TEXT NOT NULL` | `process_names` is a comma-separated process list. |
 | `focus_launcher_session` | `id INTEGER PRIMARY KEY CHECK (id = 1)`; `session_start_ms INTEGER NOT NULL`; `session_end_ms INTEGER NOT NULL DEFAULT 0`; `breaks_total INTEGER NOT NULL DEFAULT 1`; `breaks_used INTEGER NOT NULL DEFAULT 0`; `break_duration_seconds INTEGER NOT NULL DEFAULT 300`; `break_seconds_accumulated INTEGER NOT NULL DEFAULT 0`; `hard_locked INTEGER NOT NULL DEFAULT 0`; `break_active INTEGER NOT NULL DEFAULT 0`; `break_end_ms INTEGER NOT NULL DEFAULT 0`; `pin_hash TEXT NOT NULL` | Durable launcher recovery state. `pin_hash` is hashed credential material and must never be logged or exported as plaintext. |
 | `focus_launcher_session_apps` | `session_id INTEGER NOT NULL`; `position INTEGER NOT NULL`; `process_name TEXT NOT NULL`; `display_name TEXT NOT NULL`; `exe_path TEXT`; primary key `(session_id, position)` | `process_name` is an app/process identifier; `exe_path` is a platform-specific path. |
+| `app_references` | `id TEXT PRIMARY KEY`; `owner_type TEXT NOT NULL`; `owner_id TEXT NOT NULL`; `position INTEGER NOT NULL`; `legacy_process_name TEXT NOT NULL`; `stable_app_id TEXT`; `display_name TEXT`; `primary_process_name TEXT NOT NULL`; `process_aliases TEXT DEFAULT ''`; `source TEXT DEFAULT 'legacy'`; `resolution_status TEXT DEFAULT 'unresolved'`; `last_resolved_at_ms INTEGER`; `conflict_status TEXT DEFAULT 'none'`; `conflict_group_key TEXT`; unique `(owner_type, owner_id, position)` | v9/v10 additive identity records for rules, schedules, allowances, tasks, network targets, presets, launcher data, saved app lists, and VPN processes. The primary process remains available for enforcement. |
+| `setting_migration_decisions` | `setting_pattern TEXT PRIMARY KEY`; `classification TEXT NOT NULL`; `action TEXT NOT NULL`; `decision_version INTEGER NOT NULL`; `reason TEXT NOT NULL` | v10 non-destructive policy records. Windows-only and platform-specific settings are preserved as legacy until an explicit later retirement migration. |
 
 Indexes currently created by migrations:
 
@@ -44,6 +46,9 @@ Indexes currently created by migrations:
 - `idx_habit_entries` on `habit_entries(habit_id, date)`
 - `idx_daily_usage_date` on `daily_usage(date)`
 - `idx_net_rules_mode` on `network_cutoff_rules(mode)`
+- `idx_app_refs_owner` on `app_references(owner_type, owner_id, position)`
+- `idx_app_refs_process` on `app_references(primary_process_name)`
+- `idx_app_refs_stable_id` on `app_references(stable_app_id)`
 
 ### Serialized lists and scalar encodings
 
@@ -107,11 +112,20 @@ The inventory intentionally does not reproduce any PIN/hash values or user
 content. Unknown settings keys must be retained by a migration unless a later
 versioned decision explicitly classifies them.
 
-## DATA-02 — schema history through version 8
+### Migration backup and diagnostics
+
+| Artifact | Location/format | Handling |
+|---|---|---|
+| Pre-migration backup | `.focusflow/migration-backups/pre_migration_v<source>_to_v<target>_<timestamp>.db` | Created with SQLite `VACUUM INTO`, which includes committed WAL state in a consistent WAL-free snapshot. Independently integrity-checked before migration. |
+| Migration summary | `.focusflow/migration-summary.log`, one aggregate key/value record per migration attempt | Records source/target versions, counts, outcome, rollback status, backup filename, and WAL presence/size. Never records full paths or user values. |
+
+## DATA-02 — schema history through version 8 and subsequent migrations
 
 SQLite starts at `user_version = 0` for a new/empty database. `Database.migrate`
 runs each missing migration in order inside one transaction and updates
-`user_version` to 8 only after all steps succeed.
+`user_version` to 10 only after all steps succeed. DATA-02 documents the
+pre-existing v0–v8 history; v9 and v10 are documented below as subsequent
+migrations.
 
 | Version | Change |
 |---:|---|
@@ -124,9 +138,12 @@ runs each missing migration in order inside one transaction and updates
 | 6 | Adds `daily_usage` and `idx_daily_usage_date`. |
 | 7 | Adds `focus_launcher_presets`. |
 | 8 | Adds `focus_launcher_session` and `focus_launcher_session_apps` for durable launcher recovery. |
+| 9 | Adds `app_references` and indexes, then records canonical unresolved references for block rules, schedules, daily allowances, and task focus-app lists without rewriting source rows. |
+| 10 | Extends `app_references` for network targets, presets, launcher data, saved app lists, and VPN processes; records preserve-legacy decisions for Windows-only and platform-specific settings. |
 
-There is no v9 migration. Existing migration functions must remain unchanged;
-future schema work belongs in a new numbered migration.
+Existing v1–v8 migration functions and completed v9 behavior remain unchanged.
+Future schema work belongs
+in a new numbered migration.
 
 ## DATA-03 — fixture databases
 
@@ -167,7 +184,7 @@ representative data. Fixtures are safe: they never use the user database path.
 |---|---|
 | Shared and safe to preserve | Theme/language/sidebar, onboarding completion and preset IDs, user name, focus goal, overlay text/timing, Pomodoro values and chimes, sound volume, focus lock, weekly report timestamp, keyword text/enabled state, review/promo counters, app-open count, crash-report opt-in, task-alarm state |
 | Linux-equivalent or runtime-shared | `always_on_enforcement`, `sound_aversion`, `temptation_log`, `vpn_enabled`, `vpn_block_enabled`, `vpn_custom_processes`, standalone block process/timing values, launcher selection and recovery state. Preserve first; map behavior only in a later platform-aware migration. |
-| Windows-only or platform-specific | Windows startup/registry state represented by `WindowsStartupManager`; Windows setup, Defender, firewall, hosts, registry lockdown, and `start_with_windows` model semantics. Preserve unknown database keys, but do not claim a Linux equivalent automatically. |
+| Windows-only or platform-specific | Windows startup/registry state represented by `WindowsStartupManager`; Windows setup, Defender, firewall, hosts, registry lockdown, and `start_with_windows` model semantics. v10 records `preserve_legacy` decisions; preserve unknown database keys, but do not claim a Linux equivalent automatically. |
 | Legacy/product metadata | Android promo keys, Edge extension promo dismissal, post-PIN recommendations, review-prompt legacy key, block promo reset, last-crash metadata, version markers, dynamic escape-attempt counters |
 | Unsafe to migrate automatically | PIN/hash values into logs or exports; unknown settings keys; arbitrary user text; domain/keyword patterns; Windows paths; platform-specific enforcement flags whose Linux behavior is not equivalent; comma-separated values when the field's identity type is not known |
 

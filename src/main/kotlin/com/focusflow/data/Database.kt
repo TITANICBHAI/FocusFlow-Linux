@@ -17,7 +17,7 @@ object Database {
     private lateinit var connection: Connection
 
     /** True once the DB has been opened and migrated successfully. */
-    val isReady: Boolean get() = ::connection.isInitialized
+    val isReady: Boolean get() = ::connection.isInitialized && !connection.isClosed
 
     /**
      * Stores the exception from the most recent failed tryOpenAndMigrate() call so
@@ -41,6 +41,11 @@ object Database {
                 java.io.File(System.getProperty("user.home") + "/.focusflow/crash.log")
                     .also { it.parentFile?.mkdirs() }
                     .appendText("[${java.time.LocalDateTime.now()}] DB locked (SQLITE_BUSY) — another FocusFlow instance may be running. Starting with empty/default settings.\n\n")
+                return
+            }
+            if (failure is MigrationAbortedException) {
+                // Migration failures must not fall through to the corrupt-DB
+                // recovery path, which may replace the user's database.
                 return
             }
             // Any other failure (corruption, I/O error) — back up and start fresh
@@ -98,7 +103,7 @@ object Database {
             }
 
             connection = localConn
-            migrate()
+            migrate(dbFile)
             true
         } catch (e: Exception) {
             lastOpenFailure = e
@@ -153,14 +158,37 @@ object Database {
     // Every new schema change gets its own numbered migrate_vN() function.
     // Never edit an existing migrate_vN() — add a new one and bump TARGET_VERSION.
     //
-    private val TARGET_VERSION = 8
+    private val TARGET_VERSION = 10
 
-    private fun migrate() {
+    private fun migrate(dbFile: java.io.File) {
         val current = connection.createStatement()
             .executeQuery("PRAGMA user_version")
             .use { rs -> if (rs.next()) rs.getInt(1) else 0 }
 
         if (current >= TARGET_VERSION) return
+
+        val preflightBackup = try {
+            MigrationPreflightBackup.createVerified(
+                connection = connection,
+                databaseFile = dbFile,
+                sourceVersion = current,
+                targetVersion = TARGET_VERSION
+            )
+        } catch (e: MigrationPreflightBackup.Failed) {
+            MigrationDiagnostics.write(
+                databaseDirectory = dbFile.parentFile,
+                sourceVersion = current,
+                targetVersion = TARGET_VERSION,
+                backupFileName = null,
+                counts = MigrationDiagnostics.Counts(),
+                rollbackNeeded = false,
+                outcome = "backup_failed"
+            )
+            throw MigrationAbortedException(
+                "Migration refused because a verified pre-migration backup could not be created",
+                e
+            )
+        }
 
         // Wrap all migration steps in a single transaction — if any step fails
         // mid-way the schema is rolled back to the pre-migration state and
@@ -175,21 +203,41 @@ object Database {
             if (current < 6) migrateV6()
             if (current < 7) migrateV7()
             if (current < 8) migrateV8()
+            if (current < 9) migrateV9()
+            if (current < 10) migrateV10()
 
             // Bump stored version only after ALL steps succeed
             connection.createStatement()
                 .executeUpdate("PRAGMA user_version = $TARGET_VERSION")
             connection.commit()
+            MigrationDiagnostics.write(
+                databaseDirectory = dbFile.parentFile,
+                sourceVersion = current,
+                targetVersion = TARGET_VERSION,
+                backupFileName = preflightBackup.fileName,
+                counts = MigrationDiagnostics.capture(connection),
+                rollbackNeeded = false,
+                outcome = "committed",
+                walPresent = preflightBackup.walPresent,
+                walBytes = preflightBackup.walBytes
+            )
         } catch (e: Exception) {
             try { connection.rollback() } catch (_: Exception) {}
-            val logFile = java.io.File(
-                System.getProperty("user.home") + "/.focusflow/crash.log"
+            MigrationDiagnostics.write(
+                databaseDirectory = dbFile.parentFile,
+                sourceVersion = current,
+                targetVersion = TARGET_VERSION,
+                backupFileName = preflightBackup.fileName,
+                counts = MigrationDiagnostics.capture(connection),
+                rollbackNeeded = true,
+                outcome = "rolled_back",
+                walPresent = preflightBackup.walPresent,
+                walBytes = preflightBackup.walBytes
             )
-            logFile.parentFile?.mkdirs()
-            logFile.appendText(
-                "[${java.time.LocalDateTime.now()}] Migration failed at schema v$current: ${e.message}\n${e.stackTraceToString()}\n\n"
+            throw MigrationAbortedException(
+                "Schema migration failed and was rolled back",
+                e
             )
-            throw e  // Propagate so init() triggers recovery flow
         } finally {
             connection.autoCommit = true
         }
@@ -426,6 +474,21 @@ object Database {
                 )
             """.trimIndent())
         }
+    }
+
+    // v9 — stable app-reference storage for migrated process-only data.
+    //
+    // Existing process columns intentionally remain the compatibility/enforcement
+    // values. This migration adds a normalized reference record for the app
+    // identity workstream without requiring a catalog lookup or rewriting user
+    // data. A later resolver can fill stable_app_id and resolution metadata.
+    private fun migrateV9() {
+        StoredDataMigrationV9.apply(connection)
+    }
+
+    // v10 — migrate network, preset, launcher, VPN, and platform-setting references.
+    private fun migrateV10() {
+        StoredDataMigrationV10.apply(connection)
     }
 
     // v4 — network cutoff rules (domain + keyword, with optional per-app targeting)

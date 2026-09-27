@@ -77,6 +77,17 @@ object Database {
         }
     }
 
+    /**
+     * Close the active connection before replacing the database file during a
+     * restore or application reinstall. The next [init] call reopens and
+     * migrates the restored database as needed.
+     */
+    @Synchronized fun close() {
+        if (::connection.isInitialized && !connection.isClosed) {
+            connection.close()
+        }
+    }
+
     private fun tryOpenAndMigrate(dbFile: java.io.File): Boolean {
         var localConn: java.sql.Connection? = null
         return try {

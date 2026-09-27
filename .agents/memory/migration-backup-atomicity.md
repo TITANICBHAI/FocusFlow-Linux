@@ -15,3 +15,12 @@ consistent pre-migration restore point.
 **How to apply:** Use `VACUUM INTO`, validate the destination with SQLite
 integrity and schema-version checks, update `user_version` only after commit,
 and write only aggregate, non-sensitive migration diagnostics.
+
+Restoring a SQLite snapshot must close the active connection and remove the
+previous database's `-wal` and `-shm` sidecars before replacing the main file.
+
+**Why:** Reopening a restored main file alongside an old WAL can replay
+post-backup transactions and make deleted or rolled-back user data reappear.
+
+**How to apply:** Snapshot the current database first, close it, remove its
+sidecars, replace the main file, then reopen through the normal migration path.

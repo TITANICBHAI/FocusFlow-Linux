@@ -12,7 +12,7 @@ are removed.
 
 ## Status
 
-- Overall: **DATA-01 through DATA-25 complete; rollback/restore tests, runtime, and upgrade validation remain**
+- Overall: **DATA-01 through DATA-40 complete**
 - Owner: FocusFlow data and migration work
 - Depends on: the shared app identity contract from the Linux app-picker plan
 - Coordinates with: `work/shared-platform-boundary-plan.md`
@@ -488,14 +488,36 @@ Evidence for DATA-29 through DATA-34:
 
 ### Upgrade validation
 
-- [ ] **DATA-35** Run migration tests from every supported schema version.
-- [ ] **DATA-36** Test a Windows-shaped database opened by the Linux build.
-- [ ] **DATA-37** Test a Linux database after application uninstall/reinstall.
-- [ ] **DATA-38** Test backup/restore across application upgrades.
-- [ ] **DATA-39** Test migration with active schedules, allowances, tasks,
+- [x] **DATA-35** Run migration tests from every supported schema version.
+- [x] **DATA-36** Test a Windows-shaped database opened by the Linux build.
+- [x] **DATA-37** Test a Linux database after application uninstall/reinstall.
+- [x] **DATA-38** Test backup/restore across application upgrades.
+- [x] **DATA-39** Test migration with active schedules, allowances, tasks,
   sessions, VPN settings, and network rules.
-- [ ] **DATA-40** Record the final supported upgrade path before Windows
+- [x] **DATA-40** Record the final supported upgrade path before Windows
   compatibility code is removed.
+
+Evidence for DATA-35 through DATA-40:
+
+- `UpgradeValidationTest` opens every supported source schema version, v0
+  through v8, through the real `Database.init()` migration path and verifies
+  schema v10 plus pre-migration backups.
+- The Windows-shaped fixture is opened by the Linux/JVM build and verifies
+  canonical reads while preserving the original `.exe` source values.
+- Reinstall coverage snapshots a Linux database, removes the application data
+  directory, restores the user database snapshot, and verifies stale app
+  references remain visible after reopening.
+- Upgrade backup/restore coverage creates a v8 backup before initialization,
+  upgrades to v10, restores the v8 backup, and verifies automatic re-migration
+  to v10 without retaining post-backup rules.
+- Active-data coverage verifies schedules, daily allowances, tasks, focus
+  sessions, VPN process settings, and network cutoff rules together.
+- The supported path before Windows compatibility removal is:
+  `v0 → v1 → v2 → v3 → v4 → v5 → v6 → v7 → v8 → v9 → v10`.
+  Every upgrade creates a verified WAL-aware pre-migration snapshot. Windows
+  shaped v8 data is supported through v10, and the v10 legacy-setting decisions
+  preserve Windows-only settings until a separate, explicitly versioned
+  retirement migration.
 
 ## Acceptance criteria
 

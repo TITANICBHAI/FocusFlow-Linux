@@ -201,11 +201,27 @@ object AutoBackupService {
         // VACUUM INTO produces a single, WAL-free, fully consistent copy even while
         // the database is being actively written to.
         if (live.exists()) {
-            runCatching { Database.vacuumInto(safety.absolutePath) }
+            val safetyCreated = runCatching {
+                Database.vacuumInto(safety.absolutePath)
+            }.isSuccess
+            if (!safetyCreated) {
+                return RestoreResult.Failed("Could not create restore safety snapshot")
+            }
         }
+
+        // A copied database must not be opened alongside WAL/SHM files from the
+        // previous database. Close the active connection and remove those sidecars
+        // before replacing the main file; init() below reopens and re-runs any
+        // pending migrations from the restored schema.
+        Database.close()
+        val liveWal = File(live.parent, "${live.name}-wal")
+        val liveShm = File(live.parent, "${live.name}-shm")
+        liveWal.delete()
+        liveShm.delete()
 
         return try {
             Files.copy(backupFile.toPath(), live.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            Database.init()
             RestoreResult.Success
         } catch (e: Exception) {
             // Roll back: restore safety snapshot
@@ -213,6 +229,9 @@ object AutoBackupService {
                 if (safety.exists()) {
                     Files.copy(safety.toPath(), live.toPath(), StandardCopyOption.REPLACE_EXISTING)
                 }
+                liveWal.delete()
+                liveShm.delete()
+                Database.init()
             }
             RestoreResult.Failed(e.message ?: "Unknown error")
         }

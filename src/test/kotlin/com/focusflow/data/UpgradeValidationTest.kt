@@ -5,6 +5,7 @@ import com.focusflow.services.AutoBackupService
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.nio.file.Files
+import java.security.MessageDigest
 import java.sql.Connection
 import java.sql.DriverManager
 import kotlin.io.path.readText
@@ -25,21 +26,19 @@ class UpgradeValidationTest {
 
     @Test
     fun `every supported schema version gate upgrades to v10`() {
-        // v0 is the empty/pre-schema entry point. The remaining versions use
-        // the complete v8 fixture with the version marker changed so every
-        // Database.migrate branch is exercised through the real init path.
+        // v0 is the deliberately weak pre-schema input. Versions 1–7 are
+        // materialized from the real v1 shape plus only the schema changes that
+        // existed by that version; v8 uses the complete legacy fixture.
         (0..8).forEach { sourceVersion ->
             withDatabaseHome(
-                resources = if (sourceVersion == 0) {
-                    emptyList()
-                } else {
-                    listOf("schema-v8.sql")
+                resources = when {
+                    sourceVersion == 0 -> listOf("duplicate-v0.sql")
+                    sourceVersion == 8 -> listOf("schema-v8.sql")
+                    else -> listOf("schema-v1.sql")
                 },
                 beforeInit = { connection ->
-                    if (sourceVersion > 0) {
-                        connection.createStatement().use {
-                            it.executeUpdate("PRAGMA user_version = $sourceVersion")
-                        }
+                    if (sourceVersion in 1..7) {
+                        materializeSchemaVersion(connection, sourceVersion)
                     }
                 }
             ) { home ->
@@ -55,8 +54,15 @@ class UpgradeValidationTest {
         // and must preserve duplicate legacy rows rather than collapsing them.
         withDatabaseHome(resources = listOf("duplicate-v0.sql")) { home ->
             assertEquals(10, databaseVersion(home))
-            assertEquals(2, Database.getBlockRules().size)
-            assertEquals(2, Database.getDailyAllowances().size)
+            assertEquals(2, queryLong(home, "SELECT COUNT(*) FROM block_rules"))
+            assertEquals(2, queryLong(home, "SELECT COUNT(*) FROM daily_allowances"))
+            assertEquals(
+                2,
+                queryLong(
+                    home,
+                    "SELECT COUNT(*) FROM app_references WHERE owner_type = 'block_rule'"
+                )
+            )
         }
     }
 
@@ -110,7 +116,17 @@ class UpgradeValidationTest {
             assertEquals(1, firstReferences.size)
             assertEquals("unresolved", firstReferences.single().resolutionStatus.wireValue)
 
+            // Simulate an uninstall/reinstall using a consistent user-data
+            // snapshot, without carrying the old WAL sidecars forward.
+            val reinstallSnapshot = File(home, "focusflow-reinstall.db")
+            Database.vacuumInto(reinstallSnapshot.absolutePath)
             resetDatabaseConnection()
+            File(home, ".focusflow").deleteRecursively()
+            File(home, ".focusflow").mkdirs()
+            Files.copy(
+                reinstallSnapshot.toPath(),
+                File(home, ".focusflow/focusflow.db").toPath()
+            )
             Database.init()
 
             val secondRead = Database.getBlockRules().single { it.id == "linux-rule" }
@@ -123,6 +139,7 @@ class UpgradeValidationTest {
 
     @Test
     fun `backup and restore returns the upgraded database to its saved state`() {
+        lateinit var preUpgradeBackup: File
         withDatabaseHome(
             resources = listOf("schema-v8.sql"),
             beforeInit = { connection ->
@@ -135,13 +152,13 @@ class UpgradeValidationTest {
                         """.trimIndent()
                     )
                 }
+            },
+            beforeDatabaseInit = { connection, home ->
+                preUpgradeBackup = createBackupBeforeUpgrade(connection, home)
             }
         ) { home ->
-            val backup = assertIs<AutoBackupService.BackupResult.Success>(
-                AutoBackupService.runBackupNow()
-            )
+            assertEquals(8, databaseVersionOfFile(preUpgradeBackup))
             assertEquals(10, databaseVersion(home))
-            assertTrue(AutoBackupService.verifyBackup(backup.file))
 
             Database.upsertBlockRule(
                 BlockRule(
@@ -154,11 +171,11 @@ class UpgradeValidationTest {
             )
             assertTrue(Database.getBlockRules().any { it.id == "after-backup" })
 
+            // Restore the v8 backup as an application-upgrade rollback. The
+            // restore path reopens the database, so v9/v10 run again.
             assertIs<AutoBackupService.RestoreResult.Success>(
-                AutoBackupService.restoreBackup(backup.file)
+                AutoBackupService.restoreBackup(preUpgradeBackup)
             )
-            resetDatabaseConnection()
-            Database.init()
 
             assertTrue(Database.getBlockRules().any { it.id == "before-backup" })
             assertFalse(Database.getBlockRules().any { it.id == "after-backup" })
@@ -253,9 +270,103 @@ class UpgradeValidationTest {
         }
     }
 
+    private fun materializeSchemaVersion(connection: Connection, version: Int) {
+        connection.createStatement().use { statement ->
+            if (version >= 2) {
+                statement.execute("ALTER TABLE block_rules ADD COLUMN source TEXT DEFAULT 'manual'")
+            }
+            if (version >= 3) {
+                statement.execute("ALTER TABLE tasks ADD COLUMN focus_blocked_apps TEXT DEFAULT ''")
+                statement.execute("ALTER TABLE tasks ADD COLUMN focus_require_pin INTEGER DEFAULT 0")
+            }
+            if (version >= 4) {
+                statement.execute(
+                    """
+                    CREATE TABLE network_cutoff_rules (
+                        id TEXT PRIMARY KEY,
+                        pattern TEXT NOT NULL,
+                        mode TEXT NOT NULL,
+                        target_process TEXT,
+                        target_display_name TEXT,
+                        enabled INTEGER DEFAULT 1
+                    )
+                    """.trimIndent()
+                )
+                statement.execute(
+                    "CREATE INDEX idx_net_rules_mode ON network_cutoff_rules(mode)"
+                )
+            }
+            if (version >= 5) {
+                statement.execute(
+                    """
+                    CREATE TABLE custom_block_presets (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        emoji TEXT NOT NULL DEFAULT '🚫',
+                        process_names TEXT NOT NULL DEFAULT '',
+                        created_at TEXT NOT NULL
+                    )
+                    """.trimIndent()
+                )
+            }
+            if (version >= 6) {
+                statement.execute(
+                    """
+                    CREATE TABLE daily_usage (
+                        date TEXT NOT NULL,
+                        process_name TEXT NOT NULL,
+                        seconds_used INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY (date, process_name)
+                    )
+                    """.trimIndent()
+                )
+                statement.execute(
+                    "CREATE INDEX idx_daily_usage_date ON daily_usage(date)"
+                )
+            }
+            if (version >= 7) {
+                statement.execute(
+                    """
+                    CREATE TABLE focus_launcher_presets (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        process_names TEXT NOT NULL DEFAULT '',
+                        created_at TEXT NOT NULL
+                    )
+                    """.trimIndent()
+                )
+            }
+            statement.execute("PRAGMA user_version = $version")
+        }
+    }
+
+    private fun createBackupBeforeUpgrade(connection: Connection, home: File): File {
+        val backupDir = File(home, ".focusflow/backups").also { it.mkdirs() }
+        val backup = File(backupDir, "focusflow_upgrade_v8.db")
+        val escapedPath = backup.absolutePath.replace("'", "''")
+        connection.createStatement().use { statement ->
+            statement.execute("VACUUM INTO '$escapedPath'")
+        }
+        File(backup.parent, "${backup.nameWithoutExtension}.sha256").writeText(sha256(backup))
+        return backup
+    }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(8_192)
+            var read: Int
+            while (input.read(buffer).also { read = it } != -1) {
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
     private fun <T> withDatabaseHome(
         resources: List<String>,
         beforeInit: (Connection) -> Unit = {},
+        beforeDatabaseInit: ((Connection, File) -> Unit)? = null,
         block: (File) -> T
     ): T {
         synchronized(Database) {
@@ -269,6 +380,7 @@ class UpgradeValidationTest {
                 DriverManager.getConnection("jdbc:sqlite:${databaseFile.absolutePath}").use { connection ->
                     resources.forEach { executeScript(connection, "$fixtureRoot/$it") }
                     beforeInit(connection)
+                    beforeDatabaseInit?.invoke(connection, home)
                 }
                 Database.init()
                 return block(home)
@@ -317,6 +429,27 @@ class UpgradeValidationTest {
             connection.createStatement().use { statement ->
                 statement.executeQuery(sql).use { rows ->
                     if (rows.next()) rows.getString(1) else null
+                }
+            }
+        }
+
+    private fun queryLong(home: File, sql: String): Long =
+        DriverManager.getConnection(
+            "jdbc:sqlite:${File(home, ".focusflow/focusflow.db").absolutePath}"
+        ).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeQuery(sql).use { rows ->
+                    if (rows.next()) rows.getLong(1) else 0L
+                }
+            }
+        }
+
+    private fun databaseVersionOfFile(databaseFile: File): Int =
+        DriverManager.getConnection("jdbc:sqlite:${databaseFile.absolutePath}").use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeQuery("PRAGMA user_version").use { rows ->
+                    assertTrue(rows.next())
+                    rows.getInt(1)
                 }
             }
         }

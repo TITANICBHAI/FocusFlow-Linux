@@ -11,7 +11,7 @@ migration: no data is rewritten by this work.
 
 The live database is SQLite at `~/.focusflow/focusflow.db` on Linux and
 `%USERPROFILE%\.focusflow\focusflow.db` on Windows. SQLite `PRAGMA user_version`
-is the schema version. The current target is version 9.
+is the schema version. The current target is version 10.
 
 ### Tables and columns
 

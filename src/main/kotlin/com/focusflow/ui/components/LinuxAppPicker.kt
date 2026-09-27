@@ -79,6 +79,7 @@ import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
  * Installed/running filter applied to the shared catalog.
@@ -153,8 +154,20 @@ internal fun mergeStaleAppSelections(
     staleSelections: Map<String, String>,
     catalogKeys: Set<String>
 ): Map<String, String> = buildMap {
-    staleSelections.forEach { (key, label) -> put(key, label) }
-    (selectedAppKeys - catalogKeys).forEach { key -> putIfAbsent(key, key) }
+    val normalizedCatalogKeys = catalogKeys
+        .map { it.trim().lowercase(Locale.ROOT) }
+        .toSet()
+
+    // A refresh may resolve a previously stale selection. Do not keep
+    // rendering the old stale row when its stable catalog key is present again.
+    staleSelections.forEach { (key, label) ->
+        if (key.trim().lowercase(Locale.ROOT) !in normalizedCatalogKeys) {
+            put(key, label)
+        }
+    }
+    selectedAppKeys
+        .filter { it.trim().lowercase(Locale.ROOT) !in normalizedCatalogKeys }
+        .forEach { key -> putIfAbsent(key, key) }
 }
 
 internal fun filterAppCatalog(
@@ -262,7 +275,7 @@ fun LinuxAppPicker(
                 onAdd = {
                     val manual = InstalledAppsScanner.createManualProcessEntry(manualProcess)
                     if (manual == null) {
-                        manualError = "Enter a process name using letters, numbers, '.', '_' or '-'."
+                        manualError = "Enter a process name using letters, numbers, '.', '_', '+' or '-'."
                     } else {
                         manualEntries = (manualEntries + manual)
                             .distinctBy { it.catalogKey() }
@@ -771,7 +784,10 @@ private fun StaleAppRow(
                 enabled = enabled,
                 role = if (multiSelect) Role.Checkbox else Role.RadioButton,
                 onClick = onClick
-            ),
+            )
+            .semantics {
+                contentDescription = "$label, application unavailable"
+            },
         colors = CardDefaults.cardColors(containerColor = Warning.copy(alpha = 0.12f))
     ) {
         Row(
@@ -871,4 +887,6 @@ private fun formatRefreshTime(timestamp: Long): String =
         .format(Instant.ofEpochMilli(timestamp))
 
 fun AppDescriptor.catalogKey(): String =
-    desktopId ?: packageId ?: processName.lowercase()
+    (desktopId ?: packageId ?: processName)
+        .trim()
+        .lowercase(Locale.ROOT)

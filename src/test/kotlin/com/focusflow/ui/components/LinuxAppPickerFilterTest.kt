@@ -141,6 +141,17 @@ class LinuxAppPickerFilterTest {
     }
 
     @Test
+    fun `resolved stale keys disappear after catalog refresh`() {
+        val merged = mergeStaleAppSelections(
+            selectedAppKeys = setOf("org.example.Editor"),
+            staleSelections = mapOf("org.example.Editor" to "Old Editor"),
+            catalogKeys = setOf("org.example.editor")
+        )
+
+        assertTrue(merged.isEmpty())
+    }
+
+    @Test
     fun `stored process selections resolve through aliases and preserve stale values`() {
         val aliasedEditor = nativeEditor.copy(processAliases = listOf("workspace-editor"))
         val selectedKeys = selectedAppKeysForProcessNames(
@@ -149,7 +160,7 @@ class LinuxAppPickerFilterTest {
         )
 
         assertEquals(
-            setOf("org.example.Editor", "missing-tool"),
+            setOf("org.example.editor", "missing-tool"),
             selectedKeys
         )
         assertEquals(

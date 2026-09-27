@@ -28,6 +28,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -273,6 +274,43 @@ fun LinuxAppPicker(
     }
 
     Column(modifier = modifier) {
+        if (state.isRefreshing) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Purple80.copy(alpha = 0.10f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+                verticalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = Purple80,
+                        strokeWidth = 2.dp
+                    )
+                    Text(
+                        if (state.apps.isEmpty()) {
+                            "Loading installed applications…"
+                        } else {
+                            "Refreshing applications…"
+                        },
+                        color = OnSurface,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Purple80,
+                    trackColor = Surface3
+                )
+            }
+        }
+
         PickerToolbar(
             query = query,
             onQueryChanged = { query = it },

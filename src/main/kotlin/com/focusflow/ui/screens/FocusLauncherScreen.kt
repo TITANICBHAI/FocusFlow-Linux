@@ -248,6 +248,40 @@ fun FocusLauncherScreen() {
             }
         }
 
+        if (isLoading) {
+            item(key = "launcherLoadingState") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Purple80.copy(alpha = 0.10f))
+                        .border(1.dp, Purple80.copy(alpha = 0.28f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CircularProgressIndicator(
+                        color = Purple80,
+                        modifier = Modifier.size(22.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            "Loading applications",
+                            color = OnSurface,
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            "Preparing the Focus Launcher app list…",
+                            color = OnSurface2,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+        }
+
         // ── Saved launcher presets ────────────────────────────────────────────
         if (launcherPresets.isNotEmpty()) {
             item {
@@ -468,12 +502,6 @@ fun FocusLauncherScreen() {
                     },
                     allowManualEntry = true
                 )
-            }
-        } else if (isLoading) {
-            item {
-                Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Purple80, modifier = Modifier.size(28.dp))
-                }
             }
         } else if (availableApps.isEmpty()) {
             item {

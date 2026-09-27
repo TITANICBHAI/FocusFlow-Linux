@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -28,6 +29,7 @@ import com.focusflow.services.FocusLauncherApp
 import com.focusflow.services.FocusLauncherService
 import com.focusflow.ui.components.LinuxAppPicker
 import com.focusflow.ui.components.catalogKey
+import com.focusflow.ui.components.FfVerticalScrollbar
 import com.focusflow.ui.components.rememberInstalledAppCatalogState
 import com.focusflow.ui.components.isRunningAsAdmin
 import com.focusflow.ui.components.ShortcutTooltip
@@ -209,7 +211,10 @@ fun FocusLauncherScreen() {
         return
     }
 
+    val launcherListState = rememberLazyListState()
+    Box(modifier = Modifier.fillMaxSize()) {
     LazyColumn(
+        state               = launcherListState,
         modifier            = Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
@@ -658,6 +663,11 @@ fun FocusLauncherScreen() {
             }
             Spacer(Modifier.height(24.dp))
         }
+    }
+    FfVerticalScrollbar(
+        listState = launcherListState,
+        modifier  = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+    )
     }
 
     if (showCustomDurationDialog) {

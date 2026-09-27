@@ -181,6 +181,18 @@ Blocked or deferred items: APP-30 remains blocked by the lack of a real X11 or
 native Wayland session in the current Replit environment.
 Next batch: APP-30 real desktop-session selection verification.
 
+Batch: APP-10–APP-16 verification pass
+Date: 2026-09-27
+Completed tracker items: APP-10, APP-11, APP-12, APP-13, APP-14, APP-15, APP-16
+Verification: Revalidated the shared Linux picker and tightened stable catalog-key
+normalization, stale-selection removal after refresh, stale-row accessibility
+semantics, and manual-entry validation guidance. Focused
+`LinuxAppPickerFilterTest`, complete `gradle test --no-daemon`, and
+`git diff --check` passed.
+Blocked or deferred items: None within this assigned scope. APP-30 remains blocked
+by the lack of a real X11 or native Wayland session.
+Next batch: APP-30 real desktop-session selection verification.
+
 ## Current baseline
 
 `InstalledAppsScanner` already discovers some Linux applications from desktop

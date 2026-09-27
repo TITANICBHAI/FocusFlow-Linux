@@ -316,7 +316,7 @@ object WinEventHook {
 
         // Attempt 1: xdotool (works on X11 and XWayland)
         if (hasXdotool) {
-            val result = BoundedProcess.run(
+            val result = ProcessExecutorRegistry.current.run(
                 listOf("xdotool", "getactivewindow", "getwindowpid"),
                 timeoutMs = 1_500L
             )
@@ -330,14 +330,14 @@ object WinEventHook {
         // `wmctrl -lp`, this asks the root window for the active ID first and
         // never mistakes an arbitrary listed window for foreground.
         if (isX11 || isXWayland) {
-            val activeWindow = BoundedProcess.run(
+            val activeWindow = ProcessExecutorRegistry.current.run(
                 listOf("xprop", "-root", "_NET_ACTIVE_WINDOW"),
                 timeoutMs = 1_500L
             )
             val windowId = Regex("""0x[0-9a-fA-F]+""")
                 .find(activeWindow.output)?.value
             if (activeWindow.succeeded && windowId != null) {
-                val pidResult = BoundedProcess.run(
+                val pidResult = ProcessExecutorRegistry.current.run(
                     listOf("xprop", "-id", windowId, "_NET_WM_PID"),
                     timeoutMs = 1_500L
                 )

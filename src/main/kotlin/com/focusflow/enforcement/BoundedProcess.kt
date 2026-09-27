@@ -9,8 +9,11 @@ import java.util.concurrent.TimeUnit
  * Commands are always passed as argument lists; callers must not build shell
  * command strings here.
  */
-internal object BoundedProcess {
+internal fun interface ProcessExecutor {
+    fun run(command: List<String>, timeoutMs: Long): BoundedProcess.Result
+}
 
+internal object BoundedProcess : ProcessExecutor {
     data class Result(
         val exitCode: Int,
         val output: String,
@@ -20,7 +23,7 @@ internal object BoundedProcess {
         val succeeded: Boolean get() = !timedOut && exitCode == 0
     }
 
-    fun run(command: List<String>, timeoutMs: Long): Result {
+    override fun run(command: List<String>, timeoutMs: Long): Result {
         if (command.isEmpty()) return Result(-1, "", error = "empty command")
 
         return try {
@@ -71,6 +74,32 @@ internal object BoundedProcess {
             }
         } catch (e: Exception) {
             Result(-1, "", error = e.message ?: e.javaClass.simpleName)
+        }
+    }
+}
+
+/**
+ * Process execution seam shared by Linux probes and privileged operations.
+ *
+ * Production code uses [BoundedProcess]. Tests can temporarily install a fake
+ * executor without starting pkexec, iptables, systemctl, or other host tools.
+ */
+internal object ProcessExecutorRegistry {
+    @Volatile
+    var current: ProcessExecutor = BoundedProcess
+
+    private val testLock = Any()
+
+    internal fun <T> withExecutorForTesting(
+        executor: ProcessExecutor,
+        block: () -> T
+    ): T = synchronized(testLock) {
+        val previous = current
+        current = executor
+        try {
+            block()
+        } finally {
+            current = previous
         }
     }
 }

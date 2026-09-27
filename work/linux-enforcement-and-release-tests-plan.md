@@ -11,11 +11,12 @@ separate from the installed-app catalog work in
 
 ## Status
 
-- Overall: **Not started**
+- Overall: **In progress**
 - Owner: FocusFlow implementation and release work
 - Depends on: existing Linux enforcement branches and test seams
 - Required before: declaring Linux release readiness or beginning Windows
   removal
+- Active batch: **ENF-01–ENF-05** (Batch 1 complete; Batch 2 next)
 
 ## Current baseline
 
@@ -241,14 +242,14 @@ hosts/firewall success.
 
 ### Test foundation
 
-- [ ] **ENF-01** Define fake and real command-executor seams with bounded
+- [x] **ENF-01** Define fake and real command-executor seams with bounded
   timeout and captured exit status.
-- [ ] **ENF-02** Define isolated hosts-file and firewall test fixtures.
-- [ ] **ENF-03** Ensure default Gradle tests never require root, `pkexec`,
+- [x] **ENF-02** Define isolated hosts-file and firewall test fixtures.
+- [x] **ENF-03** Ensure default Gradle tests never require root, `pkexec`,
   `iptables`, X11, Wayland, or a systemd-user session.
-- [ ] **ENF-04** Add test metadata for distro, desktop, session type, Java,
+- [x] **ENF-04** Add test metadata for distro, desktop, session type, Java,
   kernel, and optional tool versions.
-- [ ] **ENF-05** Add shell/input safety coverage for every privileged or
+- [x] **ENF-05** Add shell/input safety coverage for every privileged or
   subprocess-backed operation.
 
 ### Hosts-file enforcement
@@ -339,6 +340,21 @@ hosts/firewall success.
 - [ ] **ENF-49** Verify no secrets, unsafe command interpolation, or debug-only
   behavior is included in release artifacts.
 - [ ] **ENF-50** Publish a release-readiness report with known limitations.
+
+## Batch completion records
+
+Batch: ENF-01–ENF-05
+Date: 2026-09-27
+Completed tracker items: ENF-01, ENF-02, ENF-03, ENF-04, ENF-05
+Verification: Added the injectable `ProcessExecutor` seam with the real
+bounded implementation as the default, disposable hosts/firewall fixtures,
+non-sensitive Linux environment metadata capture, and shell/input safety
+coverage. Focused foundation, shell-safety, release-readiness, and network
+tests passed. Complete `gradle test --no-daemon`, `gradle compileKotlin
+compileTestKotlin --no-daemon`, and `git diff --check` passed.
+Blocked or deferred items: None within this batch. Privileged hosts/firewall
+execution remains opt-in and belongs to ENF-10 and ENF-15.
+Next batch: ENF-06–ENF-10 (hosts-file enforcement).
 
 ## Acceptance criteria
 

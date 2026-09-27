@@ -440,7 +440,7 @@ object NetworkBlocker {
         var last = LinuxCommandResult(false, "command did not run")
         for (candidate in listOf(listOf("pkexec") + command, command)) {
             val result = try {
-                val bounded = BoundedProcess.run(
+                val bounded = ProcessExecutorRegistry.current.run(
                     candidate,
                     timeoutMs = LINUX_COMMAND_TIMEOUT_SECONDS * 1_000L
                 )

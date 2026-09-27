@@ -2,8 +2,8 @@ package com.focusflow.services
 
 import com.focusflow.enforcement.isWindows
 import com.focusflow.enforcement.isLinux
-import com.focusflow.enforcement.BoundedProcess
 import com.focusflow.enforcement.EnforcementLog
+import com.focusflow.enforcement.ProcessExecutorRegistry
 import kotlinx.coroutines.*
 import java.io.File
 import java.nio.file.AtomicMoveNotSupportedException
@@ -226,7 +226,7 @@ object HostsBlocker {
         if (!isWindows && !isLinux) return false
         return try {
             val safeDomain = normalizeDomain(domain) ?: return false
-            val result = BoundedProcess.run(
+            val result = ProcessExecutorRegistry.current.run(
                 listOf("nslookup", safeDomain, "127.0.0.1"),
                 timeoutMs = 10_000L
             )
@@ -341,21 +341,21 @@ object HostsBlocker {
         try {
             if (isLinux) {
                 // systemd-resolved may be present; nscd is a common alternative
-                val result = BoundedProcess.run(
+                val result = ProcessExecutorRegistry.current.run(
                     listOf("resolvectl", "flush-caches"),
                     timeoutMs = 10_000L
                 )
                 if (!result.succeeded) {
                     // fallback: restart nscd
                     try {
-                        BoundedProcess.run(
+                        ProcessExecutorRegistry.current.run(
                             listOf("pkexec", "systemctl", "restart", "nscd"),
                             timeoutMs = 10_000L
                         )
                     } catch (_: Exception) {}
                 }
             } else {
-                BoundedProcess.run(listOf("ipconfig", "/flushdns"), timeoutMs = 10_000L)
+                ProcessExecutorRegistry.current.run(listOf("ipconfig", "/flushdns"), timeoutMs = 10_000L)
             }
         } catch (_: Exception) {}
     }
@@ -438,7 +438,7 @@ object HostsBlocker {
                 )
                 if (domain != null) args += domain
 
-                val result = BoundedProcess.run(args, timeoutMs = 15_000L)
+                val result = ProcessExecutorRegistry.current.run(args, timeoutMs = 15_000L)
                 if (result.succeeded) {
                     true
                 } else {

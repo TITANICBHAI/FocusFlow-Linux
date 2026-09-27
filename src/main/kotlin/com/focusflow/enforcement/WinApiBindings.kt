@@ -98,7 +98,7 @@ private fun getForegroundWindowTitleWindows(): String? {
 
 private fun getLinuxWindowTitle(): String? {
     if ((!isX11 && !isXWayland) || !hasXdotool) return null
-    val result = BoundedProcess.run(
+    val result = ProcessExecutorRegistry.current.run(
         listOf("xdotool", "getactivewindow", "getwindowname"),
         1_500
     )
@@ -314,7 +314,7 @@ val isX11: Boolean get() = isLinux && currentLinuxSession == LinuxSessionKind.X1
  * True if xdotool is installed and callable. Evaluated once at startup.
  */
 val hasXdotool: Boolean by lazy {
-    BoundedProcess.run(listOf("xdotool", "version"), 2_000).succeeded
+    ProcessExecutorRegistry.current.run(listOf("xdotool", "version"), 2_000).succeeded
 }
 
 /**

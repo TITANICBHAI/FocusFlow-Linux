@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import com.focusflow.ui.components.EmptyStateCard
 import com.focusflow.ui.components.FfVerticalScrollbar
 import com.focusflow.ui.components.ShortcutTooltip
+import com.focusflow.ui.components.arrowScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -193,7 +194,9 @@ private fun SessionsTab(
     Box(modifier = Modifier.fillMaxSize()) {
     LazyColumn(
         state = reportsListState,
-        modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
+        modifier = Modifier.fillMaxSize()
+            .arrowScroll(reportsListState, requestFocus = true)
+            .padding(horizontal = 32.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(top = 12.dp, bottom = 32.dp)
     ) {
@@ -381,9 +384,13 @@ private fun TimelineTab(sessions: List<FocusSession>) {
     }
 
     val maxMins = byDay.maxOf { (_, s) -> s.sumOf { it.actualMinutes }.coerceAtLeast(1) }
+    val timelineListState = rememberLazyListState()
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
+        state = timelineListState,
+        modifier = Modifier.fillMaxSize()
+            .arrowScroll(timelineListState, requestFocus = true)
+            .padding(horizontal = 32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         contentPadding = PaddingValues(top = 16.dp, bottom = 32.dp)
     ) {
@@ -469,9 +476,13 @@ private fun BlockedAppsTab(temptLog: List<TemptationEntry>) {
     }
 
     val maxCount = grouped.maxOf { it.value.size }.coerceAtLeast(1)
+    val blockedAppsListState = rememberLazyListState()
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
+        state = blockedAppsListState,
+        modifier = Modifier.fillMaxSize()
+            .arrowScroll(blockedAppsListState, requestFocus = true)
+            .padding(horizontal = 32.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(top = 16.dp, bottom = 32.dp)
     ) {

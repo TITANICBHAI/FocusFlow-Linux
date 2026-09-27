@@ -151,7 +151,9 @@ fun FocusLauncherOverlay() {
                 LazyVerticalGrid(
                     columns               = GridCells.Adaptive(minSize = 140.dp),
                     state                 = gridState,
-                    modifier              = Modifier.fillMaxSize().padding(end = 12.dp),
+                    modifier              = Modifier.fillMaxSize()
+                        .arrowScroll(gridState, requestFocus = true)
+                        .padding(end = 12.dp),
                     verticalArrangement   = Arrangement.spacedBy(14.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {

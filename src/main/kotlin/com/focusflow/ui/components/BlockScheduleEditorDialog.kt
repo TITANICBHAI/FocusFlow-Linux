@@ -61,6 +61,8 @@ fun BlockScheduleEditorDialog(
     var showLinuxPicker by remember { mutableStateOf(false) }
     val catalogState = rememberInstalledAppCatalogState(enabled = !isWindows)
     val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    val editorScrollState = rememberScrollState()
+    val appListScrollState = rememberScrollState()
 
     LaunchedEffect(Unit) {
         if (isWindows) {
@@ -95,7 +97,8 @@ fun BlockScheduleEditorDialog(
                 modifier = Modifier
                     .width(520.dp)
                     .heightIn(max = 600.dp)
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(editorScrollState)
+                    .arrowScroll(editorScrollState),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 OutlinedTextField(
@@ -163,7 +166,8 @@ fun BlockScheduleEditorDialog(
                             .heightIn(min = 56.dp, max = 230.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(Surface3)
-                            .verticalScroll(rememberScrollState())
+                            .verticalScroll(appListScrollState)
+                            .arrowScroll(appListScrollState)
                             .padding(8.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {

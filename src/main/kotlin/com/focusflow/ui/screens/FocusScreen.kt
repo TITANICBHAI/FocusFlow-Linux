@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import com.focusflow.ui.components.FfVerticalScrollbar
+import com.focusflow.ui.components.arrowScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -192,7 +193,10 @@ fun FocusScreen(preloadTask: Task? = null) {
         }
     }) {
     Column(
-        modifier = Modifier.fillMaxSize().background(Surface).verticalScroll(focusScrollState).padding(32.dp),
+        modifier = Modifier.fillMaxSize().background(Surface)
+            .verticalScroll(focusScrollState)
+            .arrowScroll(focusScrollState, requestFocus = true)
+            .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
@@ -1315,7 +1319,11 @@ private fun SessionAppPickerDialog(
                         )
                     }
                 } else {
-                    LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize().arrowScroll(listState),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         itemsIndexed(filtered, key = { i, it -> "${it.processName}_$i" }) { _, app ->
                             val isSel = app.processName in selected
                             Row(

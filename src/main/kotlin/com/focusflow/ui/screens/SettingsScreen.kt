@@ -43,6 +43,7 @@ import com.focusflow.ui.components.LinuxAppPicker
 import com.focusflow.ui.components.catalogKey
 import com.focusflow.ui.components.rememberInstalledAppCatalogState
 import com.focusflow.ui.components.selectedAppKeysForProcessNames
+import com.focusflow.ui.components.arrowScroll
 import com.focusflow.ui.components.staleAppSelectionsForProcessNames
 import com.focusflow.services.SoundAversion
 import com.focusflow.services.TaskAlarmService
@@ -155,7 +156,10 @@ fun SettingsScreen() {
     Box(modifier = Modifier.fillMaxSize()) {
     LazyColumn(
         state = settingsListState,
-        modifier = Modifier.fillMaxSize().background(Surface).padding(32.dp),
+        modifier = Modifier.fillMaxSize()
+            .background(Surface)
+            .arrowScroll(settingsListState, requestFocus = true)
+            .padding(32.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         item {
@@ -1469,6 +1473,7 @@ private fun AddRuleDialog(onDismiss: () -> Unit, onSave: (BlockRule) -> Unit) {
                     }
                 }
             } else if (showPicker) {
+                val pickerScrollState = rememberScrollState()
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = searchQuery,
@@ -1482,7 +1487,9 @@ private fun AddRuleDialog(onDismiss: () -> Unit, onSave: (BlockRule) -> Unit) {
                         singleLine = true
                     )
                     Column(
-                        modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
+                        modifier = Modifier.heightIn(max = 320.dp)
+                            .verticalScroll(pickerScrollState)
+                            .arrowScroll(pickerScrollState),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         scannedApps
@@ -1908,6 +1915,7 @@ private fun AddScheduleDialog(onDismiss: () -> Unit, onSave: (BlockSchedule) -> 
     var selectedDays by remember { mutableStateOf(setOf(1,2,3,4,5)) }
     var processNames by remember { mutableStateOf("") }
     val strings      = LocalizationManager.strings
+    val dialogScrollState = rememberScrollState()
 
     val dayLabels = listOf("Mon","Tue","Wed","Thu","Fri","Sat","Sun")
 
@@ -1916,7 +1924,12 @@ private fun AddScheduleDialog(onDismiss: () -> Unit, onSave: (BlockSchedule) -> 
         containerColor = Surface2,
         title = { Text(LocalizationManager.strings.settingsAddBlockSchedule, color = OnSurface) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.width(460.dp).heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.width(460.dp).heightIn(max = 480.dp)
+                    .verticalScroll(dialogScrollState)
+                    .arrowScroll(dialogScrollState)
+            ) {
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(LocalizationManager.strings.settingsScheduleName) }, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Purple80, unfocusedBorderColor = OnSurface2), singleLine = true)
                 Text(LocalizationManager.strings.settingsDaysOfWeek, style = MaterialTheme.typography.bodySmall, color = OnSurface2)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2015,13 +2028,19 @@ private fun AddAllowanceDialog(onDismiss: () -> Unit, onSave: (DailyAllowance) -
     var processName   by remember { mutableStateOf("") }
     var displayName   by remember { mutableStateOf("") }
     var allowanceMins by remember { mutableStateOf("30") }
+    val dialogScrollState = rememberScrollState()
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Surface2,
         title = { Text(LocalizationManager.strings.settingsAddDailyAllowance, color = OnSurface) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.width(380.dp).heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.width(380.dp).heightIn(max = 400.dp)
+                    .verticalScroll(dialogScrollState)
+                    .arrowScroll(dialogScrollState)
+            ) {
                 Text(LocalizationManager.strings.settingsEditAllowanceDesc, style = MaterialTheme.typography.bodySmall, color = OnSurface2)
                 OutlinedTextField(value = processName, onValueChange = { processName = it }, label = { Text(LocalizationManager.strings.settingsProcessNameHint) }, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Purple80, unfocusedBorderColor = OnSurface2), singleLine = true)
                 OutlinedTextField(value = displayName, onValueChange = { displayName = it }, label = { Text(LocalizationManager.strings.settingsDisplayNameLabel) }, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Purple80, unfocusedBorderColor = OnSurface2), singleLine = true)

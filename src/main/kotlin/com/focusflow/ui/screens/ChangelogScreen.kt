@@ -1,6 +1,7 @@
 package com.focusflow.ui.screens
 
 import com.focusflow.ui.components.FfVerticalScrollbar
+import com.focusflow.ui.components.arrowScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -317,6 +318,7 @@ fun ChangelogScreen() {
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
+                .arrowScroll(scrollState, requestFocus = true)
                 .padding(horizontal = 32.dp, vertical = 32.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {

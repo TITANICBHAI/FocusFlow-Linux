@@ -31,6 +31,7 @@ import com.focusflow.enforcement.isWindows
 import com.focusflow.services.FocusLauncherApp
 import com.focusflow.services.FocusLauncherService
 import com.focusflow.ui.components.FfVerticalScrollbar
+import com.focusflow.ui.components.arrowScroll
 import com.focusflow.ui.theme.Error
 import com.focusflow.ui.theme.OnSurface
 import com.focusflow.ui.theme.OnSurface2
@@ -73,7 +74,9 @@ private fun MainLauncherScreen() {
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 148.dp),
                 state = gridState,
-                modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
+                modifier = Modifier.fillMaxSize()
+                    .arrowScroll(gridState, requestFocus = true)
+                    .padding(horizontal = 24.dp),
                 contentPadding = PaddingValues(vertical = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)

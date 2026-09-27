@@ -139,6 +139,7 @@ fun SideNav(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
+                .arrowScroll(scrollState)
                 .padding(
                     vertical   = 20.dp,
                     horizontal = if (collapsed) 6.dp else 10.dp

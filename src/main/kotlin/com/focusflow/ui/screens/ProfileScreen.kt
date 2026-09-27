@@ -1,6 +1,7 @@
 package com.focusflow.ui.screens
 
 import com.focusflow.ui.components.FfVerticalScrollbar
+import com.focusflow.ui.components.arrowScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -80,7 +81,9 @@ fun ProfileScreen() {
     Box(modifier = Modifier.fillMaxSize()) {
     Column(
         modifier = Modifier.fillMaxSize().background(Surface)
-            .verticalScroll(profileScrollState).padding(32.dp),
+            .verticalScroll(profileScrollState)
+            .arrowScroll(profileScrollState, requestFocus = true)
+            .padding(32.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         Text(strings.profileTitle, style = MaterialTheme.typography.headlineLarge, color = OnSurface)

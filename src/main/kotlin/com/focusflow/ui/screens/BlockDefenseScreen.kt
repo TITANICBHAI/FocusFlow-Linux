@@ -29,6 +29,7 @@ import com.focusflow.services.BlockScheduleService
 import com.focusflow.services.GlobalPin
 import com.focusflow.services.SessionPin
 import com.focusflow.ui.components.BlockScheduleEditorDialog
+import com.focusflow.ui.components.arrowScroll
 import com.focusflow.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -73,7 +74,9 @@ fun BlockDefenseScreen(onNavigateToVpn: () -> Unit = {}, onNavigateToAppBlocker:
     Box(modifier = Modifier.fillMaxSize()) {
     Column(
         modifier = Modifier.fillMaxSize().background(Surface)
-            .verticalScroll(scrollState).padding(32.dp),
+            .verticalScroll(scrollState)
+            .arrowScroll(scrollState, requestFocus = true)
+            .padding(32.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         Text(strings.defTitle, style = MaterialTheme.typography.headlineLarge, color = OnSurface)

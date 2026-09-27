@@ -4,6 +4,8 @@ import androidx.compose.foundation.HorizontalScrollbar
 import androidx.compose.foundation.LocalScrollbarStyle
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.VerticalScrollbar
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListState
@@ -14,8 +16,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.*
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.focusflow.ui.theme.*
+import kotlinx.coroutines.launch
 
 // ── Style ──────────────────────────────────────────────────────────────────────
 // unhoverColor = subtle track always visible so users know they can scroll.
@@ -92,6 +100,88 @@ fun FfHorizontalScrollbar(
     )
 }
 
+// ── Keyboard scrolling ────────────────────────────────────────────────────────
+
+/**
+ * Adds Arrow Up/Down scrolling to an existing vertical scroll owner.
+ *
+ * The handler is deliberately a post-child [onKeyEvent] handler. Text fields
+ * and other editable children therefore keep first opportunity to consume
+ * their arrow keys. Standard Compose pointer input, including mouse-wheel
+ * scrolling, remains provided by the existing vertical scrollable itself.
+ *
+ * Top-level screen owners should pass `requestFocus = true` so a newly entered
+ * screen can scroll immediately. Nested dialogs and pickers should leave it
+ * false when they contain an input that should retain initial focus.
+ */
+fun Modifier.arrowScroll(
+    scrollState: ScrollState,
+    requestFocus: Boolean = false
+): Modifier = arrowScrollOwner(requestFocus) { deltaPx ->
+    scrollState.scrollBy(deltaPx)
+}
+
+/** Arrow scrolling for an existing [LazyListState]. */
+fun Modifier.arrowScroll(
+    listState: LazyListState,
+    requestFocus: Boolean = false
+): Modifier = arrowScrollOwner(requestFocus) { deltaPx ->
+    listState.scrollBy(deltaPx)
+}
+
+/** Arrow scrolling for an existing [LazyGridState]. */
+fun Modifier.arrowScroll(
+    gridState: LazyGridState,
+    requestFocus: Boolean = false
+): Modifier = arrowScrollOwner(requestFocus) { deltaPx ->
+    gridState.scrollBy(deltaPx)
+}
+
+private fun Modifier.arrowScrollOwner(
+    requestFocus: Boolean,
+    scrollBy: suspend (Float) -> Unit
+): Modifier = composed {
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val focusRequester = remember { FocusRequester() }
+
+    if (requestFocus) {
+        LaunchedEffect(focusRequester) {
+            runCatching { focusRequester.requestFocus() }
+        }
+    }
+
+    focusRequester(focusRequester)
+        .focusable()
+        .onKeyEvent { event ->
+            val key = when (event.key) {
+                Key.DirectionUp -> ArrowScrollKey.ARROW_UP
+                Key.DirectionDown -> ArrowScrollKey.ARROW_DOWN
+                else -> ArrowScrollKey.OTHER
+            }
+            val intent = resolveArrowScrollIntent(
+                ArrowScrollInput(
+                    key = key,
+                    eventType = if (event.type == KeyEventType.KeyDown) {
+                        ArrowScrollEventType.KEY_DOWN
+                    } else {
+                        ArrowScrollEventType.KEY_UP
+                    },
+                    isCtrlPressed = event.isCtrlPressed
+                )
+            ) ?: return@onKeyEvent false
+
+            val stepPx = with(density) { intent.stepDp.dp.toPx() }
+            val deltaPx = if (intent.direction == ArrowScrollDirection.UP) {
+                -stepPx
+            } else {
+                stepPx
+            }
+            scope.launch { scrollBy(deltaPx) }
+            true
+        }
+}
+
 // ── Layout helpers ─────────────────────────────────────────────────────────────
 
 /** Column with a vertical scrollbar always visible on the right edge. */
@@ -107,6 +197,7 @@ fun ScrollbarColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
+                .arrowScroll(scrollState)
                 .padding(contentPadding),
             content = content
         )
@@ -147,6 +238,7 @@ fun DualScrollbarBox(
                 .fillMaxSize()
                 .horizontalScroll(hScrollState)
                 .verticalScroll(vScrollState)
+                .arrowScroll(vScrollState)
         ) {
             content()
         }

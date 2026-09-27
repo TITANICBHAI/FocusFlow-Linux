@@ -42,6 +42,7 @@ import com.focusflow.services.SessionPin
 import com.focusflow.i18n.LocalizationManager
 import com.focusflow.ui.components.ShortcutTooltip
 import com.focusflow.ui.components.TaskCard
+import com.focusflow.ui.components.arrowScroll
 import com.focusflow.ui.theme.*
 import androidx.compose.ui.input.key.*
 import com.focusflow.ui.LocalNavigate
@@ -209,6 +210,7 @@ fun DashboardScreen(refreshKey: Int = 0, onStartFocus: (Task) -> Unit, onNavigat
                         .fillMaxSize()
                         .background(Surface)
                         .verticalScroll(dashScrollState)
+                        .arrowScroll(dashScrollState, requestFocus = true)
                         .padding(32.dp),
                     verticalArrangement = Arrangement.spacedBy(20.dp)
                 ) {

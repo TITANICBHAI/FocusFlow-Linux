@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.CircleShape
@@ -313,6 +314,7 @@ private fun LanguageSelectionPage() {
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(langScrollState)
+                    .arrowScroll(langScrollState)
                     .padding(end = 10.dp)
             ) {
                 AppLanguage.entries.forEach { lang ->
@@ -752,9 +754,11 @@ private fun PresetsPage(
             }
         }
 
+        val presetGridState = rememberLazyGridState()
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
-            modifier = Modifier.height(300.dp),
+            state = presetGridState,
+            modifier = Modifier.height(300.dp).arrowScroll(presetGridState),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -1038,7 +1042,9 @@ private fun PermissionsPage() {
         Box(modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
             Column(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth().verticalScroll(scrollState)
+                modifier = Modifier.fillMaxWidth()
+                    .verticalScroll(scrollState)
+                    .arrowScroll(scrollState)
             ) {
                 // ── Auto-start (top — highlighted) ───────────────────────────
                 Row(

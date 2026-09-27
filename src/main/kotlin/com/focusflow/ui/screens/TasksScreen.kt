@@ -32,6 +32,7 @@ import com.focusflow.ui.components.LinuxAppPicker
 import com.focusflow.ui.components.catalogKey
 import com.focusflow.ui.components.rememberInstalledAppCatalogState
 import com.focusflow.ui.components.TaskCard
+import com.focusflow.ui.components.arrowScroll
 import com.focusflow.ui.theme.*
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -264,7 +265,11 @@ fun TasksScreen(onStartFocus: (Task) -> Unit) {
                 val completedTasks = tasks.filter { it.completed || it.skipped }
                 val tasksListState = rememberLazyListState()
                 Box(modifier = Modifier.fillMaxSize()) {
-                LazyColumn(state = tasksListState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyColumn(
+                    state = tasksListState,
+                    modifier = Modifier.arrowScroll(tasksListState, requestFocus = true),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     if (overdueTasks.isNotEmpty()) {
                         item {
                             Row(
@@ -423,7 +428,13 @@ fun AddTaskDialog(onDismiss: () -> Unit, onSave: (Task) -> Unit) {
             Column(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth()
-                    .then(if (isWindows) Modifier.verticalScroll(dialogScrollState) else Modifier)
+                    .then(
+                        if (isWindows) {
+                            Modifier.verticalScroll(dialogScrollState).arrowScroll(dialogScrollState)
+                        } else {
+                            Modifier
+                        }
+                    )
                     .padding(end = 10.dp)
             ) {
                 OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text(strings.tasksFieldTitle) }, modifier = Modifier.fillMaxWidth(), colors = fieldColors(), singleLine = true)
@@ -674,7 +685,13 @@ fun EditTaskDialog(task: Task, onDismiss: () -> Unit, onSave: (Task) -> Unit, on
             Column(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth()
-                    .then(if (isWindows) Modifier.verticalScroll(dialogScrollState) else Modifier)
+                    .then(
+                        if (isWindows) {
+                            Modifier.verticalScroll(dialogScrollState).arrowScroll(dialogScrollState)
+                        } else {
+                            Modifier
+                        }
+                    )
                     .padding(end = 10.dp)
             ) {
                 OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text(strings.tasksFieldTitle) }, modifier = Modifier.fillMaxWidth(), colors = fieldColors(), singleLine = true)

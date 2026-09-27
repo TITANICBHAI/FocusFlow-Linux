@@ -11,6 +11,7 @@ import com.focusflow.ui.components.selectedAppKeysForProcessNames
 import com.focusflow.ui.components.staleAppSelectionsForProcessNames
 import com.focusflow.ui.components.PinGateDialog
 import com.focusflow.ui.components.ShortcutTooltip
+import com.focusflow.ui.components.arrowScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -356,7 +357,9 @@ private fun AlwaysBlockTab(onNavigateToBlockDefense: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp),
+            modifier = Modifier.fillMaxSize()
+                .arrowScroll(listState, requestFocus = true)
+                .padding(horizontal = 28.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // ── Info banner ──────────────────────────────────────────────────
@@ -1013,7 +1016,9 @@ private fun DailyAllowanceTab() {
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp),
+            modifier = Modifier.fillMaxSize()
+                .arrowScroll(listState, requestFocus = true)
+                .padding(horizontal = 28.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // ── Info banner ─────────────────────────────────────────────────
@@ -1576,7 +1581,7 @@ private fun AllowancePickerDialog(
                     Box(modifier = Modifier.height(280.dp)) {
                         LazyColumn(
                             state = pickerState,
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier.fillMaxSize().arrowScroll(pickerState),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             // Manual entry row
@@ -1974,7 +1979,9 @@ private fun TimedBlockTab() {
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp),
+            modifier = Modifier.fillMaxSize()
+                .arrowScroll(listState, requestFocus = true)
+                .padding(horizontal = 28.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
@@ -2611,7 +2618,7 @@ private fun AppPickerDialog(
             Box(modifier = Modifier.height(360.dp)) {
                 LazyColumn(
                     state   = pickerListState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().arrowScroll(pickerListState),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     if (showPresets) {

@@ -2,6 +2,7 @@ package com.focusflow.ui.screens
 
 import com.focusflow.ui.components.FfVerticalScrollbar
 import com.focusflow.ui.components.ShortcutTooltip
+import com.focusflow.ui.components.arrowScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -95,6 +96,7 @@ fun KeywordBlockerScreen() {
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
+                .arrowScroll(scrollState, requestFocus = true)
                 .padding(horizontal = 32.dp, vertical = 32.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {

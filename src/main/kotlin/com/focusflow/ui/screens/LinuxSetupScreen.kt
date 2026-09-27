@@ -21,6 +21,7 @@ import com.focusflow.enforcement.isWayland
 import com.focusflow.enforcement.LinuxToolsChecker
 import com.focusflow.ui.components.AdminBanner
 import com.focusflow.ui.components.PermissionSetupCard
+import com.focusflow.ui.components.arrowScroll
 import com.focusflow.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -70,6 +71,7 @@ fun LinuxSetupScreen() {
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
+                .arrowScroll(scrollState, requestFocus = true)
                 .padding(horizontal = 32.dp, vertical = 32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {

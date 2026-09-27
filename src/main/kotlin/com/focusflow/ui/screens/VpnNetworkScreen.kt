@@ -37,6 +37,7 @@ import com.focusflow.ui.components.LinuxAppPickerDialog
 import com.focusflow.ui.components.rememberInstalledAppCatalogState
 import com.focusflow.ui.components.selectedAppKeysForProcessNames
 import com.focusflow.ui.components.staleAppSelectionsForProcessNames
+import com.focusflow.ui.components.arrowScroll
 import com.focusflow.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -137,6 +138,7 @@ fun VpnNetworkScreen() {
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
+                .arrowScroll(scrollState, requestFocus = true)
                 .padding(horizontal = 32.dp, vertical = 32.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {

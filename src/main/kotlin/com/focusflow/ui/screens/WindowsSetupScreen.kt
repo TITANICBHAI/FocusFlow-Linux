@@ -22,6 +22,7 @@ import com.focusflow.enforcement.isWindows
 import com.focusflow.ui.components.AdminBanner
 import com.focusflow.ui.components.PermissionSetupCard
 import com.focusflow.ui.components.isRunningAsAdmin
+import com.focusflow.ui.components.arrowScroll
 import com.focusflow.ui.theme.*
 
 @Composable
@@ -34,6 +35,7 @@ fun WindowsSetupScreen() {
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
+                .arrowScroll(scrollState, requestFocus = true)
                 .padding(horizontal = 32.dp, vertical = 32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {

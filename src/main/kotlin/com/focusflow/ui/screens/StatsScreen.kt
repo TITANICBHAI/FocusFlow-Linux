@@ -10,6 +10,7 @@ import androidx.compose.foundation.Canvas
 import com.focusflow.ui.components.EmptyStateCard
 import com.focusflow.ui.components.FfVerticalScrollbar
 import com.focusflow.ui.components.ShortcutTooltip
+import com.focusflow.ui.components.arrowScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -206,7 +207,9 @@ private fun WeekTab() {
     Box(modifier = Modifier.fillMaxSize().background(Surface)) {
     LazyColumn(
         state = weekListState,
-        modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
+        modifier = Modifier.fillMaxSize()
+            .arrowScroll(weekListState, requestFocus = true)
+            .padding(horizontal = 32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         contentPadding = PaddingValues(top = 20.dp, bottom = 32.dp)
     ) {
@@ -401,7 +404,9 @@ private fun AllTimeTab() {
     Box(modifier = Modifier.fillMaxSize().background(Surface)) {
     LazyColumn(
         state = allTimeListState,
-        modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
+        modifier = Modifier.fillMaxSize()
+            .arrowScroll(allTimeListState, requestFocus = true)
+            .padding(horizontal = 32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         contentPadding = PaddingValues(top = 20.dp, bottom = 32.dp)
     ) {
@@ -714,7 +719,9 @@ private fun DailyTab(date: LocalDate) {
     Box(modifier = Modifier.fillMaxSize().background(Surface)) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp),
+            modifier = Modifier.fillMaxSize()
+                .arrowScroll(listState, requestFocus = true)
+                .padding(horizontal = 32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(top = 20.dp, bottom = 32.dp)
         ) {

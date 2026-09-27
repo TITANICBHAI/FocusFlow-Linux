@@ -2,6 +2,7 @@ package com.focusflow.ui.screens
 
 import com.focusflow.ui.components.FfVerticalScrollbar
 import com.focusflow.ui.components.ShortcutTooltip
+import com.focusflow.ui.components.arrowScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -208,7 +209,11 @@ fun HabitsScreen() {
         } else {
             val habitsListState = rememberLazyListState()
             Box(modifier = Modifier.fillMaxSize()) {
-            LazyColumn(state = habitsListState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyColumn(
+                state = habitsListState,
+                modifier = Modifier.arrowScroll(habitsListState, requestFocus = true),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 items(habits, key = { it.id }) { habit ->
                     val habitEntries = entries[habit.id] ?: emptyList()
                     val streak       = streaks[habit.id] ?: 0
@@ -441,13 +446,19 @@ private fun AddHabitDialog(onDismiss: () -> Unit, onSave: (Habit) -> Unit) {
     var name         by remember { mutableStateOf("") }
     var selectedEmoji by remember { mutableStateOf("✅") }
     var nameError    by remember { mutableStateOf(false) }
+    val dialogScrollState = rememberScrollState()
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Surface2,
         title = { Text(strings.habitsNewHabit, color = OnSurface) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.heightIn(max = 400.dp)
+                    .verticalScroll(dialogScrollState)
+                    .arrowScroll(dialogScrollState)
+            ) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it; nameError = false },
@@ -511,13 +522,19 @@ private fun EditHabitDialog(habit: Habit, onDismiss: () -> Unit, onSave: (Habit)
     var name          by remember { mutableStateOf(habit.name) }
     var selectedEmoji by remember { mutableStateOf(habit.emoji) }
     var nameError     by remember { mutableStateOf(false) }
+    val dialogScrollState = rememberScrollState()
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Surface2,
         title = { Text(strings.habitsEditHabit, color = OnSurface) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.heightIn(max = 400.dp)
+                    .verticalScroll(dialogScrollState)
+                    .arrowScroll(dialogScrollState)
+            ) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it; nameError = false },

@@ -34,6 +34,7 @@ import com.focusflow.ui.components.rememberInstalledAppCatalogState
 import com.focusflow.ui.components.isRunningAsAdmin
 import com.focusflow.ui.components.ShortcutTooltip
 import com.focusflow.ui.components.relaunchAsAdmin
+import com.focusflow.ui.components.arrowScroll
 import com.focusflow.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -223,7 +224,9 @@ fun FocusLauncherScreen() {
     Box(modifier = Modifier.fillMaxSize()) {
     LazyColumn(
         state               = launcherListState,
-        modifier            = Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp),
+        modifier            = Modifier.fillMaxSize()
+            .arrowScroll(launcherListState, requestFocus = true)
+            .padding(horizontal = 28.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         // ── Header ───────────────────────────────────────────────────────────

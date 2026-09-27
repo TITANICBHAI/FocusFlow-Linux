@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,6 +32,8 @@ fun PostPinRecommendationsDialog(
     onOpenReleases: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val scrollState = rememberScrollState()
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(
@@ -45,7 +48,9 @@ fun PostPinRecommendationsDialog(
             modifier = Modifier.width(560.dp).heightIn(max = 560.dp)
         ) {
             Column(
-                modifier = Modifier.padding(30.dp).verticalScroll(rememberScrollState()),
+                modifier = Modifier.padding(30.dp)
+                    .verticalScroll(scrollState)
+                    .arrowScroll(scrollState),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Box(

@@ -26,6 +26,7 @@ import com.focusflow.services.NuclearPin
 import com.focusflow.ui.components.FfVerticalScrollbar
 import com.focusflow.ui.components.NuclearPinGateDialog
 import com.focusflow.ui.components.NuclearPinSetupDialog
+import com.focusflow.ui.components.arrowScroll
 import com.focusflow.ui.theme.*
 import kotlinx.coroutines.delay
 
@@ -58,6 +59,7 @@ fun NuclearModeScreen() {
                 .fillMaxSize()
                 .background(Surface)
                 .verticalScroll(scrollState)
+                .arrowScroll(scrollState, requestFocus = true)
                 .padding(32.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {

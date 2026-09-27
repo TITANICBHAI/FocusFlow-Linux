@@ -3,6 +3,7 @@ package com.focusflow.ui.screens
 import androidx.compose.foundation.Canvas
 import com.focusflow.ui.components.FfVerticalScrollbar
 import com.focusflow.ui.components.ShortcutTooltip
+import com.focusflow.ui.components.arrowScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -83,6 +84,7 @@ fun DailyNotesScreen() {
             .fillMaxSize()
             .background(Surface)
             .verticalScroll(notesScrollState)
+            .arrowScroll(notesScrollState, requestFocus = true)
             .padding(32.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {

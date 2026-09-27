@@ -2,6 +2,7 @@ package com.focusflow.ui.screens
 
 import com.focusflow.ui.components.FfVerticalScrollbar
 import com.focusflow.ui.components.ShortcutTooltip
+import com.focusflow.ui.components.arrowScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -97,6 +98,7 @@ fun ContactScreen() {
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
+                .arrowScroll(scrollState, requestFocus = true)
                 .padding(32.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
@@ -269,7 +271,9 @@ fun ContactScreen() {
                         style    = MaterialTheme.typography.bodySmall,
                         color    = OnSurface2,
                         fontSize = 11.sp,
-                        modifier = Modifier.verticalScroll(previewScroll)
+                        modifier = Modifier
+                            .verticalScroll(previewScroll)
+                            .arrowScroll(previewScroll)
                     )
                 }
             },

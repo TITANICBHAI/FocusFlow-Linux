@@ -16,6 +16,7 @@ keyboard shortcuts.
 - Overall: **Planned**
 - Owner: FocusFlow UI implementation
 - Tracker: `scroll/scroll-tracker.md`
+- Inventory: `scroll/scroll-inventory.md`
 - Agent prompt: `scroll/reliable-scroll-agent-prompt.md`
 - Current scope: main screens, sidebar, and bounded scrollable dialogs/pickers
 
@@ -83,6 +84,28 @@ Provide a shared mechanism that can route Arrow Up/Down to either:
 - a `ScrollState`, or
 - a `LazyListState`.
 
+The selected API for Batch 2 is overloads on a focused modifier helper:
+
+```text
+Modifier.arrowScroll(scrollState, requestFocus = false)
+Modifier.arrowScroll(listState, requestFocus = false)
+Modifier.arrowScroll(gridState, requestFocus = false)
+```
+
+Both overloads will:
+
+- map Compose `Key.ArrowUp`/`Key.ArrowDown` to the shared
+  `ArrowScrollIntent` policy;
+- use the same centralized `DEFAULT_VERTICAL_SCROLL_STEP_DP = 48`;
+- convert the step through `LocalDensity`;
+- call the existing state through the remembered coroutine scope;
+- remain attached to the actual viewport owner and its existing scrollbar state.
+
+The pure policy and clamping seams are defined in
+`ScrollKeyboardPolicy.kt`. The Compose event adapter is implemented in
+`ScrollUtils.kt`; the `LazyGridState` overload keeps the inventoried vertical
+grid overlays covered by the same policy.
+
 The helper should:
 
 - use the existing scroll state;
@@ -105,6 +128,14 @@ focus into a text field:
 - Clicking or tabbing into an editor must preserve normal editor arrow behavior.
 - Moving focus to a button or checkbox must not disable screen scrolling.
 - Do not steal focus from a dialog's first input or from an active search field.
+
+The focus strategy is a post-child handler on the scroll owner. The owner may
+be focusable so it can receive arrows after navigation, but it must not
+unconditionally request focus on every recomposition or while a dialog/editor
+is active. Editable descendants get first chance to consume arrow events;
+only an unconsumed key reaches the owner policy. Existing root
+`onPreviewKeyEvent` handlers for Ctrl shortcuts remain unchanged and are not
+replaced by the arrow policy.
 
 If the chosen Compose Desktop focus behavior cannot satisfy both initial arrow
 scrolling and text editing, document the limitation and add the smallest

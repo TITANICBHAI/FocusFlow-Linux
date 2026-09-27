@@ -205,6 +205,14 @@ fun FocusLauncherScreen() {
     } else {
         linuxAppsForSession
     }
+    val selectableAppNames = if (isWindows) {
+        availableApps.map { it.processName.lowercase() }.toSet()
+    } else {
+        (catalogState.apps.map { it.processName } + manualLinuxApps.map { it.processName })
+            .map { it.lowercase() }
+            .toSet()
+    }
+    val selectedSelectableCount = selectedApps.count { it in selectableAppNames }
 
     if (isActive) {
         ActiveLauncherBanner()
@@ -391,6 +399,33 @@ fun FocusLauncherScreen() {
                 if (isWindows) "Pulled from your FocusFlow lists. Uncheck any you don't want this session."
                 else "Browse installed applications and choose what this session may launch.",
                 color = OnSurface2, style = MaterialTheme.typography.bodySmall)
+        }
+
+        item(key = "bulkAppSelectionActions") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "$selectedSelectableCount / ${selectableAppNames.size} selected",
+                    color = OnSurface2,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(
+                    onClick = { selectedApps = selectableAppNames },
+                    enabled = selectableAppNames.isNotEmpty() &&
+                        selectedSelectableCount < selectableAppNames.size
+                ) {
+                    Text("Select all", color = Purple80)
+                }
+                TextButton(
+                    onClick = { selectedApps = emptySet() },
+                    enabled = selectedApps.isNotEmpty()
+                ) {
+                    Text("Unselect all", color = OnSurface2)
+                }
+            }
         }
 
         if (!isWindows) {

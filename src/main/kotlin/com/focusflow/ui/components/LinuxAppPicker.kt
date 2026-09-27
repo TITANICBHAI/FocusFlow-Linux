@@ -69,6 +69,7 @@ import com.focusflow.enforcement.AppSource
 import com.focusflow.enforcement.InstalledAppCatalog
 import com.focusflow.enforcement.InstalledAppsScanner
 import com.focusflow.ui.theme.Error
+import com.focusflow.ui.theme.OnSurface
 import com.focusflow.ui.theme.OnSurface2
 import com.focusflow.ui.theme.Purple80
 import com.focusflow.ui.theme.Success

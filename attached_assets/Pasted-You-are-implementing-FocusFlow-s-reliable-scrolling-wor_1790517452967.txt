@@ -1,0 +1,50 @@
+You are implementing FocusFlow's reliable scrolling workstream.
+
+Project context
+FocusFlow is a Kotlin/JVM Compose Desktop productivity application. The application has both ScrollState-based layouts and LazyColumn-based layouts. The requested behavior is deliberately narrow:
+
+Preserve reliable mouse-wheel scrolling.
+Add reliable Arrow Up and Arrow Down scrolling.
+Move one logical scroll step per arrow key press.
+Do not add Page Up/Page Down, Home/End, horizontal keyboard scrolling, or unrelated keyboard shortcuts in this assignment.
+
+Read first
+Read these files before editing:
+
+replit.md
+scroll/reliable-scroll-plan.md
+scroll/scroll-tracker.md
+.agents/memory/MEMORY.md
+Then inspect the relevant source and tests, especially:
+
+src/main/kotlin/com/focusflow/ui/components/ScrollUtils.kt
+src/main/kotlin/com/focusflow/ui/components/SideNav.kt
+src/main/kotlin/com/focusflow/App.kt
+src/main/kotlin/com/focusflow/ui/screens/
+Use search to find every verticalScroll, LazyColumn, LazyGrid, and bounded dialog/picker scroll owner. Do not assume the initial inventory is complete.
+
+Assigned scope
+You are assigned exactly:
+
+<ASSIGNED_SCOPE>
+Implement only that scope. Do not begin unrelated UI, platform migration, scrollbar redesign, or navigation work. If you find related work outside the assignment, record it as a blocker or follow-up note instead of expanding the scope.
+
+Required behavior
+Keep standard Compose mouse-wheel behavior intact.
+Arrow Up moves the active vertical scroll owner up by one logical step.
+Arrow Down moves the active vertical scroll owner down by one logical step.
+Use one centralized, density-aware step of approximately 48.dp.
+Handle only key-down events for these two keys.
+Clamp naturally at the beginning and end.
+Do not consume arrow keys from an actively edited text field or text area.
+Do not break Ctrl navigation shortcuts, search focus, buttons, checkboxes, switches, or app-picker controls.
+Use the existing ScrollState or LazyListState; never create a second state just for arrow handling.
+Keep one vertical scroll owner per viewport. In particular, the Focus Launcher Linux picker must remain non-scrollable inside the outer launcher LazyColumn.
+Implementation guidance
+Put reusable behavior in ScrollUtils.kt or another focused component file, not as copied handlers in every screen.
+Support both ScrollState and LazyListState.
+Use a remembered coroutine scope for suspend scroll operations.
+Prefer post-child key handling where possible so text inputs retain their normal arrow behavior.
+Ensure a screen can receive arrow input after navigation without forcing focus into a text field.
+Attach the handler to the actual scroll owner, not each row.
+Preserve existing scrollbar state wiring.

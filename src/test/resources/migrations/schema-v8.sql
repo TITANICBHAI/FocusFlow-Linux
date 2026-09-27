@@ -1,0 +1,18 @@
+PRAGMA user_version = 8;
+CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT DEFAULT '', duration_minutes INTEGER DEFAULT 25, scheduled_date TEXT, scheduled_time TEXT, completed INTEGER DEFAULT 0, skipped INTEGER DEFAULT 0, recurring INTEGER DEFAULT 0, recurring_type TEXT, priority TEXT DEFAULT 'medium', tags TEXT DEFAULT '', created_at TEXT NOT NULL, completed_at TEXT, focus_mode INTEGER DEFAULT 0, focus_intensity TEXT DEFAULT 'standard', focus_blocked_apps TEXT DEFAULT '', focus_require_pin INTEGER DEFAULT 0);
+CREATE TABLE focus_sessions (id TEXT PRIMARY KEY, task_id TEXT, task_name TEXT NOT NULL, start_time TEXT NOT NULL, end_time TEXT, planned_minutes INTEGER NOT NULL, actual_minutes INTEGER DEFAULT 0, completed INTEGER DEFAULT 0, interrupted INTEGER DEFAULT 0, notes TEXT DEFAULT '');
+CREATE TABLE block_rules (id TEXT PRIMARY KEY, process_name TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, enabled INTEGER DEFAULT 1, block_network INTEGER DEFAULT 0, source TEXT DEFAULT 'manual');
+CREATE TABLE block_schedules (id TEXT PRIMARY KEY, name TEXT NOT NULL, days_of_week TEXT NOT NULL, start_hour INTEGER NOT NULL, start_minute INTEGER NOT NULL, end_hour INTEGER NOT NULL, end_minute INTEGER NOT NULL, enabled INTEGER DEFAULT 1, process_names TEXT DEFAULT '');
+CREATE TABLE daily_allowances (process_name TEXT PRIMARY KEY, display_name TEXT NOT NULL, allowance_minutes INTEGER NOT NULL);
+CREATE TABLE daily_notes (date TEXT PRIMARY KEY, content TEXT NOT NULL, mood INTEGER DEFAULT 3, updated_at TEXT NOT NULL);
+CREATE TABLE temptation_log (id INTEGER PRIMARY KEY AUTOINCREMENT, process_name TEXT NOT NULL, display_name TEXT NOT NULL, timestamp TEXT NOT NULL);
+CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE daily_completions (date TEXT PRIMARY KEY, completed_count INTEGER DEFAULT 0, total_count INTEGER DEFAULT 0, focus_minutes INTEGER DEFAULT 0);
+CREATE TABLE habits (id TEXT PRIMARY KEY, name TEXT NOT NULL, emoji TEXT DEFAULT '✅', created_at TEXT NOT NULL);
+CREATE TABLE habit_entries (habit_id TEXT NOT NULL, date TEXT NOT NULL, done INTEGER DEFAULT 1, PRIMARY KEY (habit_id, date));
+CREATE TABLE network_cutoff_rules (id TEXT PRIMARY KEY, pattern TEXT NOT NULL, mode TEXT NOT NULL, target_process TEXT, target_display_name TEXT, enabled INTEGER DEFAULT 1);
+CREATE TABLE custom_block_presets (id TEXT PRIMARY KEY, name TEXT NOT NULL, emoji TEXT NOT NULL DEFAULT '🚫', process_names TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
+CREATE TABLE daily_usage (date TEXT NOT NULL, process_name TEXT NOT NULL, seconds_used INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (date, process_name));
+CREATE TABLE focus_launcher_presets (id TEXT PRIMARY KEY, name TEXT NOT NULL, process_names TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
+CREATE TABLE focus_launcher_session (id INTEGER PRIMARY KEY CHECK (id = 1), session_start_ms INTEGER NOT NULL, session_end_ms INTEGER NOT NULL DEFAULT 0, breaks_total INTEGER NOT NULL DEFAULT 1, breaks_used INTEGER NOT NULL DEFAULT 0, break_duration_seconds INTEGER NOT NULL DEFAULT 300, break_seconds_accumulated INTEGER NOT NULL DEFAULT 0, hard_locked INTEGER NOT NULL DEFAULT 0, break_active INTEGER NOT NULL DEFAULT 0, break_end_ms INTEGER NOT NULL DEFAULT 0, pin_hash TEXT NOT NULL);
+CREATE TABLE focus_launcher_session_apps (session_id INTEGER NOT NULL, position INTEGER NOT NULL, process_name TEXT NOT NULL, display_name TEXT NOT NULL, exe_path TEXT, PRIMARY KEY (session_id, position));

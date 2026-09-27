@@ -12,7 +12,7 @@ are removed.
 
 ## Status
 
-- Overall: **Not started**
+- Overall: **Phase A complete (DATA-01 through DATA-05); later phases not started**
 - Owner: FocusFlow data and migration work
 - Depends on: the shared app identity contract from the Linux app-picker plan
 - Coordinates with: `work/shared-platform-boundary-plan.md`
@@ -300,14 +300,29 @@ After Linux release readiness:
 
 ### Inventory and migration fixtures
 
-- [ ] **DATA-01** Inventory every persisted table, column, setting key, and
+ - [x] **DATA-01** Inventory every persisted table, column, setting key, and
   serialized process/app list.
-- [ ] **DATA-02** Document all existing schema versions through version 8.
-- [ ] **DATA-03** Create fixture databases for fresh, old, malformed, stale,
+ - [x] **DATA-02** Document all existing schema versions through version 8.
+ - [x] **DATA-03** Create fixture databases for fresh, old, malformed, stale,
   duplicate, and Windows-shaped data.
-- [ ] **DATA-04** Identify every backup, restore, export, and import path.
-- [ ] **DATA-05** Identify settings that are shared, Linux-equivalent,
+ - [x] **DATA-04** Identify every backup, restore, export, and import path.
+ - [x] **DATA-05** Identify settings that are shared, Linux-equivalent,
   Windows-only, legacy, or unsafe to migrate automatically.
+
+Evidence for DATA-01 through DATA-05:
+
+- `work/stored-data-inventory.md` documents the 16 persisted tables, columns,
+  indexes, settings key families, serialized values, schema versions 0–8,
+  backup/restore/export/import paths, and settings classifications.
+- `src/test/resources/migrations/` contains SQL schemas and data scenarios for
+  old v1, fresh v8, malformed, stale, duplicate v0, and Windows-shaped v8
+  databases.
+- `src/test/kotlin/com/focusflow/data/StoredDataFixtureTest.kt` materializes
+  every fixture in a temporary SQLite file and verifies schema versions,
+  table presence, representative hazards, duplicate retention, and unknown
+  setting preservation.
+- Verification: `gradle test --no-daemon --tests
+  com.focusflow.data.StoredDataFixtureTest` passed.
 
 ### Canonical app/process identity
 

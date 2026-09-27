@@ -1,0 +1,14 @@
+PRAGMA user_version = 1;
+CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT DEFAULT '', duration_minutes INTEGER DEFAULT 25, scheduled_date TEXT, scheduled_time TEXT, completed INTEGER DEFAULT 0, skipped INTEGER DEFAULT 0, recurring INTEGER DEFAULT 0, recurring_type TEXT, priority TEXT DEFAULT 'medium', tags TEXT DEFAULT '', created_at TEXT NOT NULL, completed_at TEXT, focus_mode INTEGER DEFAULT 0, focus_intensity TEXT DEFAULT 'standard');
+CREATE TABLE focus_sessions (id TEXT PRIMARY KEY, task_id TEXT, task_name TEXT NOT NULL, start_time TEXT NOT NULL, end_time TEXT, planned_minutes INTEGER NOT NULL, actual_minutes INTEGER DEFAULT 0, completed INTEGER DEFAULT 0, interrupted INTEGER DEFAULT 0, notes TEXT DEFAULT '');
+CREATE TABLE block_rules (id TEXT PRIMARY KEY, process_name TEXT NOT NULL, display_name TEXT NOT NULL, enabled INTEGER DEFAULT 1, block_network INTEGER DEFAULT 0);
+CREATE TABLE block_schedules (id TEXT PRIMARY KEY, name TEXT NOT NULL, days_of_week TEXT NOT NULL, start_hour INTEGER NOT NULL, start_minute INTEGER NOT NULL, end_hour INTEGER NOT NULL, end_minute INTEGER NOT NULL, enabled INTEGER DEFAULT 1, process_names TEXT DEFAULT '');
+CREATE TABLE daily_allowances (process_name TEXT PRIMARY KEY, display_name TEXT NOT NULL, allowance_minutes INTEGER NOT NULL);
+CREATE TABLE daily_notes (date TEXT PRIMARY KEY, content TEXT NOT NULL, mood INTEGER DEFAULT 3, updated_at TEXT NOT NULL);
+CREATE TABLE temptation_log (id INTEGER PRIMARY KEY AUTOINCREMENT, process_name TEXT NOT NULL, display_name TEXT NOT NULL, timestamp TEXT NOT NULL);
+CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE daily_completions (date TEXT PRIMARY KEY, completed_count INTEGER DEFAULT 0, total_count INTEGER DEFAULT 0, focus_minutes INTEGER DEFAULT 0);
+CREATE TABLE habits (id TEXT PRIMARY KEY, name TEXT NOT NULL, emoji TEXT DEFAULT '✅', created_at TEXT NOT NULL);
+CREATE TABLE habit_entries (habit_id TEXT NOT NULL, date TEXT NOT NULL, done INTEGER DEFAULT 1, PRIMARY KEY (habit_id, date));
+INSERT INTO tasks(id, title, created_at) VALUES ('old-task', 'Old schema task', '2026-09-27T00:00:00');
+INSERT INTO block_rules(id, process_name, display_name) VALUES ('old-rule', 'legacy.exe', 'Legacy app');

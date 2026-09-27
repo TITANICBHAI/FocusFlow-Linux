@@ -8,11 +8,29 @@ import java.sql.Connection
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 object Database {
 
     private val dtFmt   = DateTimeFormatter.ISO_LOCAL_DATE_TIME
     private val dateFmt = DateTimeFormatter.ISO_LOCAL_DATE
+
+    private const val OWNER_BLOCK_RULE = "block_rule"
+    private const val OWNER_SCHEDULE = "block_schedule"
+    private const val OWNER_DAILY_ALLOWANCE = "daily_allowance"
+    private const val OWNER_TASK_FOCUS_APPS = "task_focus_apps"
+    private const val OWNER_NETWORK_RULE = "network_cutoff_rule"
+    private const val OWNER_CUSTOM_PRESET = "custom_block_preset"
+    private const val OWNER_LAUNCHER_PRESET = "focus_launcher_preset"
+    private const val OWNER_LAUNCHER_SESSION = "focus_launcher_session"
+    private const val OWNER_LAUNCHER_SETTING = "setting:launcher_selected_apps"
+    private const val OWNER_VPN_SETTING = "setting:vpn_custom_processes"
+    private const val OWNER_STANDALONE_SETTING = "setting:standalone_block_processes"
+    private val PROCESS_SETTING_KEYS = setOf(
+        "launcher_selected_apps",
+        "vpn_custom_processes",
+        "standalone_block_processes"
+    )
 
     private lateinit var connection: Connection
 
@@ -553,38 +571,49 @@ object Database {
     }
 
     @Synchronized fun upsertTask(task: Task) {
-        connection.prepareStatement("""
-            INSERT OR REPLACE INTO tasks
-            (id, title, description, duration_minutes, scheduled_date, scheduled_time,
-             completed, skipped, recurring, recurring_type, priority, tags, created_at, completed_at,
-             focus_mode, focus_intensity, focus_blocked_apps, focus_require_pin)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """.trimIndent()).use { ps ->
-            ps.setString(1, task.id)
-            ps.setString(2, task.title)
-            ps.setString(3, task.description)
-            ps.setInt(4, task.durationMinutes)
-            ps.setString(5, task.scheduledDate?.format(dateFmt))
-            ps.setString(6, task.scheduledTime)
-            ps.setInt(7, if (task.completed) 1 else 0)
-            ps.setInt(8, if (task.skipped) 1 else 0)
-            ps.setInt(9, if (task.recurring) 1 else 0)
-            ps.setString(10, task.recurringType)
-            ps.setString(11, task.priority)
-            ps.setString(12, task.tags.joinToString(","))
-            ps.setString(13, task.createdAt.format(dtFmt))
-            ps.setString(14, task.completedAt?.format(dtFmt))
-            ps.setInt(15, if (task.focusMode) 1 else 0)
-            ps.setString(16, task.focusIntensity)
-            ps.setString(17, normalizeStoredProcesses(task.focusBlockedApps).joinToString(","))
-            ps.setInt(18, if (task.focusRequirePin) 1 else 0)
-            ps.executeUpdate()
+        inTransaction {
+            val processes = canonicalProcessesForWrite(task.focusBlockedApps)
+            connection.prepareStatement("""
+                INSERT OR REPLACE INTO tasks
+                (id, title, description, duration_minutes, scheduled_date, scheduled_time,
+                 completed, skipped, recurring, recurring_type, priority, tags, created_at, completed_at,
+                 focus_mode, focus_intensity, focus_blocked_apps, focus_require_pin)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """.trimIndent()).use { ps ->
+                ps.setString(1, task.id)
+                ps.setString(2, task.title)
+                ps.setString(3, task.description)
+                ps.setInt(4, task.durationMinutes)
+                ps.setString(5, task.scheduledDate?.format(dateFmt))
+                ps.setString(6, task.scheduledTime)
+                ps.setInt(7, if (task.completed) 1 else 0)
+                ps.setInt(8, if (task.skipped) 1 else 0)
+                ps.setInt(9, if (task.recurring) 1 else 0)
+                ps.setString(10, task.recurringType)
+                ps.setString(11, task.priority)
+                ps.setString(12, task.tags.joinToString(","))
+                ps.setString(13, task.createdAt.format(dtFmt))
+                ps.setString(14, task.completedAt?.format(dtFmt))
+                ps.setInt(15, if (task.focusMode) 1 else 0)
+                ps.setString(16, task.focusIntensity)
+                ps.setString(17, processes.joinToString(","))
+                ps.setInt(18, if (task.focusRequirePin) 1 else 0)
+                ps.executeUpdate()
+            }
+            syncAppReferences(
+                ownerType = OWNER_TASK_FOCUS_APPS,
+                ownerId = task.id,
+                values = processes.map { it to null }
+            )
         }
     }
 
     @Synchronized fun deleteTask(id: String) {
-        connection.prepareStatement("DELETE FROM tasks WHERE id = ?").use { ps ->
-            ps.setString(1, id); ps.executeUpdate()
+        inTransaction {
+            connection.prepareStatement("DELETE FROM tasks WHERE id = ?").use { ps ->
+                ps.setString(1, id); ps.executeUpdate()
+            }
+            deleteAppReferences(OWNER_TASK_FOCUS_APPS, id)
         }
     }
 
@@ -655,7 +684,15 @@ object Database {
     }
 
     @Synchronized fun clearAllTasks() {
-        connection.createStatement().executeUpdate("DELETE FROM tasks")
+        inTransaction {
+            connection.createStatement().executeUpdate("DELETE FROM tasks")
+            connection.prepareStatement(
+                "DELETE FROM app_references WHERE owner_type = ?"
+            ).use { ps ->
+                ps.setString(1, OWNER_TASK_FOCUS_APPS)
+                ps.executeUpdate()
+            }
+        }
     }
 
     @Synchronized fun getRecurringTemplates(): List<Task> {
@@ -811,32 +848,35 @@ object Database {
     }
 
     @Synchronized fun getEnabledBlockProcesses(): Set<String> {
-        return connection.createStatement().executeQuery(
-            "SELECT process_name FROM block_rules WHERE enabled = 1"
-        ).use { rs ->
-            val set = mutableSetOf<String>()
-            while (rs.next()) {
-                normalizeStoredProcess(rs.getString("process_name"))?.let(set::add)
-            }
-            set
-        }
+        return getBlockRules()
+            .asSequence()
+            .filter { it.enabled }
+            .map { it.processName }
+            .toSet()
     }
 
     @Synchronized fun upsertBlockRule(rule: BlockRule) {
-        connection.prepareStatement("""
-            INSERT OR REPLACE INTO block_rules (id, process_name, display_name, enabled, block_network)
-            VALUES (?,?,?,?,?)
-        """.trimIndent()).use { ps ->
-            ps.setString(1, rule.id)
-            ps.setString(2, normalizeStoredProcess(rule.processName) ?: rule.processName)
-            ps.setString(3, rule.displayName); ps.setInt(4, if (rule.enabled) 1 else 0)
-            ps.setInt(5, if (rule.blockNetwork) 1 else 0); ps.executeUpdate()
+        inTransaction {
+            val process = canonicalProcessForWrite(rule.processName) ?: rule.processName.trim()
+            connection.prepareStatement("""
+                INSERT OR REPLACE INTO block_rules (id, process_name, display_name, enabled, block_network)
+                VALUES (?,?,?,?,?)
+            """.trimIndent()).use { ps ->
+                ps.setString(1, rule.id)
+                ps.setString(2, process)
+                ps.setString(3, rule.displayName); ps.setInt(4, if (rule.enabled) 1 else 0)
+                ps.setInt(5, if (rule.blockNetwork) 1 else 0); ps.executeUpdate()
+            }
+            syncAppReferences(OWNER_BLOCK_RULE, rule.id, listOf(process to rule.displayName))
         }
     }
 
     @Synchronized fun deleteBlockRule(id: String) {
-        connection.prepareStatement("DELETE FROM block_rules WHERE id = ?").use { ps ->
-            ps.setString(1, id); ps.executeUpdate()
+        inTransaction {
+            connection.prepareStatement("DELETE FROM block_rules WHERE id = ?").use { ps ->
+                ps.setString(1, id); ps.executeUpdate()
+            }
+            deleteAppReferences(OWNER_BLOCK_RULE, id)
         }
     }
 
@@ -853,24 +893,31 @@ object Database {
     }
 
     @Synchronized fun upsertBlockSchedule(s: BlockSchedule) {
-        connection.prepareStatement("""
-            INSERT OR REPLACE INTO block_schedules
-            (id, name, days_of_week, start_hour, start_minute, end_hour, end_minute, enabled, process_names)
-            VALUES (?,?,?,?,?,?,?,?,?)
-        """.trimIndent()).use { ps ->
-            ps.setString(1, s.id); ps.setString(2, s.name)
-            ps.setString(3, s.daysOfWeek.joinToString(","))
-            ps.setInt(4, s.startHour); ps.setInt(5, s.startMinute)
-            ps.setInt(6, s.endHour); ps.setInt(7, s.endMinute)
-            ps.setInt(8, if (s.enabled) 1 else 0)
-            ps.setString(9, normalizeStoredProcesses(s.processNames).joinToString(","))
-            ps.executeUpdate()
+        inTransaction {
+            val processes = canonicalProcessesForWrite(s.processNames)
+            connection.prepareStatement("""
+                INSERT OR REPLACE INTO block_schedules
+                (id, name, days_of_week, start_hour, start_minute, end_hour, end_minute, enabled, process_names)
+                VALUES (?,?,?,?,?,?,?,?,?)
+            """.trimIndent()).use { ps ->
+                ps.setString(1, s.id); ps.setString(2, s.name)
+                ps.setString(3, s.daysOfWeek.joinToString(","))
+                ps.setInt(4, s.startHour); ps.setInt(5, s.startMinute)
+                ps.setInt(6, s.endHour); ps.setInt(7, s.endMinute)
+                ps.setInt(8, if (s.enabled) 1 else 0)
+                ps.setString(9, processes.joinToString(","))
+                ps.executeUpdate()
+            }
+            syncAppReferences(OWNER_SCHEDULE, s.id, processes.map { it to null })
         }
     }
 
     @Synchronized fun deleteBlockSchedule(id: String) {
-        connection.prepareStatement("DELETE FROM block_schedules WHERE id = ?").use { ps ->
-            ps.setString(1, id); ps.executeUpdate()
+        inTransaction {
+            connection.prepareStatement("DELETE FROM block_schedules WHERE id = ?").use { ps ->
+                ps.setString(1, id); ps.executeUpdate()
+            }
+            deleteAppReferences(OWNER_SCHEDULE, id)
         }
     }
 
@@ -878,15 +925,25 @@ object Database {
 
     @Synchronized fun getDailyAllowances(): List<DailyAllowance> {
         return connection.createStatement().executeQuery(
-            "SELECT * FROM daily_allowances ORDER BY display_name"
+            "SELECT rowid, * FROM daily_allowances ORDER BY display_name"
         ).use { rs ->
             val list = mutableListOf<DailyAllowance>()
-            while (rs.next()) list.add(DailyAllowance(
-                normalizeStoredProcess(rs.getString("process_name"))
-                    ?: rs.getString("process_name"),
-                rs.getString("display_name"),
-                rs.getInt("allowance_minutes")
-            ))
+            while (rs.next()) {
+                val fallback = rs.getString("process_name")
+                val ownerId = "rowid:${rs.getLong("rowid")}"
+                val process = effectiveProcessList(
+                    OWNER_DAILY_ALLOWANCE,
+                    ownerId,
+                    listOf(fallback)
+                ).firstOrNull() ?: fallback
+                list.add(
+                    DailyAllowance(
+                        process,
+                        rs.getString("display_name"),
+                        rs.getInt("allowance_minutes")
+                    )
+                )
+            }
             list
         // Defensive dedup: legacy DBs may have process_name duplicates if the table
         // was originally created without the PRIMARY KEY constraint. Dedup here
@@ -895,20 +952,45 @@ object Database {
     }
 
     @Synchronized fun upsertDailyAllowance(a: DailyAllowance) {
-        connection.prepareStatement("""
-            INSERT OR REPLACE INTO daily_allowances (process_name, display_name, allowance_minutes)
-            VALUES (?,?,?)
-        """.trimIndent()).use { ps ->
-            ps.setString(1, normalizeStoredProcess(a.processName) ?: a.processName)
-            ps.setString(2, a.displayName)
-            ps.setInt(3, a.allowanceMinutes); ps.executeUpdate()
+        inTransaction {
+            val process = canonicalProcessForWrite(a.processName) ?: a.processName.trim()
+            connection.prepareStatement("""
+                INSERT OR REPLACE INTO daily_allowances (process_name, display_name, allowance_minutes)
+                VALUES (?,?,?)
+            """.trimIndent()).use { ps ->
+                ps.setString(1, process)
+                ps.setString(2, a.displayName)
+                ps.setInt(3, a.allowanceMinutes); ps.executeUpdate()
+            }
+            val rowId = connection.prepareStatement(
+                "SELECT rowid FROM daily_allowances WHERE process_name = ?"
+            ).use { ps ->
+                ps.setString(1, process)
+                ps.executeQuery().use { rs -> if (rs.next()) rs.getLong(1) else null }
+            }
+            rowId?.let {
+                syncAppReferences(OWNER_DAILY_ALLOWANCE, "rowid:$it", listOf(process to a.displayName))
+            }
         }
     }
 
     @Synchronized fun deleteDailyAllowance(processName: String) {
-        connection.prepareStatement("DELETE FROM daily_allowances WHERE process_name = ?").use { ps ->
-            ps.setString(1, normalizeStoredProcess(processName) ?: processName)
-            ps.executeUpdate()
+        inTransaction {
+            val process = canonicalProcessForWrite(processName) ?: processName.trim()
+            val ownerIds = connection.prepareStatement(
+                "SELECT rowid FROM daily_allowances WHERE process_name = ?"
+            ).use { ps ->
+                ps.setString(1, process)
+                ps.executeQuery().use { rs ->
+                    buildList {
+                        while (rs.next()) add("rowid:${rs.getLong(1)}")
+                    }
+                }
+            }
+            connection.prepareStatement("DELETE FROM daily_allowances WHERE process_name = ?").use { ps ->
+                ps.setString(1, process); ps.executeUpdate()
+            }
+            ownerIds.forEach { deleteAppReferences(OWNER_DAILY_ALLOWANCE, it) }
         }
     }
 
@@ -960,7 +1042,22 @@ object Database {
         return try {
             connection.prepareStatement("SELECT value FROM settings WHERE key = ?").use { ps ->
                 ps.setString(1, key)
-                ps.executeQuery().use { rs -> if (rs.next()) rs.getString("value") else null }
+                ps.executeQuery().use { rs ->
+                    if (!rs.next()) {
+                        null
+                    } else {
+                        val raw = rs.getString("value")
+                        if (key in PROCESS_SETTING_KEYS) {
+                            effectiveProcessList(
+                                ownerTypeForProcessSetting(key),
+                                key,
+                                raw.orEmpty().split(",")
+                            ).joinToString(",")
+                        } else {
+                            raw
+                        }
+                    }
+                }
             }
         } catch (_: Exception) { null }
     }
@@ -968,8 +1065,22 @@ object Database {
     @Synchronized fun setSetting(key: String, value: String) {
         if (!isReady) return
         try {
-            connection.prepareStatement("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)").use { ps ->
-                ps.setString(1, key); ps.setString(2, value); ps.executeUpdate()
+            inTransaction {
+                val storedValue = if (key in PROCESS_SETTING_KEYS) {
+                    canonicalProcessesForWrite(value.split(",")).joinToString(",")
+                } else {
+                    value
+                }
+                connection.prepareStatement("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)").use { ps ->
+                    ps.setString(1, key); ps.setString(2, storedValue); ps.executeUpdate()
+                }
+                if (key in PROCESS_SETTING_KEYS) {
+                    syncAppReferences(
+                        ownerTypeForProcessSetting(key),
+                        key,
+                        canonicalProcessesForWrite(value.split(",")).map { it to null }
+                    )
+                }
             }
         } catch (_: Exception) {}
     }
@@ -1043,7 +1154,9 @@ object Database {
             ps.executeQuery().use { rs ->
                 val list = mutableListOf<TemptationEntry>()
                 while (rs.next()) list.add(TemptationEntry(
-                    rs.getString("process_name"), rs.getString("display_name"),
+                    normalizeStoredProcess(rs.getString("process_name"))
+                        ?: rs.getString("process_name"),
+                    rs.getString("display_name"),
                     LocalDateTime.parse(rs.getString("timestamp"), dtFmt)
                 ))
                 list
@@ -1270,18 +1383,26 @@ object Database {
     }
 
     @Synchronized fun upsertNetworkCutoffRule(rule: NetworkCutoffRule) {
-        connection.prepareStatement("""
-            INSERT OR REPLACE INTO network_cutoff_rules
-            (id, pattern, mode, target_process, target_display_name, enabled)
-            VALUES (?,?,?,?,?,?)
-        """.trimIndent()).use { ps ->
-            ps.setString(1, rule.id)
-            ps.setString(2, rule.pattern)
-            ps.setString(3, rule.mode.name)
-            ps.setString(4, normalizeStoredProcess(rule.targetProcess) ?: rule.targetProcess)
-            ps.setString(5, rule.targetDisplayName)
-            ps.setInt(6, if (rule.enabled) 1 else 0)
-            ps.executeUpdate()
+        inTransaction {
+            val process = canonicalProcessForWrite(rule.targetProcess)
+            connection.prepareStatement("""
+                INSERT OR REPLACE INTO network_cutoff_rules
+                (id, pattern, mode, target_process, target_display_name, enabled)
+                VALUES (?,?,?,?,?,?)
+            """.trimIndent()).use { ps ->
+                ps.setString(1, rule.id)
+                ps.setString(2, rule.pattern)
+                ps.setString(3, rule.mode.name)
+                ps.setString(4, process)
+                ps.setString(5, rule.targetDisplayName)
+                ps.setInt(6, if (rule.enabled) 1 else 0)
+                ps.executeUpdate()
+            }
+            syncAppReferences(
+                OWNER_NETWORK_RULE,
+                rule.id,
+                process?.let { listOf(it to rule.targetDisplayName) } ?: emptyList()
+            )
         }
     }
 
@@ -1292,8 +1413,11 @@ object Database {
     }
 
     @Synchronized fun deleteNetworkCutoffRule(id: String) {
-        connection.prepareStatement("DELETE FROM network_cutoff_rules WHERE id = ?").use { ps ->
-            ps.setString(1, id); ps.executeUpdate()
+        inTransaction {
+            connection.prepareStatement("DELETE FROM network_cutoff_rules WHERE id = ?").use { ps ->
+                ps.setString(1, id); ps.executeUpdate()
+            }
+            deleteAppReferences(OWNER_NETWORK_RULE, id)
         }
     }
 
@@ -1310,23 +1434,30 @@ object Database {
     }
 
     @Synchronized fun upsertCustomBlockPreset(preset: CustomBlockPreset) {
-        connection.prepareStatement("""
-            INSERT OR REPLACE INTO custom_block_presets
-            (id, name, emoji, process_names, created_at)
-            VALUES (?,?,?,?,?)
-        """.trimIndent()).use { ps ->
-            ps.setString(1, preset.id)
-            ps.setString(2, preset.name)
-            ps.setString(3, preset.emoji)
-            ps.setString(4, normalizeStoredProcesses(preset.processNames).joinToString(","))
-            ps.setString(5, preset.createdAt.format(dtFmt))
-            ps.executeUpdate()
+        inTransaction {
+            val processes = canonicalProcessesForWrite(preset.processNames)
+            connection.prepareStatement("""
+                INSERT OR REPLACE INTO custom_block_presets
+                (id, name, emoji, process_names, created_at)
+                VALUES (?,?,?,?,?)
+            """.trimIndent()).use { ps ->
+                ps.setString(1, preset.id)
+                ps.setString(2, preset.name)
+                ps.setString(3, preset.emoji)
+                ps.setString(4, processes.joinToString(","))
+                ps.setString(5, preset.createdAt.format(dtFmt))
+                ps.executeUpdate()
+            }
+            syncAppReferences(OWNER_CUSTOM_PRESET, preset.id, processes.map { it to null })
         }
     }
 
     @Synchronized fun deleteCustomBlockPreset(id: String) {
-        connection.prepareStatement("DELETE FROM custom_block_presets WHERE id = ?").use { ps ->
-            ps.setString(1, id); ps.executeUpdate()
+        inTransaction {
+            connection.prepareStatement("DELETE FROM custom_block_presets WHERE id = ?").use { ps ->
+                ps.setString(1, id); ps.executeUpdate()
+            }
+            deleteAppReferences(OWNER_CUSTOM_PRESET, id)
         }
     }
 
@@ -1345,23 +1476,30 @@ object Database {
 
     @Synchronized fun upsertFocusLauncherPreset(preset: FocusLauncherPreset) {
         if (!isReady) return
-        connection.prepareStatement("""
-            INSERT OR REPLACE INTO focus_launcher_presets
-            (id, name, process_names, created_at)
-            VALUES (?,?,?,?)
-        """.trimIndent()).use { ps ->
-            ps.setString(1, preset.id)
-            ps.setString(2, preset.name)
-            ps.setString(3, normalizeStoredProcesses(preset.processNames).joinToString(","))
-            ps.setString(4, preset.createdAt.format(dtFmt))
-            ps.executeUpdate()
+        inTransaction {
+            val processes = canonicalProcessesForWrite(preset.processNames)
+            connection.prepareStatement("""
+                INSERT OR REPLACE INTO focus_launcher_presets
+                (id, name, process_names, created_at)
+                VALUES (?,?,?,?)
+            """.trimIndent()).use { ps ->
+                ps.setString(1, preset.id)
+                ps.setString(2, preset.name)
+                ps.setString(3, processes.joinToString(","))
+                ps.setString(4, preset.createdAt.format(dtFmt))
+                ps.executeUpdate()
+            }
+            syncAppReferences(OWNER_LAUNCHER_PRESET, preset.id, processes.map { it to null })
         }
     }
 
     @Synchronized fun deleteFocusLauncherPreset(id: String) {
         if (!isReady) return
-        connection.prepareStatement("DELETE FROM focus_launcher_presets WHERE id = ?").use { ps ->
-            ps.setString(1, id); ps.executeUpdate()
+        inTransaction {
+            connection.prepareStatement("DELETE FROM focus_launcher_presets WHERE id = ?").use { ps ->
+                ps.setString(1, id); ps.executeUpdate()
+            }
+            deleteAppReferences(OWNER_LAUNCHER_PRESET, id)
         }
     }
 
@@ -1405,10 +1543,15 @@ object Database {
             ps.executeQuery().use { rs ->
                 buildList {
                     while (rs.next()) {
+                        val rawProcess = rs.getString("process_name")
+                        val process = effectiveProcessList(
+                            OWNER_LAUNCHER_SESSION,
+                            "session:1",
+                            listOf(rawProcess)
+                        ).firstOrNull() ?: rawProcess
                         add(
                             FocusLauncherSessionApp(
-                                processName = normalizeStoredProcess(rs.getString("process_name"))
-                                    ?: rs.getString("process_name"),
+                                processName = process,
                                 displayName = rs.getString("display_name"),
                                 exePath = rs.getString("exe_path")
                             )
@@ -1424,6 +1567,9 @@ object Database {
         if (!isReady) return
         connection.autoCommit = false
         try {
+            val normalizedApps = session.apps.mapNotNull { app ->
+                canonicalProcessForWrite(app.processName)?.let { app to it }
+            }
             connection.prepareStatement(
                 """
                 INSERT OR REPLACE INTO focus_launcher_session
@@ -1455,15 +1601,20 @@ object Database {
                 VALUES (1, ?, ?, ?, ?)
                 """.trimIndent()
             ).use { ps ->
-                session.apps.forEachIndexed { index, app ->
+                normalizedApps.forEachIndexed { index, (app, process) ->
                     ps.setInt(1, index)
-                    ps.setString(2, normalizeStoredProcess(app.processName) ?: app.processName)
+                    ps.setString(2, process)
                     ps.setString(3, app.displayName)
                     ps.setString(4, app.exePath)
                     ps.addBatch()
                 }
                 ps.executeBatch()
             }
+            syncAppReferences(
+                OWNER_LAUNCHER_SESSION,
+                "session:1",
+                normalizedApps.map { (app, process) -> process to app.displayName }
+            )
             connection.commit()
         } catch (e: Exception) {
             try { connection.rollback() } catch (_: Exception) {}
@@ -1483,6 +1634,7 @@ object Database {
             connection.prepareStatement(
                 "DELETE FROM focus_launcher_session WHERE id = 1"
             ).use { it.executeUpdate() }
+            deleteAppReferences(OWNER_LAUNCHER_SESSION, "session:1")
             connection.commit()
         } catch (e: Exception) {
             try { connection.rollback() } catch (_: Exception) {}
@@ -1492,11 +1644,200 @@ object Database {
         }
     }
 
-    private fun normalizeStoredProcess(value: String?): String? =
+    /**
+     * Reads sidecar identities when present and falls back to the legacy source
+     * column for older or partially migrated owners. A read never rewrites the
+     * source row.
+     */
+    private fun effectiveProcessList(
+        ownerType: String,
+        ownerId: String,
+        fallback: List<String>
+    ): List<String> {
+        val references = readAppReferences(ownerType, ownerId)
+        val maxPosition = maxOf(
+            references.maxOfOrNull { it.position } ?: -1,
+            fallback.lastIndex
+        )
+        if (maxPosition < 0) return emptyList()
+
+        return (0..maxPosition).mapNotNull { position ->
+            val reference = references.firstOrNull { it.position == position }
+            canonicalProcessForRead(reference?.primaryProcessName ?: fallback.getOrNull(position))
+        }.distinct()
+    }
+
+    private fun canonicalProcessForRead(value: String?): String? =
         value?.let { ProcessNameNormalizer.normalizeStored(it) }
 
+    private fun canonicalProcessForWrite(value: String?): String? =
+        value?.trim()?.takeIf { it.isNotBlank() }?.let {
+            ProcessNameNormalizer.normalizeStored(it)
+        }
+
+    private fun canonicalProcessesForWrite(values: Iterable<String>): List<String> =
+        values.mapNotNull(::canonicalProcessForWrite).distinct()
+
+    private fun normalizeStoredProcess(value: String?): String? =
+        canonicalProcessForRead(value)
+
     private fun normalizeStoredProcesses(values: List<String>): List<String> =
-        values.mapNotNull(::normalizeStoredProcess).distinct()
+        values.mapNotNull(::canonicalProcessForRead).distinct()
+
+    private fun <T> inTransaction(block: () -> T): T {
+        val ownsTransaction = connection.autoCommit
+        if (ownsTransaction) connection.autoCommit = false
+        return try {
+            val result = block()
+            if (ownsTransaction) connection.commit()
+            result
+        } catch (error: Exception) {
+            if (ownsTransaction) {
+                try { connection.rollback() } catch (_: Exception) {}
+            }
+            throw error
+        } finally {
+            if (ownsTransaction) connection.autoCommit = true
+        }
+    }
+
+    private fun ownerTypeForProcessSetting(key: String): String = when (key) {
+        "launcher_selected_apps" -> OWNER_LAUNCHER_SETTING
+        "vpn_custom_processes" -> OWNER_VPN_SETTING
+        "standalone_block_processes" -> OWNER_STANDALONE_SETTING
+        else -> "setting:$key"
+    }
+
+    private fun readAppReferences(ownerType: String, ownerId: String): List<StoredAppReference> {
+        if (!isReady) return emptyList()
+        return try {
+            connection.prepareStatement(
+                """
+                SELECT id, owner_type, owner_id, position, legacy_process_name,
+                       stable_app_id, display_name, primary_process_name,
+                       process_aliases, source, resolution_status,
+                       last_resolved_at_ms, conflict_status, conflict_group_key
+                FROM app_references
+                WHERE owner_type = ? AND owner_id = ?
+                ORDER BY position ASC
+                """.trimIndent()
+            ).use { ps ->
+                ps.setString(1, ownerType)
+                ps.setString(2, ownerId)
+                ps.executeQuery().use { rs ->
+                    buildList {
+                        while (rs.next()) add(
+                            StoredAppReference(
+                                id = rs.getString("id"),
+                                ownerType = rs.getString("owner_type"),
+                                ownerId = rs.getString("owner_id"),
+                                position = rs.getInt("position"),
+                                legacyProcessName = rs.getString("legacy_process_name"),
+                                stableAppId = rs.getString("stable_app_id"),
+                                displayName = rs.getString("display_name"),
+                                primaryProcessName = rs.getString("primary_process_name"),
+                                processAliases = ProcessNameNormalizer.normalizeAliases(
+                                    rs.getString("process_aliases").orEmpty().split(",")
+                                ),
+                                source = enumValues<AppReferenceSource>().firstOrNull {
+                                    it.wireValue == rs.getString("source")
+                                } ?: AppReferenceSource.LEGACY,
+                                resolutionStatus = enumValues<AppResolutionStatus>().firstOrNull {
+                                    it.wireValue == rs.getString("resolution_status")
+                                } ?: AppResolutionStatus.UNRESOLVED,
+                                lastResolvedAtMs = rs.getLong("last_resolved_at_ms")
+                                    .takeIf { !rs.wasNull() },
+                                conflictStatus = rs.getString("conflict_status") ?: "none",
+                                conflictGroupKey = rs.getString("conflict_group_key")
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Legacy columns remain readable if the sidecar table is absent.
+            emptyList()
+        }
+    }
+
+    /** Public repository read for relink flows and diagnostics. */
+    @Synchronized fun getAppReferences(
+        ownerType: String,
+        ownerId: String
+    ): List<StoredAppReference> = readAppReferences(ownerType, ownerId)
+
+    private fun syncAppReferences(
+        ownerType: String,
+        ownerId: String,
+        values: List<Pair<String, String?>>
+    ) {
+        if (!isReady) return
+        val existing = readAppReferences(ownerType, ownerId).toMutableList()
+        connection.prepareStatement(
+            "DELETE FROM app_references WHERE owner_type = ? AND owner_id = ?"
+        ).use { ps ->
+            ps.setString(1, ownerType)
+            ps.setString(2, ownerId)
+            ps.executeUpdate()
+        }
+
+        connection.prepareStatement(
+            """
+            INSERT INTO app_references (
+                id, owner_type, owner_id, position, legacy_process_name,
+                stable_app_id, display_name, primary_process_name,
+                process_aliases, source, resolution_status, last_resolved_at_ms,
+                conflict_status, conflict_group_key
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent()
+        ).use { ps ->
+            values.forEachIndexed { position, (rawProcess, displayName) ->
+                val process = canonicalProcessForWrite(rawProcess) ?: return@forEachIndexed
+                val preserved = existing.firstOrNull { old ->
+                    ProcessNameNormalizer.equivalentStored(old.primaryProcessName, process) ||
+                        ProcessNameNormalizer.equivalentStored(old.legacyProcessName, process)
+                }
+                existing.remove(preserved)
+                ps.setString(1, preserved?.id ?: UUID.nameUUIDFromBytes(
+                    "$ownerType|$ownerId|$position".toByteArray(Charsets.UTF_8)
+                ).toString())
+                ps.setString(2, ownerType)
+                ps.setString(3, ownerId)
+                ps.setInt(4, position)
+                ps.setString(5, rawProcess.trim())
+                ps.setString(6, preserved?.stableAppId)
+                ps.setString(7, displayName ?: preserved?.displayName)
+                ps.setString(8, process)
+                ps.setString(9, preserved?.processAliases?.joinToString(",") ?: "")
+                ps.setString(10, preserved?.source?.wireValue ?: AppReferenceSource.LEGACY.wireValue)
+                ps.setString(
+                    11,
+                    preserved?.resolutionStatus?.wireValue
+                        ?: AppResolutionStatus.UNRESOLVED.wireValue
+                )
+                if (preserved?.lastResolvedAtMs == null) {
+                    ps.setNull(12, java.sql.Types.INTEGER)
+                } else {
+                    ps.setLong(12, preserved.lastResolvedAtMs)
+                }
+                ps.setString(13, preserved?.conflictStatus ?: "none")
+                ps.setString(14, preserved?.conflictGroupKey)
+                ps.addBatch()
+            }
+            ps.executeBatch()
+        }
+    }
+
+    private fun deleteAppReferences(ownerType: String, ownerId: String) {
+        if (!isReady) return
+        connection.prepareStatement(
+            "DELETE FROM app_references WHERE owner_type = ? AND owner_id = ?"
+        ).use { ps ->
+            ps.setString(1, ownerType)
+            ps.setString(2, ownerId)
+            ps.executeUpdate()
+        }
+    }
 
     // ── Row mappers ───────────────────────────────────────────────────────────
 
@@ -1518,7 +1859,9 @@ object Database {
         focusMode         = rs.getInt("focus_mode") == 1,
         focusIntensity    = rs.getString("focus_intensity") ?: "standard",
         focusBlockedApps  = try {
-            normalizeStoredProcesses(
+            effectiveProcessList(
+                OWNER_TASK_FOCUS_APPS,
+                rs.getString("id"),
                 rs.getString("focus_blocked_apps")
                     ?.split(",")
                     ?.filter { it.isNotBlank() }
@@ -1543,8 +1886,11 @@ object Database {
 
     private fun rowToBlockRule(rs: java.sql.ResultSet): BlockRule = BlockRule(
         id           = rs.getString("id"),
-        processName  = normalizeStoredProcess(rs.getString("process_name"))
-            ?: rs.getString("process_name"),
+        processName  = effectiveProcessList(
+            OWNER_BLOCK_RULE,
+            rs.getString("id"),
+            listOf(rs.getString("process_name"))
+        ).firstOrNull() ?: rs.getString("process_name"),
         displayName  = rs.getString("display_name"),
         enabled      = rs.getInt("enabled") == 1,
         blockNetwork = rs.getInt("block_network") == 1
@@ -1559,7 +1905,9 @@ object Database {
         endHour      = rs.getInt("end_hour"),
         endMinute    = rs.getInt("end_minute"),
         enabled      = rs.getInt("enabled") == 1,
-        processNames = normalizeStoredProcesses(
+        processNames = effectiveProcessList(
+            OWNER_SCHEDULE,
+            rs.getString("id"),
             rs.getString("process_names")?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
         )
     )
@@ -1568,7 +1916,11 @@ object Database {
         id                 = rs.getString("id"),
         pattern            = rs.getString("pattern"),
         mode               = try { NetworkRuleMode.valueOf(rs.getString("mode")) } catch (_: Exception) { NetworkRuleMode.DOMAIN },
-        targetProcess      = normalizeStoredProcess(rs.getString("target_process")),
+        targetProcess      = effectiveProcessList(
+            OWNER_NETWORK_RULE,
+            rs.getString("id"),
+            listOfNotNull(rs.getString("target_process"))
+        ).firstOrNull(),
         targetDisplayName  = rs.getString("target_display_name"),
         enabled            = rs.getInt("enabled") == 1
     )
@@ -1577,7 +1929,9 @@ object Database {
         id           = rs.getString("id"),
         name         = rs.getString("name"),
         emoji        = rs.getString("emoji") ?: "🚫",
-        processNames = normalizeStoredProcesses(
+        processNames = effectiveProcessList(
+            OWNER_CUSTOM_PRESET,
+            rs.getString("id"),
             rs.getString("process_names")?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
         ),
         createdAt    = LocalDateTime.parse(rs.getString("created_at"), dtFmt)
@@ -1586,7 +1940,9 @@ object Database {
     private fun rowToFocusLauncherPreset(rs: java.sql.ResultSet): FocusLauncherPreset = FocusLauncherPreset(
         id           = rs.getString("id"),
         name         = rs.getString("name"),
-        processNames = normalizeStoredProcesses(
+        processNames = effectiveProcessList(
+            OWNER_LAUNCHER_PRESET,
+            rs.getString("id"),
             rs.getString("process_names")?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
         ),
         createdAt    = LocalDateTime.parse(rs.getString("created_at"), dtFmt)

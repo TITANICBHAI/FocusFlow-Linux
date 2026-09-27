@@ -52,7 +52,7 @@ fun BlockScheduleEditorDialog(
         mutableStateOf(initialSchedule?.daysOfWeek?.toSet() ?: setOf(1, 2, 3, 4, 5))
     }
     var selectedProcesses by remember {
-        mutableStateOf(initialSchedule?.processNames?.map { it.lowercase() }?.toSet() ?: emptySet())
+        mutableStateOf(initialSchedule?.processNames?.toSet() ?: emptySet())
     }
     var customProcesses by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
@@ -176,7 +176,7 @@ fun BlockScheduleEditorDialog(
                             )
                         } else {
                             visibleApps.forEach { app ->
-                                val processName = app.processName.lowercase()
+                                val processName = app.processName
                                 val selected = processName in selectedProcesses
                                 Row(
                                     modifier = Modifier
@@ -283,9 +283,8 @@ fun BlockScheduleEditorDialog(
                     val custom = if (isWindows) {
                         customProcesses
                             .split(",", "\n")
-                            .map { it.trim().lowercase() }
+                            .map { it.trim() }
                             .filter { it.isNotBlank() }
-                            .map { if (it.endsWith(".exe")) it else "$it.exe" }
                     } else {
                         emptyList()
                     }

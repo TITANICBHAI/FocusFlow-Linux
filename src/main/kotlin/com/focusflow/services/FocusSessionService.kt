@@ -1,5 +1,6 @@
 package com.focusflow.services
 
+import com.focusflow.ProcessNameNormalizer
 import com.focusflow.data.Database
 import com.focusflow.data.models.FocusSession
 import com.focusflow.data.models.SessionState
@@ -89,7 +90,7 @@ object FocusSessionService {
         firedMilestones.clear()
         ProcessMonitor.sessionActive = true
         ProcessMonitor.sessionExtraBlockedProcesses =
-            blockedProcesses.map { it.lowercase().let { n -> if (!n.endsWith(".exe")) "$n.exe" else n } }.toSet()
+            ProcessNameNormalizer.normalizeStoredList(blockedProcesses).toSet()
         ProcessMonitor.start()
         NotificationService.sessionStarted(name, minutes)
 

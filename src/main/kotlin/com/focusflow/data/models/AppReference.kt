@@ -38,3 +38,27 @@ data class CanonicalAppReference(
     val lastResolvedAtMs: Long? = null,
     val resolutionStatus: AppResolutionStatus
 )
+
+/**
+ * A row from the additive app-reference sidecar.
+ *
+ * The owner and position identify which legacy source value this reference
+ * belongs to. Repositories use this shape to read new sidecar data while
+ * retaining a fallback path for databases created before the sidecar existed.
+ */
+data class StoredAppReference(
+    val id: String,
+    val ownerType: String,
+    val ownerId: String,
+    val position: Int,
+    val legacyProcessName: String,
+    val stableAppId: String?,
+    val displayName: String?,
+    val primaryProcessName: String,
+    val processAliases: List<String> = emptyList(),
+    val source: AppReferenceSource,
+    val resolutionStatus: AppResolutionStatus,
+    val lastResolvedAtMs: Long?,
+    val conflictStatus: String = "none",
+    val conflictGroupKey: String? = null
+)

@@ -47,7 +47,6 @@ import com.focusflow.ui.components.staleAppSelectionsForProcessNames
 import com.focusflow.services.SoundAversion
 import com.focusflow.services.TaskAlarmService
 import com.focusflow.ui.theme.*
-import com.focusflow.ProcessNameNormalizer
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -581,16 +580,12 @@ fun SettingsScreen() {
                             row.forEach { (name, proc) ->
                                 val resolvedProc = if (isLinux) {
                                     InstalledAppsScanner.resolveAppReference(proc, catalogState.apps)?.processName
-                                        ?: when (proc.lowercase()) {
-                                            "battle.net launcher.exe" -> "battle.net"
-                                            else -> ProcessNameNormalizer.normalizeStored(proc)
-                                        }
-                                        ?: proc.lowercase()
+                                        ?: proc
                                 } else {
                                     proc
                                 }
                                 val alreadyAdded = blockRules.any {
-                                    ProcessNameNormalizer.equivalentStored(it.processName, resolvedProc)
+                                    it.processName.equals(resolvedProc, ignoreCase = true)
                                 }
                                 OutlinedButton(
                                     onClick = {
@@ -1568,13 +1563,16 @@ private fun AddRuleDialog(onDismiss: () -> Unit, onSave: (BlockRule) -> Unit) {
             Button(
                 onClick = {
                     if (processName.isBlank()) return@Button
-                    val name = if (isWindows) {
-                        if (processName.endsWith(".exe")) processName else "$processName.exe"
-                    } else {
-                        com.focusflow.ProcessNameNormalizer.normalizeManual(processName)
-                            ?: return@Button
-                    }
-                    onSave(BlockRule(UUID.randomUUID().toString(), name.lowercase(), displayName.ifBlank { name }, true, blockNetwork))
+                    val enteredProcess = processName.trim()
+                    onSave(
+                        BlockRule(
+                            UUID.randomUUID().toString(),
+                            enteredProcess,
+                            displayName.ifBlank { enteredProcess },
+                            true,
+                            blockNetwork
+                        )
+                    )
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Purple80)
             ) { Text(LocalizationManager.strings.btnAdd) }
@@ -2039,7 +2037,14 @@ private fun AddAllowanceDialog(onDismiss: () -> Unit, onSave: (DailyAllowance) -
         confirmButton = {
             Button(onClick = {
                 if (processName.isBlank()) return@Button
-                onSave(DailyAllowance(processName = processName.trim(), displayName = displayName.ifBlank { processName.removeSuffix(".exe").replaceFirstChar { it.uppercase() } }, allowanceMinutes = allowanceMins.toIntOrNull()?.coerceAtLeast(1) ?: 30))
+                 val enteredProcess = processName.trim()
+                 onSave(
+                     DailyAllowance(
+                         processName = enteredProcess,
+                         displayName = displayName.ifBlank { enteredProcess },
+                         allowanceMinutes = allowanceMins.toIntOrNull()?.coerceAtLeast(1) ?: 30
+                     )
+                 )
             }, colors = ButtonDefaults.buttonColors(containerColor = Purple80)) { Text(LocalizationManager.strings.btnAdd) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(LocalizationManager.strings.btnCancel, color = OnSurface2) } }

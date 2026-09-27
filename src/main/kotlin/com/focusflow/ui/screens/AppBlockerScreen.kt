@@ -47,7 +47,6 @@ import com.focusflow.data.models.BlockRule
 import com.focusflow.i18n.LocalizationManager
 import com.focusflow.data.models.CustomBlockPreset
 import com.focusflow.data.models.DailyAllowance
-import com.focusflow.ProcessNameNormalizer
 import com.focusflow.enforcement.AppIconExtractor
 import com.focusflow.enforcement.AppCatalogState
 import com.focusflow.enforcement.AppDescriptor
@@ -322,7 +321,7 @@ private fun AlwaysBlockTab(onNavigateToBlockDefense: () -> Unit) {
             return
         }
         val proc = manual.processName
-        if (blockRules.any { ProcessNameNormalizer.equivalentStored(it.processName, proc) }) {
+        if (blockRules.any { it.processName.equals(proc, ignoreCase = true) }) {
             manualError = "\"$proc\" is already in your block list"; return
         }
         manualError = null

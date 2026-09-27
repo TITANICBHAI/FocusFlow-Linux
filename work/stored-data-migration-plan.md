@@ -464,13 +464,27 @@ Evidence for DATA-22 through DATA-25:
 
 ### Runtime and UI compatibility
 
-- [ ] **DATA-29** Make all repositories read old and new app references during
+- [x] **DATA-29** Make all repositories read old and new app references during
   the transition.
-- [ ] **DATA-30** Ensure new writes use canonical Linux-safe identity values.
-- [ ] **DATA-31** Keep stale references visible in the shared app picker.
-- [ ] **DATA-32** Add user-visible reselect/relink behavior for unresolved apps.
-- [ ] **DATA-33** Remove per-screen process normalization and conversion logic.
-- [ ] **DATA-34** Verify no screen silently deletes or rewrites user rules.
+- [x] **DATA-30** Ensure new writes use canonical Linux-safe identity values.
+- [x] **DATA-31** Keep stale references visible in the shared app picker.
+- [x] **DATA-32** Add user-visible reselect/relink behavior for unresolved apps.
+- [x] **DATA-33** Remove per-screen process normalization and conversion logic.
+- [x] **DATA-34** Verify no screen silently deletes or rewrites user rules.
+
+Evidence for DATA-29 through DATA-34:
+
+- Repository reads prefer ordered `app_references` values and fall back to
+  legacy process columns; writes canonicalize process identities and synchronize
+  the sidecar without rewriting unrelated user text.
+- Deletes remove only the explicitly deleted owner and its sidecar records.
+- The shared Linux picker keeps unresolved values visible and provides a
+  `Relink` action that replaces only the selected stale key.
+- Screen-level `.exe` conversion and process normalization were removed from
+  schedule, settings, VPN, and blocker flows; the repository is now the write
+  boundary.
+- The full Gradle test suite passes, including a focused stale-reference relink
+  test.
 
 ### Upgrade validation
 

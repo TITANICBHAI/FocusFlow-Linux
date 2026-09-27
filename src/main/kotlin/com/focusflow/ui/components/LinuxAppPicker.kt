@@ -232,6 +232,7 @@ fun LinuxAppPicker(
     var manualProcess by rememberSaveable { mutableStateOf("") }
     var manualError by rememberSaveable { mutableStateOf<String?>(null) }
     var manualEntries by remember { mutableStateOf(emptyList<AppDescriptor>()) }
+    var relinkTargetKey by rememberSaveable { mutableStateOf<String?>(null) }
 
     val presence = enumValueOf<AppPickerPresenceFilter>(presenceValue)
     val source = enumValueOf<AppPickerSourceFilter>(sourceValue)
@@ -250,6 +251,25 @@ fun LinuxAppPicker(
                     label.contains(query.trim(), ignoreCase = true))
         }
 
+    fun selectCatalogKey(key: String) {
+        val staleKey = relinkTargetKey
+        if (staleKey != null) {
+            onSelectionChanged(
+                replaceStaleAppSelection(selectedAppKeys, staleKey, key)
+            )
+            relinkTargetKey = null
+        } else {
+            onSelectionChanged(
+                if (multiSelect) {
+                    if (key in selectedAppKeys) selectedAppKeys - key
+                    else selectedAppKeys + key
+                } else {
+                    setOf(key)
+                }
+            )
+        }
+    }
+
     Column(modifier = modifier) {
         PickerToolbar(
             query = query,
@@ -262,6 +282,15 @@ fun LinuxAppPicker(
             enabled = enabled,
             onRefresh = onRefresh
         )
+
+        relinkTargetKey?.let { staleKey ->
+            Text(
+                "Select a replacement for ${staleEntries[staleKey] ?: staleKey}.",
+                color = Warning,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+        }
 
         if (allowManualEntry) {
             ManualProcessEntry(
@@ -280,8 +309,16 @@ fun LinuxAppPicker(
                         manualEntries = (manualEntries + manual)
                             .distinctBy { it.catalogKey() }
                         val key = manual.catalogKey()
+                        val staleKey = relinkTargetKey
                         onSelectionChanged(
-                            if (multiSelect) selectedAppKeys + key else setOf(key)
+                            if (staleKey != null) {
+                                relinkTargetKey = null
+                                replaceStaleAppSelection(selectedAppKeys, staleKey, key)
+                            } else if (multiSelect) {
+                                selectedAppKeys + key
+                            } else {
+                                setOf(key)
+                            }
                         )
                         onManualEntry(manual)
                         manualProcess = ""
@@ -367,6 +404,9 @@ fun LinuxAppPicker(
                                 multiSelect = multiSelect,
                                 onClick = {
                                     onSelectionChanged(selectedAppKeys - key)
+                                },
+                                onRelink = {
+                                    relinkTargetKey = key
                                 }
                             )
                         }
@@ -383,14 +423,7 @@ fun LinuxAppPicker(
                             enabled = enabled,
                             multiSelect = multiSelect,
                             onClick = {
-                                onSelectionChanged(
-                                    if (multiSelect) {
-                                        if (selected) selectedAppKeys - key
-                                        else selectedAppKeys + key
-                                    } else {
-                                        setOf(key)
-                                    }
-                                )
+                                selectCatalogKey(key)
                             }
                         )
                     }
@@ -453,6 +486,12 @@ internal fun staleAppSelectionsForProcessNames(
         }
     }
     .associateWith { InstalledAppsScanner.friendlyNameFor(it) }
+
+internal fun replaceStaleAppSelection(
+    selectedAppKeys: Set<String>,
+    staleKey: String,
+    replacementKey: String
+): Set<String> = (selectedAppKeys - staleKey) + replacementKey
 
 /**
  * The dialog shell for all Linux multi-select app flows. Screens provide only
@@ -775,7 +814,8 @@ private fun StaleAppRow(
     selected: Boolean,
     enabled: Boolean,
     multiSelect: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onRelink: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -808,6 +848,12 @@ private fun StaleAppRow(
                     color = Warning,
                     style = MaterialTheme.typography.bodySmall
                 )
+            }
+            TextButton(
+                onClick = onRelink,
+                enabled = enabled
+            ) {
+                Text("Relink", color = Warning)
             }
             if (multiSelect) {
                 Checkbox(checked = selected, onCheckedChange = null, enabled = enabled)

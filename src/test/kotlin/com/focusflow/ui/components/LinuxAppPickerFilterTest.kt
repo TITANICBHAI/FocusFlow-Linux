@@ -195,4 +195,16 @@ class LinuxAppPickerFilterTest {
             ).isEmpty()
         )
     }
+
+    @Test
+    fun `relink replaces stale selection without dropping other selected apps`() {
+        assertEquals(
+            setOf("org.example.editor", "org.telegram.desktop"),
+            replaceStaleAppSelection(
+                selectedAppKeys = setOf("missing-tool", "org.telegram.desktop"),
+                staleKey = "missing-tool",
+                replacementKey = "org.example.editor"
+            )
+        )
+    }
 }

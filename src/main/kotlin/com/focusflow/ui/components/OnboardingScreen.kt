@@ -45,6 +45,7 @@ import com.focusflow.enforcement.resolvePresetProcessNames
 import com.focusflow.enforcement.WindowsStartupManager
 import com.focusflow.enforcement.isWindows
 import com.focusflow.enforcement.isLinux
+import com.focusflow.ProcessNameNormalizer
 import com.focusflow.i18n.AppLanguage
 import com.focusflow.i18n.LocalizationManager
 import com.focusflow.ui.theme.*
@@ -746,7 +747,15 @@ private fun PresetsPage(
                 )
             } else if (selectedMissing.isNotEmpty()) {
                 Text(
-                    "Not found on this Linux system: ${selectedMissing.joinToString()}",
+                    "Not found on this Linux system: ${
+                        selectedMissing
+                            .map { reference ->
+                                val normalized = ProcessNameNormalizer.normalizeStored(reference) ?: reference
+                                InstalledAppsScanner.friendlyNameFor(normalized)
+                            }
+                            .distinct()
+                            .joinToString()
+                    }",
                     style = MaterialTheme.typography.labelMedium,
                     color = Warning,
                     textAlign = TextAlign.Center
@@ -1098,7 +1107,11 @@ private fun PermissionsPage() {
                         "Required for process kill, firewall rules & Nuclear Mode"
                     else
                         "Hosts blocking needs writable /etc/hosts; firewall attempts may request pkexec authorization",
-                    badge = if (isAdmin) "✓ Process access available" else "Review Linux Setup",
+                    badge = when {
+                        isAdmin -> "✓ Process access available"
+                        isLinux -> "Review Linux Setup"
+                        else -> "Review platform setup"
+                    },
                     badgeGranted = isAdmin
                 ) {
                     if (!isAdmin && isWindows) {

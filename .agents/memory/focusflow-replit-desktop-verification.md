@@ -7,4 +7,4 @@ The imported Gradle wrapper may not have its executable bit, while the configure
 
 **Why:** A wrapper invocation can fail before Gradle starts, and a browser screenshot connection refusal does not necessarily mean the Compose desktop application failed to launch.
 
-**How to apply:** Use the configured system `gradle` command with the workflow Java environment for checks, inspect workflow logs/process state for desktop startup, and record browser screenshot unavailability as a VNC limitation rather than changing the app to add a web server.
+**How to apply:** Use the configured system `gradle` command with the workflow Java environment for checks, inspect workflow logs/process state for desktop startup, and record browser screenshot unavailability as a VNC limitation rather than changing the app to add a web server. Stop the desktop workflow before running Gradle tests; concurrent Kotlin compilations can corrupt incremental caches and produce misleading missing-module or persistent-enumerator errors.

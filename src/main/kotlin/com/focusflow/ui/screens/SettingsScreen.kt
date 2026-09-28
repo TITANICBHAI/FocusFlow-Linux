@@ -2042,7 +2042,22 @@ private fun AddAllowanceDialog(onDismiss: () -> Unit, onSave: (DailyAllowance) -
                     .arrowScroll(dialogScrollState)
             ) {
                 Text(LocalizationManager.strings.settingsEditAllowanceDesc, style = MaterialTheme.typography.bodySmall, color = OnSurface2)
-                OutlinedTextField(value = processName, onValueChange = { processName = it }, label = { Text(LocalizationManager.strings.settingsProcessNameHint) }, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Purple80, unfocusedBorderColor = OnSurface2), singleLine = true)
+                OutlinedTextField(
+                    value = processName,
+                    onValueChange = { processName = it },
+                    label = {
+                        Text(
+                            if (isLinux) "Process name (e.g. chrome)"
+                            else LocalizationManager.strings.settingsProcessNameHint
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Purple80,
+                        unfocusedBorderColor = OnSurface2
+                    ),
+                    singleLine = true
+                )
                 OutlinedTextField(value = displayName, onValueChange = { displayName = it }, label = { Text(LocalizationManager.strings.settingsDisplayNameLabel) }, modifier = Modifier.fillMaxWidth(), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Purple80, unfocusedBorderColor = OnSurface2), singleLine = true)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(LocalizationManager.strings.settingsAllowanceLabel, color = OnSurface2, style = MaterialTheme.typography.bodySmall)

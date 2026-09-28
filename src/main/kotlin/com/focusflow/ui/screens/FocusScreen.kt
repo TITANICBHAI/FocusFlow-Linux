@@ -1133,7 +1133,15 @@ private fun StartStandaloneBlockDialog(onDismiss: () -> Unit, onStart: (String, 
         title = { Text(strings.focusQuickBlockTitle, color = OnSurface) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(strings.focusEnterProcessNamesDesc, style = MaterialTheme.typography.bodySmall, color = OnSurface2)
+                Text(
+                    if (isLinux) {
+                        "Enter process names (e.g. chrome, discord) separated by commas. The block CANNOT be cancelled."
+                    } else {
+                        strings.focusEnterProcessNamesDesc
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurface2
+                )
                 OutlinedTextField(
                     value = apps, onValueChange = { apps = it },
                     label = { Text(strings.focusProcessLabel) }, modifier = Modifier.fillMaxWidth(),

@@ -68,6 +68,8 @@ import com.focusflow.enforcement.AppIconExtractor
 import com.focusflow.enforcement.AppSource
 import com.focusflow.enforcement.InstalledAppCatalog
 import com.focusflow.enforcement.InstalledAppsScanner
+import com.focusflow.enforcement.LinuxProcessSafety
+import com.focusflow.ProcessNameNormalizer
 import com.focusflow.ui.theme.Error
 import com.focusflow.ui.theme.OnSurface
 import com.focusflow.ui.theme.OnSurface2
@@ -343,8 +345,12 @@ fun LinuxAppPicker(
                     manualError = null
                 },
                 onAdd = {
+                    val normalizedManual = ProcessNameNormalizer.normalizeManual(manualProcess)
+                    val protectedReason = LinuxProcessSafety.protectedReason(normalizedManual)
                     val manual = InstalledAppsScanner.createManualProcessEntry(manualProcess)
-                    if (manual == null) {
+                    if (protectedReason != null) {
+                        manualError = protectedReason
+                    } else if (manual == null) {
                         manualError = "Enter a process name using letters, numbers, '.', '_', '+' or '-'."
                     } else {
                         manualEntries = (manualEntries + manual)
@@ -442,6 +448,7 @@ fun LinuxAppPicker(
                         visibleStaleEntries.forEach { (key, label) ->
                             item(key = "stale:$key") {
                                 StaleAppRow(
+                                    protected = LinuxProcessSafety.isProtectedProcessName(key),
                                     label = label,
                                     selected = key in selectedAppKeys,
                                     enabled = enabled,
@@ -464,7 +471,8 @@ fun LinuxAppPicker(
                             CatalogAppRow(
                                 app = app,
                                 selected = selected,
-                                enabled = enabled,
+                                enabled = enabled &&
+                                    !LinuxProcessSafety.isProtectedProcessName(app.processName),
                                 multiSelect = multiSelect,
                                 onClick = {
                                     selectCatalogKey(key)
@@ -482,6 +490,7 @@ fun LinuxAppPicker(
                     ) {
                         visibleStaleEntries.forEach { (key, label) ->
                             StaleAppRow(
+                                protected = LinuxProcessSafety.isProtectedProcessName(key),
                                 label = label,
                                 selected = key in selectedAppKeys,
                                 enabled = enabled,
@@ -500,7 +509,8 @@ fun LinuxAppPicker(
                             CatalogAppRow(
                                 app = app,
                                 selected = selected,
-                                enabled = enabled,
+                                enabled = enabled &&
+                                    !LinuxProcessSafety.isProtectedProcessName(app.processName),
                                 multiSelect = multiSelect,
                                 onClick = {
                                     selectCatalogKey(key)
@@ -820,6 +830,7 @@ private fun CatalogAppRow(
     multiSelect: Boolean,
     onClick: () -> Unit
 ) {
+    val protected = LinuxProcessSafety.isProtectedProcessName(app.processName)
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -878,6 +889,19 @@ private fun CatalogAppRow(
                             }
                         }
                     }
+                    if (protected) {
+                        Surface(
+                            color = Warning.copy(alpha = 0.18f),
+                            contentColor = Warning,
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                "Protected",
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
                 }
             }
             if (multiSelect) {
@@ -891,6 +915,7 @@ private fun CatalogAppRow(
 
 @Composable
 private fun StaleAppRow(
+    protected: Boolean,
     label: String,
     selected: Boolean,
     enabled: Boolean,
@@ -902,14 +927,24 @@ private fun StaleAppRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(
-                enabled = enabled,
+                enabled = enabled && (!protected || selected),
                 role = if (multiSelect) Role.Checkbox else Role.RadioButton,
                 onClick = onClick
             )
             .semantics {
-                contentDescription = "$label, application unavailable"
+                contentDescription = if (protected) {
+                    "$label, protected and unavailable"
+                } else {
+                    "$label, application unavailable"
+                }
             },
-        colors = CardDefaults.cardColors(containerColor = Warning.copy(alpha = 0.12f))
+        colors = CardDefaults.cardColors(
+            containerColor = if (protected) {
+                Error.copy(alpha = 0.12f)
+            } else {
+                Warning.copy(alpha = 0.12f)
+            }
+        )
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(10.dp),
@@ -925,8 +960,8 @@ private fun StaleAppRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(label, color = MaterialTheme.colorScheme.onSurface)
                 Text(
-                    "Not currently available",
-                    color = Warning,
+                    if (protected) "Protected — cannot be enforced" else "Not currently available",
+                    color = if (protected) Error else Warning,
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -937,9 +972,17 @@ private fun StaleAppRow(
                 Text("Relink", color = Warning)
             }
             if (multiSelect) {
-                Checkbox(checked = selected, onCheckedChange = null, enabled = enabled)
+                Checkbox(
+                    checked = selected,
+                    onCheckedChange = null,
+                    enabled = enabled && (!protected || selected)
+                )
             } else {
-                RadioButton(selected = selected, onClick = null, enabled = enabled)
+                RadioButton(
+                    selected = selected,
+                    onClick = null,
+                    enabled = enabled && (!protected || selected)
+                )
             }
         }
     }

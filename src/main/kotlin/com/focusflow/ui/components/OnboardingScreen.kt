@@ -778,7 +778,10 @@ private fun PresetsPage(
                     missingApps = if (isLinux && catalogState.apps.isNotEmpty()) {
                         preset.processNames.filter { process ->
                             InstalledAppsScanner.resolveAppReference(process, catalogState.apps) == null
-                        }.distinct()
+                        }.distinct().map { reference ->
+                            val normalized = ProcessNameNormalizer.normalizeStored(reference) ?: reference
+                            InstalledAppsScanner.friendlyNameFor(normalized)
+                        }
                     } else {
                         emptyList()
                     },

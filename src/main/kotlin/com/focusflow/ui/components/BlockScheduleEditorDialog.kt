@@ -215,7 +215,12 @@ fun BlockScheduleEditorDialog(
                         value = customProcesses,
                         onValueChange = { customProcesses = it; validationError = "" },
                         label = { Text("Additional process names (optional)") },
-                        placeholder = { Text("example.exe, another.exe") },
+                        placeholder = {
+                            Text(
+                                if (isLinux) "example-app, another-app"
+                                else "example.exe, another.exe"
+                            )
+                        },
                         supportingText = { Text("Use this for an app not found in the installed-app list.") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,

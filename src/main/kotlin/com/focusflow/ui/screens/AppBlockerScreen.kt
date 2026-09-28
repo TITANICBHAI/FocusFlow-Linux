@@ -53,6 +53,7 @@ import com.focusflow.enforcement.AppCatalogState
 import com.focusflow.enforcement.AppDescriptor
 import com.focusflow.enforcement.BlockPresets
 import com.focusflow.enforcement.InstalledAppsScanner
+import com.focusflow.enforcement.LinuxProcessSafety
 import com.focusflow.enforcement.NetworkBlocker
 import com.focusflow.enforcement.ProcessMonitor
 import com.focusflow.enforcement.ScannedApp
@@ -322,6 +323,10 @@ private fun AlwaysBlockTab(onNavigateToBlockDefense: () -> Unit) {
             return
         }
         val proc = manual.processName
+        LinuxProcessSafety.protectedReason(proc)?.let {
+            manualError = it
+            return
+        }
         if (blockRules.any { it.processName.equals(proc, ignoreCase = true) }) {
             manualError = "\"$proc\" is already in your block list"; return
         }
@@ -632,7 +637,11 @@ private fun AlwaysBlockTab(onNavigateToBlockDefense: () -> Unit) {
                         )
                     }
                     Text(
-                        strings.blockerManualEntryHint,
+                        if (isLinux) {
+                            "Enter a process name directly — useful for apps not shown in the picker."
+                        } else {
+                            strings.blockerManualEntryHint
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = OnSurface2
                     )
@@ -687,7 +696,11 @@ private fun AlwaysBlockTab(onNavigateToBlockDefense: () -> Unit) {
                     EmptyStateCard(
                         icon        = Icons.Default.Block,
                         title       = strings.blockerNoAppsBlockedTitle,
-                        message     = strings.blockerNoAppsBlockedBody,
+                        message     = if (isLinux) {
+                            "Pick from the list above or type a process name to add your first block rule."
+                        } else {
+                            strings.blockerNoAppsBlockedBody
+                        },
                         actionLabel = strings.blockerPickFromList,
                         onAction    = { showPicker = true },
                         modifier    = Modifier.padding(top = 8.dp)
@@ -956,7 +969,11 @@ private fun EmptyBlockState() {
         }
         Text(strings.blockerNoAppsBlockedTitle, style = MaterialTheme.typography.titleMedium, color = OnSurface)
         Text(
-            strings.blockerNoAppsBlockedBody,
+            if (isLinux) {
+                "Pick from the list above or type a process name to add your first block rule."
+            } else {
+                strings.blockerNoAppsBlockedBody
+            },
             style = MaterialTheme.typography.bodySmall,
             color = OnSurface2,
             textAlign = TextAlign.Center
@@ -1601,7 +1618,13 @@ private fun AllowancePickerDialog(
                                     OutlinedTextField(
                                         value = manualExe,
                                         onValueChange = { manualExe = it },
-                                        placeholder = { Text(strings.blockerTypeName, color = OnSurface2, fontSize = 12.sp) },
+                                        placeholder = {
+                                            Text(
+                                                if (isLinux) "Type process name…" else strings.blockerTypeName,
+                                                color = OnSurface2,
+                                                fontSize = 12.sp
+                                            )
+                                        },
                                         modifier = Modifier.weight(1f).height(46.dp),
                                         singleLine = true,
                                         textStyle = MaterialTheme.typography.bodySmall,

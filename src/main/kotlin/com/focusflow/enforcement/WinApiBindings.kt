@@ -165,6 +165,9 @@ fun focusWindowByPid(pid: Long): Boolean {
  * On other platforms: uses ProcessHandle (cross-platform JVM 9+), skipping own PID.
  */
 fun killProcessByName(processName: String): Boolean {
+    if (isLinux && LinuxProcessSafety.isProtectedProcessName(processName)) {
+        return false
+    }
     if (isWindows) {
         // Fire-and-forget: don't block the enforcement coroutine waiting for taskkill
         // to exit. The kill signal is sent immediately; the process terminates asynchronously.
@@ -203,6 +206,9 @@ fun killProcessByName(processName: String): Boolean {
  */
 fun killProcessByPid(pid: Long): Boolean {
     if (pid <= 0L) return false
+    if (isLinux && LinuxProcessSafety.isProtectedProcess(pid)) {
+        return false
+    }
     if (isWindows) {
         // Fire-and-forget — same as killProcessByName; no waitFor() so the
         // enforcement coroutine is not blocked while taskkill exits.

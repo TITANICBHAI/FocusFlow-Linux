@@ -3,6 +3,7 @@ package com.focusflow.enforcement
 import com.focusflow.data.Database
 import com.focusflow.services.SoundAversion
 import com.focusflow.services.SystemTrayManager
+import com.focusflow.services.UninstallProtectionService
 import kotlinx.coroutines.*
 import java.awt.TrayIcon
 import java.util.concurrent.ConcurrentHashMap
@@ -53,6 +54,11 @@ object NuclearMode {
         "wmic.exe", "winrm.exe",
         // Installers (could download bypass tools)
         "winget.exe", "msiexec.exe"
+    )
+
+    /** Installer processes need the same authorization as the app-owned wizard. */
+    private val directInstallerProcesses = setOf(
+        "msiexec.exe", "unins000.exe", "uninstall.exe", "setup.exe"
     )
 
     /** Linux processes that could be used to escape focus enforcement. */
@@ -169,7 +175,7 @@ object NuclearMode {
                         .lowercase()
                         .takeIf { it.isNotBlank() }
                 }
-                .filter { it in escapeProcesses }
+                .filter { it in escapeProcesses && shouldBlockInstallerProcess(it) }
                 .toSet()
         } catch (_: Exception) {
             emptySet()
@@ -183,7 +189,11 @@ object NuclearMode {
                 .toList()
                 .mapNotNull { ph ->
                     val cmd = ph.info().command().orElse(null) ?: return@mapNotNull null
-                    java.io.File(cmd).name.lowercase().takeIf { it.isNotBlank() }
+                    val exeName = java.io.File(cmd).name.lowercase()
+                    exeName.takeIf {
+                        it.isNotBlank() &&
+                            !LinuxProcessSafety.isProtectedProcess(ph.pid(), it)
+                    }
                 }
                 .filter { it in escapeProcesses }
                 .toSet()
@@ -207,11 +217,26 @@ object NuclearMode {
                     val matchesKnownPath = knownEscapePathSuffixes.any { suffix ->
                         normalised.endsWith(suffix)
                     }
-                    if (matchesKnownPath) java.io.File(rawPath).name.lowercase() else null
+                    if (
+                        matchesKnownPath &&
+                        !LinuxProcessSafety.isProtectedProcess(ph.pid(), java.io.File(rawPath).name)
+                    ) {
+                        java.io.File(rawPath).name.lowercase()
+                    } else {
+                        null
+                    }
                 }
-                .filter { it.isNotBlank() }
+                .filter { it.isNotBlank() && shouldBlockInstallerProcess(it) }
                 .toSet()
         } catch (_: Exception) { emptySet() }
+    }
+
+    private fun shouldBlockInstallerProcess(processName: String): Boolean {
+        if (InstallVariant.isMsix && processName in directInstallerProcesses) return false
+        if (InstallVariant.isWindowsDirectInstall && processName in directInstallerProcesses) {
+            return !UninstallProtectionService.authorizeUninstallAttempt()
+        }
+        return true
     }
 
     // ── Layer 2: Kill (batch) + log ──────────────────────────────────────────
@@ -247,7 +272,10 @@ object NuclearMode {
                     .forEach { ph ->
                         val cmd = ph.info().command().orElse(null) ?: return@forEach
                         val exeName = java.io.File(cmd).name.lowercase()
-                        if (exeName in found) {
+                        if (
+                            exeName in found &&
+                            !LinuxProcessSafety.isProtectedProcess(ph.pid(), exeName)
+                        ) {
                             try { ph.destroyForcibly() } catch (_: Exception) {}
                         }
                     }
@@ -276,12 +304,14 @@ object NuclearMode {
     private fun applyFirewallLock() {
         if (!isRunningAsAdmin()) return
         escapeProcesses
+            .filter { InstallVariant.isWindowsDirectInstall || it !in directInstallerProcesses }
             .filter { it.endsWith(".exe") }
             .forEach { exe -> NetworkBlocker.addRule(exe) }
     }
 
     private fun removeFirewallLock() {
         escapeProcesses
+            .filter { InstallVariant.isWindowsDirectInstall || it !in directInstallerProcesses }
             .filter { it.endsWith(".exe") }
             .forEach { exe -> NetworkBlocker.removeRule(exe) }
     }

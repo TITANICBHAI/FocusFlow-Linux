@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.focusflow.ui.theme.*
+import com.focusflow.enforcement.isLinux
 
 @Composable
 fun PostPinRecommendationsDialog(
@@ -90,13 +91,23 @@ fun PostPinRecommendationsDialog(
                     actionLabel = "Open Network Shield",
                     onAction = onOpenNetworkShield
                 )
-                RecommendationCard(
-                    icon = Icons.Default.Language,
-                    title = "For Windows: uninstall protection",
-                    body = "Direct EXE/MSI builds add a FocusFlow gate to normal uninstall paths. Windows still controls Store/MSIX removal.",
-                    actionLabel = "View EXE/MSI releases",
-                    onAction = onOpenReleases
-                )
+                if (isLinux) {
+                    RecommendationCard(
+                        icon = Icons.Default.Language,
+                        title = "Linux package safety",
+                        body = "FocusFlow guards intentional quit and uninstall handoffs while active protections are running. Your package manager still owns system removal.",
+                        actionLabel = "View Linux releases",
+                        onAction = onOpenReleases
+                    )
+                } else {
+                    RecommendationCard(
+                        icon = Icons.Default.Language,
+                        title = "For Windows: uninstall protection",
+                        body = "Direct EXE/MSI builds add a FocusFlow gate to normal uninstall paths. Windows still controls Store/MSIX removal.",
+                        actionLabel = "View EXE/MSI releases",
+                        onAction = onOpenReleases
+                    )
+                }
                 TextButton(
                     onClick = onDismiss,
                     modifier = Modifier.align(Alignment.End)

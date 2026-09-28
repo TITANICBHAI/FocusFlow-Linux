@@ -238,6 +238,7 @@ while (${D}true) {
             try {
                 ProcessBuilder("systemctl", "--user", "stop", "focusflow-watchdog.timer").start().waitFor()
                 ProcessBuilder("systemctl", "--user", "disable", "focusflow-watchdog.timer").start().waitFor()
+                ProcessBuilder("systemctl", "--user", "daemon-reload").start().waitFor()
                 val home = System.getProperty("user.home")
                 File("$home/.config/systemd/user/focusflow-watchdog.service").delete()
                 File("$home/.config/systemd/user/focusflow-watchdog.timer").delete()

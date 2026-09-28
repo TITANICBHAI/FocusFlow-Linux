@@ -69,8 +69,6 @@ object SystemTrayManager {
 
             val ksItem = MenuItem("Emergency Break (5m 00s/day left)")
             ksItem.addActionListener { callbacks.onKillSwitch() }
-            killSwitchItem = ksItem
-
             popup.add(openItem)
             popup.add(toggleItem)
             popup.add(ksItem)
@@ -84,9 +82,12 @@ object SystemTrayManager {
             icon.isImageAutoSize = false
             icon.addActionListener { callbacks.onRestore() }
 
-            trayIcon = icon
             try {
                 tray.add(icon)
+                // Publish state only after SystemTray accepted the icon. If add()
+                // fails, close-to-tray must not hide the only recoverable window.
+                trayIcon = icon
+                killSwitchItem = ksItem
             } catch (e: AWTException) {
                 System.err.println("[FocusFlow] Tray install failed: ${e.message}")
             }
@@ -94,12 +95,18 @@ object SystemTrayManager {
     }
 
     fun remove() {
-        trayIcon?.let { icon ->
+        val icon = trayIcon
+        trayIcon = null
+        killSwitchItem = null
+        icon?.let {
             EventQueue.invokeLater {
-                SystemTray.getSystemTray().remove(icon)
+                try {
+                    SystemTray.getSystemTray().remove(it)
+                } catch (_: Throwable) {
+                    // The tray can disappear during desktop-session shutdown.
+                }
             }
         }
-        trayIcon = null
     }
 
     fun showNotification(

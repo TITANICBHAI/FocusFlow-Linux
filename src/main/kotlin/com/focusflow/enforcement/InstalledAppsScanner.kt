@@ -292,7 +292,8 @@ object InstalledAppsScanner {
         "bwrap", "xdg-dbus-proxy",
         // FocusFlow itself
         "focusflow", "java", "kotlin"
-    ).map { it.lowercase(Locale.ROOT) }.toSet()
+    ).map { it.lowercase(Locale.ROOT) }.toSet() +
+        LinuxProcessSafety.protectedProcessNames
 
     private val systemIgnore: Set<String> get() = when {
         isWindows -> windowsSystemIgnore
@@ -524,6 +525,7 @@ object InstalledAppsScanner {
         displayName: String? = null
     ): AppDescriptor? {
         val normalized = ProcessNameNormalizer.normalizeManual(processName) ?: return null
+        if (LinuxProcessSafety.isProtectedProcessName(normalized)) return null
         return AppDescriptor(
             processName = normalized,
             displayName = displayName?.trim().takeIf { !it.isNullOrBlank() }

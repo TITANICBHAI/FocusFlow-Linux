@@ -16,8 +16,16 @@ import com.focusflow.services.*
 import com.focusflow.services.FocusLauncherService
 import com.focusflow.IS_LINUX
 import com.focusflow.ui.launcher.LauncherWindowHost
+import java.util.concurrent.atomic.AtomicBoolean
 
-fun main() = application {
+fun main(args: Array<String>) = application {
+    // Package-manager uninstall entries can hand off to this guarded path.
+    if (UninstallWizardFlag.isRequested(args)) {
+        UninstallWizard.run()
+        exitApplication()
+        return@application
+    }
+
     // ── Crash reporter — MUST be first, before any other service ──────────────
     // Installs handlers for:
     //   • All Java/Kotlin threads (Thread.setDefaultUncaughtExceptionHandler)
@@ -25,6 +33,11 @@ fun main() = application {
     //   • Kotlin coroutines (fall-through to thread handler via SupervisorJob)
     // Writes a detailed report to Desktop/~/.focusflow/tmpdir with a Swing dialog.
     CrashReporter.install()
+
+    // jpackage creates the initial Windows uninstall entry. Replace only
+    // FocusFlow's direct-install command with the guarded --uninstall handoff;
+    // MSIX/Store and Linux package-manager entries remain OS-owned.
+    WindowsUninstallRegistration.ensureRegistered()
 
     // ── Startup registry janitor ───────────────────────────────────────────────
     // Unconditionally remove any leftover registry lockdown keys from a previous
@@ -159,8 +172,19 @@ fun main() = application {
     // thread so the AWT Event Dispatch Thread never blocks. A hung service (e.g.
     // ProcessMonitor waiting on a thread join) would otherwise freeze the UI and
     // trigger a Windows "Not Responding" dialog.
-    val doShutdown: () -> Unit = {
+    val shutdownStarted = AtomicBoolean(false)
+    val doShutdown: () -> Unit = shutdown@{
+        // A tray double-click or a close event can otherwise start two teardown
+        // threads and race service cleanup.
+        if (!shutdownStarted.compareAndSet(false, true)) return@shutdown
         Thread({
+            if (!UninstallProtectionService.authorizeQuit()) {
+                shutdownStarted.set(false)
+                return@Thread
+            }
+            // An intentional quit must not be immediately relaunched by the
+            // crash watchdog. Crash/kill paths intentionally leave it installed.
+            WatchdogInstaller.uninstall()
             FocusLauncherService.exit()
             KillSwitchService.deactivate()
             FocusSessionService.end(completed = false)

@@ -303,45 +303,7 @@ object ProcessMonitor {
         "eoaexperiences.exe"          // Ease of Access orchestration UI experiences
     )
 
-    private val linuxLauncherSafeProcesses = setOf(
-        // ── FocusFlow itself ──────────────────────────────────────────────────
-        "java", "focusflow",
-
-        // ── Core Linux system processes — killing = broken session or reboot ──
-        "xorg", "xwayland",           // Display server — kill = black screen
-        "wayland", "gnome-shell",     // Wayland compositor and GNOME compositor
-        "kwin_x11", "kwin_wayland",   // KDE compositor
-        "xfwm4", "mutter", "muffin",  // XFCE / Cinnamon window managers
-        "compiz", "openbox",          // Other window managers
-        "systemd", "systemd-logind",  // Systemd init + session manager
-        "systemd-user-session",       // Systemd user session manager
-        "dbus-daemon", "dbus-launch", // D-Bus — inter-process messaging backbone
-        "gdm", "gdm-session-worker",   // GNOME Display Manager
-        "sddm", "sddm-greeter",        // Simple Desktop Display Manager
-        "lightdm", "lightdm-gtk-greeter", // LightDM
-        "polkitd", "polkit-gnome",    // Polkit authentication agent
-        "at-spi-bus-launcher",           // Accessibility bridge
-        "at-spi2-registry",              // Accessibility registry
-        "gvfs", "gvfsd",                // GNOME virtual filesystem — file dialog breaks without this
-        "udisks", "udisksd",             // Disk management
-        "upower",                        // Power management
-        "networkmanager",                // Network connectivity
-        "wpa_supplicant",                // Wi-Fi daemon
-
-        // ── Input stack ───────────────────────────────────────────────────────
-        "libinput-daemon",               // Input event handler
-        "input", "inputlock",            // Input handlers
-        "sshd",                          // Essential for session
-
-        // ── Audio ─────────────────────────────────────────────────────────────
-        "pulseaudio", "pipewire", "wireplumber",
-        "alsa", "alsa-sink", "alsa-source",
-        "jackd",
-
-        // ── Accessibility ─────────────────────────────────────────────────────
-        "orca", "speech-dispatcher",
-        "onboard", "xvkbd"
-    )
+    private val linuxLauncherSafeProcesses = LinuxProcessSafety.launcherSafeProcessNames
 
     /**
      * System processes that are always safe — combined Windows + Linux sets, dispatched by OS.
@@ -567,7 +529,11 @@ object ProcessMonitor {
                         ?.substringAfterLast('\\')
                         ?.substringAfterLast('/')
                         ?.lowercase() ?: return@forEach
-                    if (exeName !in launcherSafeProcesses && exeName !in currentAllowed) {
+                    if (
+                        !LinuxProcessSafety.isProtectedProcess(ph.pid(), exeName) &&
+                        exeName !in launcherSafeProcesses &&
+                        exeName !in currentAllowed
+                    ) {
                         if (tryAcquireCooldown("sweep:$exeName", now)) {
                             // Two-layer kill for maximum reliability:
                             //   1. destroyForcibly() — instant JVM-level SIGKILL, no subprocess overhead
@@ -638,7 +604,11 @@ object ProcessMonitor {
                 processName
             }
             val launcherResolvedLower = launcherResolved.lowercase()
-            if (launcherResolvedLower !in launcherSafeProcesses && launcherResolvedLower !in launcherAllowed) {
+            if (
+                !LinuxProcessSafety.isProtectedProcess(pid, launcherResolved) &&
+                launcherResolvedLower !in launcherSafeProcesses &&
+                launcherResolvedLower !in launcherAllowed
+            ) {
                 if (tryAcquireCooldown("launcher:$launcherResolvedLower", now)) {
                     // Two-layer kill (same logic as launcherSweep):
                     //   1. destroyForcibly() via PID — instant, zero subprocess overhead
@@ -765,7 +735,11 @@ object ProcessMonitor {
                         .substringAfterLast('/')
                         .lowercase()
                 }
-                .filter { exe -> exe !in launcherSafeProcesses && exe !in allowed }
+                .filter {
+                    exe -> exe !in launcherSafeProcesses &&
+                        !LinuxProcessSafety.isProtectedProcessName(exe) &&
+                        exe !in allowed
+                }
                 .findFirst()
                 .orElse(null)
         } catch (_: Exception) { null }
@@ -776,6 +750,10 @@ object ProcessMonitor {
      * Kills by PID when available (targeted), falls back to name-based kill.
      */
     private suspend fun enforceBlock(processName: String, pid: Long = 0L) {
+        // Final defense: rules can be stale, manually entered, or created by a
+        // different feature after picker validation. Never terminate FocusFlow,
+        // its Linux process tree, or protected session infrastructure.
+        if (LinuxProcessSafety.isProtectedProcess(pid, processName)) return
         if (pid > 0L) killProcessByPid(pid) else killProcessByName(processName)
         SoundAversion.playBlockAlert()
 

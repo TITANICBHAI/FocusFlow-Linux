@@ -2338,8 +2338,21 @@ private fun DateTimePicker(
         SpinnerField(
             value    = "%02d".format(date.monthValue),
             label    = strings.blockerMonth,
-            onDec    = { onDateChange(maxOf(date.minusMonths(1).withDayOfMonth(1).also { if (it < minDate) return@SpinnerField }, minDate)) },
-            onInc    = { onDateChange(date.plusMonths(1).withDayOfMonth(minOf(date.dayOfMonth, date.plusMonths(1).lengthOfMonth()))) },
+            onDec    = {
+                val previousMonth = date.minusMonths(1)
+                val candidate = previousMonth.withDayOfMonth(
+                    minOf(date.dayOfMonth, previousMonth.lengthOfMonth())
+                )
+                onDateChange(if (candidate < minDate) minDate else candidate)
+            },
+            onInc    = {
+                val nextMonth = date.plusMonths(1)
+                onDateChange(
+                    nextMonth.withDayOfMonth(
+                        minOf(date.dayOfMonth, nextMonth.lengthOfMonth())
+                    )
+                )
+            },
             accentColor = accentColor,
             modifier = Modifier.weight(1.2f)
         )
@@ -2389,17 +2402,32 @@ private fun SpinnerField(
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(1.dp)
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        IconButton(onClick = onInc, modifier = Modifier.size(20.dp)) {
-            Icon(Icons.Default.KeyboardArrowUp, null, tint = accentColor, modifier = Modifier.size(16.dp))
+        IconButton(
+            onClick = onInc,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(32.dp)
+        ) {
+            Icon(
+                Icons.Default.KeyboardArrowUp,
+                contentDescription = "Increase $label",
+                tint = accentColor,
+                modifier = Modifier.size(20.dp)
+            )
         }
         Text(
             value,
             color = OnSurface,
             fontWeight = FontWeight.SemiBold,
             style = MaterialTheme.typography.bodySmall,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .clickable(onClick = onInc)
+                .padding(vertical = 3.dp)
         )
         Text(
             label,
@@ -2408,8 +2436,18 @@ private fun SpinnerField(
             fontSize = 9.sp,
             textAlign = TextAlign.Center
         )
-        IconButton(onClick = onDec, modifier = Modifier.size(20.dp)) {
-            Icon(Icons.Default.KeyboardArrowDown, null, tint = accentColor, modifier = Modifier.size(16.dp))
+        IconButton(
+            onClick = onDec,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(32.dp)
+        ) {
+            Icon(
+                Icons.Default.KeyboardArrowDown,
+                contentDescription = "Decrease $label",
+                tint = accentColor,
+                modifier = Modifier.size(20.dp)
+            )
         }
     }
 }

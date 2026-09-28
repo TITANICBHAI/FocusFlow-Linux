@@ -32,11 +32,11 @@ object WindowsUninstallRegistration {
 
         for (hive in listOf(WinReg.HKEY_CURRENT_USER, WinReg.HKEY_LOCAL_MACHINE)) {
             val subkeys = runCatching { Advapi32Util.registryGetKeys(hive, ROOT) }
-                .getOrElse { continue }
+                .getOrNull() ?: continue
             for (subkey in subkeys) {
                 val path = "$ROOT\\$subkey"
                 val values = runCatching { Advapi32Util.registryGetValues(hive, path) }
-                    .getOrElse { continue }
+                    .getOrNull() ?: continue
                 val displayName = (values[DISPLAY_NAME] as? String)?.trim() ?: continue
                 if (!displayName.equals("FocusFlow", ignoreCase = true) &&
                     !displayName.startsWith("FocusFlow ", ignoreCase = true)
@@ -65,11 +65,11 @@ object WindowsUninstallRegistration {
         if (!InstallVariant.isWindowsDirectInstall) return null
         for (hive in listOf(WinReg.HKEY_CURRENT_USER, WinReg.HKEY_LOCAL_MACHINE)) {
             val subkeys = runCatching { Advapi32Util.registryGetKeys(hive, ROOT) }
-                .getOrElse { continue }
+                .getOrNull() ?: continue
             for (subkey in subkeys) {
                 val path = "$ROOT\\$subkey"
                 val values = runCatching { Advapi32Util.registryGetValues(hive, path) }
-                    .getOrElse { continue }
+                    .getOrNull() ?: continue
                 if ((values[MARKER] as? String) != "1") continue
                 val command = (values[ORIGINAL] as? String)?.trim()
                     ?.takeIf { it.isNotBlank() }

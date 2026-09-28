@@ -652,7 +652,12 @@ private fun AlwaysBlockTab(onNavigateToBlockDefense: () -> Unit) {
                         OutlinedTextField(
                             value = manualEntry,
                             onValueChange = { manualEntry = it; manualError = null },
-                            placeholder = { Text("e.g. discord.exe", color = OnSurface2) },
+                            placeholder = {
+                                Text(
+                                    if (isLinux) "e.g. discord" else "e.g. discord.exe",
+                                    color = OnSurface2
+                                )
+                            },
                             modifier = Modifier.weight(1f),
                             singleLine = true,
                             isError = manualError != null,

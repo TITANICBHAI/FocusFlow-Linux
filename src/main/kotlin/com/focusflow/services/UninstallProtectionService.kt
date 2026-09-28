@@ -21,6 +21,7 @@ object UninstallProtectionService {
     private const val AUTHORIZATION_WINDOW_MS = 30_000L
     private val authorizedUninstallUntilMs = AtomicLong(0L)
     private val uninstallPromptLock = Any()
+    private enum class Action { QUIT, UNINSTALL }
 
     private sealed interface Requirement {
         data class WaitForStandalone(val remainingMs: Long) : Requirement
@@ -45,7 +46,7 @@ object UninstallProtectionService {
 
     fun authorizeQuit(): Boolean {
         if (!isLinux && !InstallVariant.isWindowsDirectInstall) return true
-        return authorizeRequirements(activeRequirements())
+        return authorizeRequirements(activeRequirements(Action.QUIT))
     }
 
     fun authorizeUninstallWizard(): Boolean {
@@ -57,7 +58,7 @@ object UninstallProtectionService {
             )
             return false
         }
-        return authorizeRequirements(activeRequirements())
+        return authorizeRequirements(activeRequirements(Action.UNINSTALL))
     }
 
     /**
@@ -72,7 +73,7 @@ object UninstallProtectionService {
         synchronized(uninstallPromptLock) {
             val refreshed = System.currentTimeMillis()
             if (authorizedUninstallUntilMs.get() > refreshed) return true
-            val allowed = authorizeRequirements(activeRequirements())
+            val allowed = authorizeRequirements(activeRequirements(Action.UNINSTALL))
             if (allowed) {
                 authorizedUninstallUntilMs.set(
                     System.currentTimeMillis() + AUTHORIZATION_WINDOW_MS
@@ -82,7 +83,7 @@ object UninstallProtectionService {
         }
     }
 
-    private fun activeRequirements(): List<Requirement> {
+    private fun activeRequirements(action: Action): List<Requirement> {
         val result = mutableListOf<Requirement>()
         runCatching {
             val until = Database.getSetting("standalone_block_until")?.toLongOrNull() ?: 0L
@@ -115,15 +116,22 @@ object UninstallProtectionService {
                 FocusSessionService.state.value.isActive ||
                 FocusLauncherService.isActive.value
             if (focusActive) {
-                if (SessionPin.isSet()) {
+                if (action == Action.QUIT && SessionPin.isSet()) {
                     result += Requirement.Pin(
                         "Focus session",
-                        "Enter the Session PIN to quit or uninstall during the active focus session:",
+                        "Enter the Session PIN to quit during the active focus session:",
                         SessionPin::verify
                     )
-                } else {
+                } else if (action == Action.UNINSTALL && GlobalPin.isSet()) {
+                    result += Requirement.Pin(
+                        "Global PIN",
+                        "Enter the Global PIN to uninstall while a focus session is active:",
+                        GlobalPin::verify
+                    )
+                } else if (action == Action.UNINSTALL) {
                     result += Requirement.Blocked(
-                        "FocusFlow cannot quit or uninstall during an active focus session without a Session PIN."
+                        "FocusFlow cannot be uninstalled during an active focus session. " +
+                            "Let the session end, or set a Global PIN before starting the session."
                     )
                 }
             }

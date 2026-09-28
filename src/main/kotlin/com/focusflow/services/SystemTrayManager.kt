@@ -29,10 +29,21 @@ object SystemTrayManager {
         val onKillSwitch: () -> Unit
     )
 
-    val isSupported: Boolean get() = SystemTray.isSupported()
+    val isSupported: Boolean
+        get() = runCatching { SystemTray.isSupported() }.getOrDefault(false)
+
+    /**
+     * True only after the desktop accepted FocusFlow's tray icon.
+     *
+     * SystemTray.isSupported() is only a capability probe. On Linux, and
+     * especially around Wayland/XWayland transitions, the later tray.add()
+     * call can still fail.
+     */
+    val isInstalled: Boolean
+        get() = trayIcon != null
 
     fun install(callbacks: TrayCallbacks) {
-        if (!SystemTray.isSupported()) {
+        if (!isSupported) {
             if (isLinux) {
                 // Tray may not work on Wayland — java.awt.SystemTray relies on
                 // XEmbed which isn't available in pure Wayland sessions.

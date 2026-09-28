@@ -19,3 +19,4 @@
 - [Linux app discovery and picker scope](linux-app-discovery-picker-scope.md) — Unify app selection on a refreshable Linux-aware catalog while preserving Windows and avoiding UI-thread I/O.
 - [Stored identity migration boundary](stored-identity-migration-boundary.md) — Keep legacy process columns as enforcement compatibility and add identity metadata additively.
 - [Migration backup and atomicity](migration-backup-atomicity.md) — Gate schema changes on a verified WAL-aware snapshot and never replace the live DB after migration failure.
+- [Linux preset stale references](linux-preset-stale-references.md) — Preserve normalized missing preset entries so onboarding choices can resolve after a later catalog refresh.

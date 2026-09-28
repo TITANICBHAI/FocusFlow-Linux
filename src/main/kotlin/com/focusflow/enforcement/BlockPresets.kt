@@ -134,6 +134,9 @@ fun resolvePresetProcessNames(
                 app.processName.lowercase()
             } else {
                 missing += reference
+                // Retain a normalized stale reference so the user's preset
+                // choice remains visible and can resolve after a later catalog
+                // refresh or installation.
                 ProcessNameNormalizer.normalizeStored(reference, platform)
             }
         } else {

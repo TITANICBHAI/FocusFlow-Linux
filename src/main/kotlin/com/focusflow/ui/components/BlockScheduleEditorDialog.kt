@@ -22,6 +22,7 @@ import com.focusflow.data.models.hasValidTimeRange
 import com.focusflow.enforcement.AppDescriptor
 import com.focusflow.enforcement.InstalledAppsScanner
 import com.focusflow.enforcement.ScannedApp
+import com.focusflow.enforcement.isLinux
 import com.focusflow.enforcement.isWindows
 import com.focusflow.i18n.LocalizationManager
 import com.focusflow.ui.theme.*

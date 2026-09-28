@@ -768,6 +768,23 @@ object Database {
         }
     }
 
+    /**
+     * Returns true only for a session that was persisted as started but has
+     * never received an end timestamp. Interrupted sessions that were already
+     * closed are historical records and must not keep uninstall protection
+     * active forever.
+     */
+    @Synchronized fun hasUnfinishedFocusSession(): Boolean {
+        if (!isReady) return false
+        return connection.prepareStatement(
+            "SELECT 1 FROM focus_sessions " +
+                "WHERE completed = 0 AND end_time IS NULL " +
+                "ORDER BY start_time DESC LIMIT 1"
+        ).use { ps ->
+            ps.executeQuery().use { it.next() }
+        }
+    }
+
     @Synchronized fun getSessionsInDateRange(start: LocalDate, end: LocalDate): List<FocusSession> {
         return connection.prepareStatement(
             "SELECT * FROM focus_sessions WHERE DATE(start_time) BETWEEN ? AND ? ORDER BY start_time DESC"

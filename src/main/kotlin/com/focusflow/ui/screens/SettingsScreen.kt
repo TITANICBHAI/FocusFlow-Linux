@@ -27,6 +27,7 @@ import com.focusflow.data.Database
 import com.focusflow.data.models.BlockRule
 import com.focusflow.data.models.BlockSchedule
 import com.focusflow.data.models.DailyAllowance
+import com.focusflow.ProcessNameNormalizer
 import com.focusflow.enforcement.*
 import com.focusflow.i18n.AppLanguage
 import com.focusflow.i18n.LocalizationManager
@@ -584,6 +585,7 @@ fun SettingsScreen() {
                             row.forEach { (name, proc) ->
                                 val resolvedProc = if (isLinux) {
                                     InstalledAppsScanner.resolveAppReference(proc, catalogState.apps)?.processName
+                                        ?: ProcessNameNormalizer.normalizeStored(proc)
                                         ?: proc
                                 } else {
                                     proc

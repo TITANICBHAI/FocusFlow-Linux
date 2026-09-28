@@ -30,6 +30,7 @@ import com.focusflow.enforcement.ProcessMonitor
 import com.focusflow.enforcement.VpnBlocker
 import com.focusflow.enforcement.isLinux
 import com.focusflow.enforcement.isWindows
+import com.focusflow.ProcessNameNormalizer
 import com.focusflow.services.GlobalPin
 import com.focusflow.services.HostsBlocker
 import com.focusflow.ui.components.PinGateDialog
@@ -501,8 +502,20 @@ fun VpnNetworkScreen() {
                             val pat = newPattern.trim().lowercase()
                             if (pat.isBlank()) return@Button
                             val targetProc = if (appSpecific && newTargetProcess.isNotBlank()) {
-                                newTargetProcess.trim()
+                                ProcessNameNormalizer.normalizeManual(newTargetProcess)
                             } else null
+                            if (appSpecific && newTargetProcess.isNotBlank() && targetProc == null) {
+                                scope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        if (isLinux) {
+                                            "Enter a valid Linux process name, such as firefox."
+                                        } else {
+                                            "Enter a valid process name, such as chrome.exe."
+                                        }
+                                    )
+                                }
+                                return@Button
+                            }
                             val targetDisp = if (appSpecific && newTargetDisplay.isNotBlank()) newTargetDisplay.trim()
                                              else targetProc
 

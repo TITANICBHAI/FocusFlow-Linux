@@ -87,7 +87,9 @@ fun main(args: Array<String>) = application {
     // Focus Launcher — restore taskbar and clear crash guard if we crashed while locked
     try { FocusLauncherService.loadFromDb() } catch (_: Throwable) {
         // Absolute fallback: if loadFromDb itself throws, at minimum restore the taskbar
-        try { FocusLauncherService.emergencyRestoreWindows() } catch (_: Throwable) {}
+        if (IS_WINDOWS) {
+            try { FocusLauncherService.emergencyRestoreWindows() } catch (_: Throwable) {}
+        }
     }
 
     // Daily allowances — per-app usage caps that reset at midnight
@@ -210,59 +212,57 @@ fun main(args: Array<String>) = application {
         }, "FocusFlow-Shutdown").also { it.isDaemon = true }.start()
     }
 
-    if (SystemTrayManager.isSupported) {
-        SystemTrayManager.install(
-            SystemTrayManager.TrayCallbacks(
-                onRestore = { windowVisible = true },
-                onQuit = doShutdown,
-                onToggleBlocking = {
-                    val newState = !ProcessMonitor.alwaysOnEnabled
-                    // Disabling enforcement requires the GlobalPin if one is set
-                    if (!newState && GlobalPin.isSet()) {
-                        SystemTrayManager.showNotification(
-                            "PIN Required",
-                            "Open FocusFlow to disable enforcement — a PIN is required."
-                        )
-                        return@TrayCallbacks
-                    }
-                    ProcessMonitor.alwaysOnEnabled = newState
-                    Database.setSetting("always_on_enforcement", newState.toString())
-                    val status = if (newState) "ON" else "OFF"
+    SystemTrayManager.install(
+        SystemTrayManager.TrayCallbacks(
+            onRestore = { windowVisible = true },
+            onQuit = doShutdown,
+            onToggleBlocking = {
+                val newState = !ProcessMonitor.alwaysOnEnabled
+                // Disabling enforcement requires the GlobalPin if one is set
+                if (!newState && GlobalPin.isSet()) {
                     SystemTrayManager.showNotification(
-                        "FocusFlow Blocking $status",
-                        "Always-on enforcement is now $status"
+                        "PIN Required",
+                        "Open FocusFlow to disable enforcement — a PIN is required."
                     )
-                },
-                onKillSwitch = {
-                    val activated = KillSwitchService.toggle()
-                    when {
-                        !activated -> SystemTrayManager.showNotification(
-                            "Emergency Break Exhausted",
-                            "You've used your 5-minute daily break budget. Resets at midnight."
+                    return@TrayCallbacks
+                }
+                ProcessMonitor.alwaysOnEnabled = newState
+                Database.setSetting("always_on_enforcement", newState.toString())
+                val status = if (newState) "ON" else "OFF"
+                SystemTrayManager.showNotification(
+                    "FocusFlow Blocking $status",
+                    "Always-on enforcement is now $status"
+                )
+            },
+            onKillSwitch = {
+                val activated = KillSwitchService.toggle()
+                when {
+                    !activated -> SystemTrayManager.showNotification(
+                        "Emergency Break Exhausted",
+                        "You've used your 5-minute daily break budget. Resets at midnight."
+                    )
+                    KillSwitchService.isActive.value -> {
+                        val secs = KillSwitchService.remainingSecondsToday.value
+                        val m = secs / 60
+                        val s = (secs % 60).toString().padStart(2, '0')
+                        SystemTrayManager.showNotification(
+                            "Emergency Break — Enforcement Paused",
+                            "${m}m ${s}s remaining in your daily budget."
                         )
-                        KillSwitchService.isActive.value -> {
-                            val secs = KillSwitchService.remainingSecondsToday.value
-                            val m = secs / 60
-                            val s = (secs % 60).toString().padStart(2, '0')
-                            SystemTrayManager.showNotification(
-                                "Emergency Break — Enforcement Paused",
-                                "${m}m ${s}s remaining in your daily budget."
-                            )
-                        }
-                        else -> {
-                            val secs = KillSwitchService.remainingSecondsToday.value
-                            val m = secs / 60
-                            val s = (secs % 60).toString().padStart(2, '0')
-                            SystemTrayManager.showNotification(
-                                "Enforcement Resumed",
-                                "${m}m ${s}s of emergency break budget remaining today."
-                            )
-                        }
+                    }
+                    else -> {
+                        val secs = KillSwitchService.remainingSecondsToday.value
+                        val m = secs / 60
+                        val s = (secs % 60).toString().padStart(2, '0')
+                        SystemTrayManager.showNotification(
+                            "Enforcement Resumed",
+                            "${m}m ${s}s of emergency break budget remaining today."
+                        )
                     }
                 }
-            )
+            }
         )
-    }
+    )
 
     // Probe the classloader before calling painterResource — on some JVM environments
     // (Linux sandbox, headless CI) the context classloader may not include the resources
@@ -280,7 +280,7 @@ fun main(args: Array<String>) = application {
         Window(
             onCloseRequest = {
                 if (isKioskMode) return@Window  // Cannot close window during kiosk mode
-                if (SystemTrayManager.isSupported) {
+                if (SystemTrayManager.isInstalled) {
                     windowVisible = false
                     SystemTrayManager.showNotification(
                         "FocusFlow is still running",

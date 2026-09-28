@@ -22,19 +22,31 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.focusflow.enforcement.isWindows
 import com.focusflow.enforcement.isLinux
+import com.focusflow.data.Database
 import com.focusflow.ui.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private const val LINUX_CAPABILITY_BANNER_DISMISSED = "linux_capability_banner_dismissed"
 
 @Composable
 fun OsBanner() {
-    if (isWindows) return
+    if (!isLinux) return
 
-    var visible by remember { mutableStateOf(true) }
-    val osLabel = when {
-        isLinux -> "Linux"
-        else -> "this platform"
+    val scope = rememberCoroutineScope()
+    var visible by remember { mutableStateOf<Boolean?>(null) }
+
+    LaunchedEffect(Unit) {
+        visible = withContext(Dispatchers.IO) {
+            Database.getSetting(LINUX_CAPABILITY_BANNER_DISMISSED) != "true"
+        }
     }
 
-    AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
+    val isVisible = visible == true
+    if (!isVisible) return
+
+    AnimatedVisibility(visible = isVisible, enter = fadeIn(), exit = fadeOut()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -48,21 +60,26 @@ fun OsBanner() {
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "Linux — partial enforcement available",
+                    "Linux enforcement",
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 13.sp,
                     color = Warning
                 )
                 Text(
-                    if (isLinux)
-                        "Hosts blocking, iptables firewall rules, and process monitoring are available. Full keyboard hook and Win32 enforcement are Windows-only."
-                    else
-                        "FocusFlow's app blocking, network rules and process monitoring only work on Windows. The UI and data features are fully functional.",
+                    "Process blocking, hosts rules, and firewall protection are available. Some desktop controls depend on your session.",
                     fontSize = 12.sp,
                     color = OnSurface2
                 )
             }
-            IconButton(onClick = { visible = false }, modifier = Modifier.size(28.dp)) {
+            IconButton(
+                onClick = {
+                    visible = false
+                    scope.launch(Dispatchers.IO) {
+                        Database.setSetting(LINUX_CAPABILITY_BANNER_DISMISSED, "true")
+                    }
+                },
+                modifier = Modifier.size(28.dp)
+            ) {
                 Icon(Icons.Default.Close, "Dismiss", tint = OnSurface2, modifier = Modifier.size(16.dp))
             }
         }

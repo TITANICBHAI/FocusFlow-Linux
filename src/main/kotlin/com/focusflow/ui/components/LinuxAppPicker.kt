@@ -347,9 +347,13 @@ fun LinuxAppPicker(
                 onAdd = {
                     val normalizedManual = ProcessNameNormalizer.normalizeManual(manualProcess)
                     val protectedReason = LinuxProcessSafety.protectedReason(normalizedManual)
+                    val runtimeReason =
+                        LinuxProcessSafety.manualTargetRestrictionReason(normalizedManual)
                     val manual = InstalledAppsScanner.createManualProcessEntry(manualProcess)
                     if (protectedReason != null) {
                         manualError = protectedReason
+                    } else if (runtimeReason != null) {
+                        manualError = runtimeReason
                     } else if (manual == null) {
                         manualError = "Enter a process name using letters, numbers, '.', '_', '+' or '-'."
                     } else {

@@ -3,71 +3,104 @@ package com.focusflow.enforcement
 import java.io.File
 import java.util.Locale
 
+enum class LinuxProcessProtectionCategory(val rationale: String) {
+    FOCUSFLOW_RUNTIME("This exact PID is the running FocusFlow process."),
+    SYSTEM_CRITICAL(
+        "This is a core Linux system, login, authorization, or connectivity service."
+    ),
+    DESKTOP_SESSION(
+        "This process supports the active display, desktop, input, or user-session environment."
+    )
+}
+
+data class LinuxProcessProtectionClassification(
+    val category: LinuxProcessProtectionCategory,
+    val reason: String = category.rationale
+)
+
 /**
  * Linux process-safety contract shared by discovery, pickers, and enforcement.
  *
- * The launcher safe set is intentionally broader than Nuclear Mode's escape
- * blocklist. Launcher mode kills everything outside the selected app set, while
- * Nuclear Mode only targets explicitly known escape tools.
+ * Name-based protection is limited to classified system and desktop-session
+ * infrastructure. FocusFlow itself is protected by its exact PID, not by a
+ * generic runtime name or by protecting its descendants.
  */
 object LinuxProcessSafety {
 
+    private val focusFlowPid = ProcessHandle.current().pid()
+
     /**
-     * Processes that must survive Focus Launcher inverse enforcement.
-     *
-     * The names are a conservative fallback. [isProtectedProcess] also protects
-     * the current FocusFlow process tree by PID, which covers packaged launchers
-     * and helper processes whose executable name is not stable.
+     * Named global protections. Every entry is assigned to a category with an
+     * explicit shared rationale. FocusFlow is intentionally absent: its own PID
+     * is protected separately, and descendants are not implicitly protected.
      */
-    val launcherSafeProcessNames: Set<String> = setOf(
-        // FocusFlow itself and the JVM fallback used by unpackaged launches.
-        "java", "focusflow",
+    private val protectedNamesByCategory: Map<LinuxProcessProtectionCategory, Set<String>> =
+        linkedMapOf(
+            LinuxProcessProtectionCategory.SYSTEM_CRITICAL to setOf(
+                // Core boot, login, authorization, and service management.
+                "systemd", "init", "systemd-logind", "systemd-user-session",
+                "gdm", "gdm-session-worker", "sddm", "sddm-greeter",
+                "lightdm", "lightdm-gtk-greeter", "lxdm",
+                "polkitd", "polkit-gnome", "pk-launch",
 
-        // Display server, compositor, and window manager.
-        "xorg", "xwayland", "wayland",
-        "gnome-shell", "kwin_x11", "kwin_wayland",
-        "xfwm4", "mutter", "muffin", "compiz", "openbox",
-        "plasmashell", "cinnamon", "mate-session", "mate-panel",
-        "xfce4-session", "lxqt-session", "gnome-session-binary",
+                // System/session IPC and essential device/network services.
+                "dbus-daemon", "dbus-broker",
+                "udisks", "udisksd", "upower",
+                "networkmanager", "wpa_supplicant", "sshd"
+            ),
+            LinuxProcessProtectionCategory.DESKTOP_SESSION to setOf(
+                // Display server, compositor, window manager, and desktop shell.
+                "xorg", "xwayland", "wayland",
+                "gnome-shell", "kwin_x11", "kwin_wayland",
+                "xfwm4", "mutter", "muffin", "compiz", "openbox",
+                "plasmashell", "cinnamon", "mate-session", "mate-panel",
+                "xfce4-session", "lxqt-session", "gnome-session-binary",
 
-        // Login, session, IPC, and authorization.
-        "systemd", "init", "systemd-logind", "systemd-user-session",
-        "dbus-daemon", "dbus-broker", "dbus-launch",
-        "gdm", "gdm-session-worker", "sddm", "sddm-greeter",
-        "lightdm", "lightdm-gtk-greeter", "lxdm",
-        "polkitd", "polkit-gnome", "pk-launch",
+                // User-session IPC, portals, filesystems, and accessibility bus.
+                "dbus-launch",
+                "at-spi-bus-launcher", "at-spi2-registry",
+                "gvfs", "gvfsd",
+                "xdg-desktop-portal", "xdg-document-portal", "xdg-permission-store",
+                "xdg-dbus-proxy",
 
-        // Desktop services, portals, storage, power, and networking.
-        "at-spi-bus-launcher", "at-spi2-registry",
-        "gvfs", "gvfsd",
-        "xdg-desktop-portal", "xdg-document-portal", "xdg-permission-store",
-        "xdg-dbus-proxy",
-        "udisks", "udisksd", "upower",
-        "networkmanager", "wpa_supplicant",
+                // Input, audio, accessibility, and KDE session services.
+                "libinput-daemon", "input", "inputlock",
+                "ibus-daemon", "fcitx", "fcitx5",
+                "pulseaudio", "pipewire", "wireplumber",
+                "alsa", "alsa-sink", "alsa-source", "jackd",
+                "orca", "speech-dispatcher", "onboard", "xvkbd",
+                "kded5", "kded6"
+            )
+        )
 
-        // Input methods and remote access.
-        "libinput-daemon", "input", "inputlock",
-        "ibus-daemon", "fcitx", "fcitx5",
-        "sshd",
+    /** Canonical name-to-category inventory used by safety and picker checks. */
+    val protectedProcessNameClassifications: Map<String, LinuxProcessProtectionCategory> =
+        protectedNamesByCategory.flatMap { (category, names) ->
+            names.map { it.lowercase(Locale.ROOT) to category }
+        }.toMap()
 
-        // Audio.
-        "pulseaudio", "pipewire", "wireplumber",
-        "alsa", "alsa-sink", "alsa-source", "jackd",
-
-        // Accessibility.
-        "orca", "speech-dispatcher", "onboard", "xvkbd",
-
-        // KDE desktop services commonly required by the active session.
-        "kded5", "kded6"
-    ).map { it.lowercase(Locale.ROOT) }.toSet()
+    /** Name-based protections used by Focus Launcher and other Linux safeguards. */
+    val launcherSafeProcessNames: Set<String> = protectedProcessNameClassifications.keys
 
     /**
-     * Processes that the picker must never offer as a new blocking target.
-     *
-     * This is kept separate from the launcher set so a future platform can
-     * preserve a session service without exposing it as a user-selectable app.
+     * Compatibility name for consumers that need the classified system/session
+     * inventory. It does not include generic runtimes or FocusFlow by name.
      */
     val protectedProcessNames: Set<String> = launcherSafeProcessNames
+
+    /**
+     * Runtime executables are not global protections, but a bare process-name
+     * target is too broad to represent one application safely. Keep this
+     * restriction separate so removing global authorization does not make a
+     * generic runtime selectable as an application.
+     */
+    private val ambiguousRuntimeProcessNames = setOf(
+        "java", "javaw", "python", "python2", "python3", "node", "nodejs",
+        "ruby", "perl", "php", "dotnet", "mono", "bash", "sh", "dash",
+        "zsh", "fish"
+    )
+
+    private val versionedPythonName = Regex("""python(?:2|3)(?:\.\d+)*""")
 
     fun normalizeProcessName(raw: String?): String? =
         raw?.trim()
@@ -76,50 +109,59 @@ object LinuxProcessSafety {
             ?.lowercase(Locale.ROOT)
             ?.takeIf { it.isNotBlank() }
 
+    fun isGenericRuntimeProcessName(processName: String?): Boolean {
+        val name = normalizeProcessName(processName) ?: return false
+        return name in ambiguousRuntimeProcessNames || versionedPythonName.matches(name)
+    }
+
+    /** Explain why a generic runtime cannot be used as a bare manual app target. */
+    fun manualTargetRestrictionReason(processName: String?): String? {
+        if (!isLinux || !isGenericRuntimeProcessName(processName)) return null
+        return "A bare runtime name can match unrelated applications. Select a specific app instead."
+    }
+
     fun isProtectedProcessName(processName: String?): Boolean =
-        isLinux && normalizeProcessName(processName) in protectedProcessNames
+        isLinux && normalizeProcessName(processName) in protectedProcessNameClassifications
+
+    fun protectionClassification(
+        pid: Long,
+        processName: String? = null
+    ): LinuxProcessProtectionClassification? {
+        if (!isLinux) return null
+        if (pid > 0L && pid == focusFlowPid) {
+            return LinuxProcessProtectionClassification(
+                LinuxProcessProtectionCategory.FOCUSFLOW_RUNTIME
+            )
+        }
+        val name = normalizeProcessName(processName) ?: return null
+        val category = protectedProcessNameClassifications[name] ?: return null
+        return LinuxProcessProtectionClassification(category)
+    }
 
     fun protectedReason(processName: String?): String? {
-        if (!isProtectedProcessName(processName)) return null
+        if (!isLinux) return null
         val name = normalizeProcessName(processName) ?: return null
-        return if (name == "java" || name == "focusflow") {
-            "FocusFlow and its runtime are protected from termination."
-        } else {
-            "This Linux desktop/session process is protected from termination."
-        }
+        val category = protectedProcessNameClassifications[name] ?: return null
+        return category.rationale
     }
 
     /**
-     * Returns true when a Linux PID is the current FocusFlow process, one of its
-     * descendants, or a named protected process.
-     *
-     * Walking parent handles is intentionally bounded: a malformed or changing
-     * process tree must never stall an enforcement tick.
+     * A FocusFlow process is protected only by its exact PID. Other processes
+     * are protected only when their own process name belongs to the classified
+     * global system/session inventory; ancestry is never consulted.
      */
     fun isProtectedProcess(pid: Long, processName: String? = null): Boolean {
-        if (!isLinux) return false
-        if (isProtectedProcessName(processName)) return true
-        if (pid <= 0L) return false
-
-        val ownPid = ProcessHandle.current().pid()
-        if (pid == ownPid) return true
-
-        var current = ProcessHandle.of(pid).orElse(null) ?: return false
-        repeat(64) {
-            val parent = current.parent().orElse(null) ?: return@repeat
-            if (parent.pid() == ownPid) return true
-            if (parent.pid() == pid) return@repeat
-            current = parent
-        }
-        return false
+        return protectionClassification(pid, processName) != null
     }
 
     /**
-     * Uses the actual executable basename when a PID is available. This catches
-     * wrappers and protects the current FocusFlow process tree even when the
-     * caller only has a PID.
+     * Uses the actual executable basename when a PID is available. The exact
+     * current FocusFlow PID remains protected even when its runtime name is
+     * generic or unknown.
      */
     fun isProtectedProcess(pid: Long): Boolean {
+        if (!isLinux || pid <= 0L) return false
+        if (pid == focusFlowPid) return true
         val command = ProcessHandle.of(pid)
             .flatMap { it.info().command() }
             .orElse(null)

@@ -62,21 +62,23 @@ batch begins:
 
 Prerequisite: none. Do this before broadening Linux identity behavior.
 
-- [ ] **PI-0.1 — Classify every global Linux protection**
+- [x] **PI-0.1 — Classify every global Linux protection**
   Maintain a reasoned inventory for FocusFlow-owned runtime, system-critical,
   and desktop-session protections. Every entry needs a category, reason, and
   regression coverage; do not use a blanket process-name exception.
-- [ ] **PI-0.2 — Remove generic runtime names from global authorization**
+- [x] **PI-0.2 — Remove generic runtime names from global authorization**
   Arbitrary Java/Python/Node/etc. processes must not become safe merely because
-  their executable name matches a runtime.
-- [ ] **PI-0.3 — Scope FocusFlow protection to verified ownership**
+  their executable name matches a runtime. If bare runtime names remain blocked
+  as manual targets, that restriction must be separate from global protection.
+- [x] **PI-0.3 — Scope FocusFlow protection to verified ownership**
   Protect the actual FocusFlow process without treating every descendant as
-  globally protected. Unknown identity must not be made killable or authorized
-  by a PID or process-tree guess.
-- [ ] **PI-0.4 — Add safety-boundary regressions**
-  Cover unrelated Java, FocusFlow's own instance, system/session inventory,
-  unknown identity, and the rule that descendant membership is not global
-  protection. Confirm Windows behavior remains unchanged.
+  globally protected. Protect the exact running process only; do not infer
+  ownership from a name or process-tree relationship.
+- [x] **PI-0.4 — Add safety-boundary regressions**
+  Cover generic runtimes versus the protected-name inventory, the exact
+  FocusFlow PID, an ordinary child and an unknown PID, category/rationale
+  coverage, and unchanged Windows behavior. Start-tick/pidfd identity tests
+  belong to Batch 1.
 
 ## Batch 1 — Build authoritative Linux process observations
 
@@ -287,4 +289,4 @@ Add one row per completed batch. Do not claim completion based only on a build.
 
 | Batch | Date | Tracker IDs completed | Changed areas | Commands/tests and results | Manual evidence or environment limits | Next batch |
 |---|---|---|---|---|---|---|
-| — | — | — | — | — | — | Batch 0 |
+| 0 | 2026-09-30 | PI-0.1–PI-0.4 | LinuxProcessSafety, InstalledAppsScanner, LinuxAppPicker, ProcessMonitor, LinuxProcessSafetyTest | `gradle test --tests com.focusflow.enforcement.LinuxProcessSafetyTest --tests com.focusflow.enforcement.NuclearModeLinuxTest --tests com.focusflow.enforcement.InstalledAppsScannerLinuxTest --tests com.focusflow.ui.components.LinuxAppPickerFilterTest --tests com.focusflow.enforcement.WinApiBindingsLinuxTest --no-daemon` — passed (34 tests); `git diff --check` — passed | No Windows runtime available. Direct diff review confirmed Windows-specific safe-name and manual-target paths are unchanged; new generic-runtime target restriction is Linux-gated. | Batch 1 |

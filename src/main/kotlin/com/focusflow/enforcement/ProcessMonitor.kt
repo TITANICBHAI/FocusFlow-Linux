@@ -306,7 +306,8 @@ object ProcessMonitor {
     private val linuxLauncherSafeProcesses = LinuxProcessSafety.launcherSafeProcessNames
 
     /**
-     * System processes that are always safe — combined Windows + Linux sets, dispatched by OS.
+     * Classified global system/session protections — combined Windows + Linux
+     * sets, dispatched by OS. FocusFlow's own Linux PID is protected separately.
      */
     val launcherSafeProcesses: Set<String> get() = when {
         isWindows -> windowsLauncherSafeProcesses
@@ -515,9 +516,17 @@ object ProcessMonitor {
         val ownPid = ProcessHandle.current().pid()
         val now    = System.currentTimeMillis()
         try {
-            ProcessHandle.allProcesses()
-                .filter { ph -> ph.isAlive && ph.pid() != ownPid && ph.info().command().isPresent }
-                .forEach { ph ->
+            if (isLinux) {
+                val repository = LinuxProcessRepository.system
+                repository.snapshot().processes.forEach { observation ->
+                    if (observation.pid == ownPid) return@forEach
+                    val identity =
+                        observation.processInstanceIdentity as? ProcessInstanceIdentity.Known
+                            ?: return@forEach
+                    val exeName = observation.executableBasename
+                        ?.lowercase()
+                        ?: return@forEach
+
                     // Re-read launcherAllowedProcesses on every iteration.
                     // If exit() fired mid-sweep (clearing the set), stop killing
                     // immediately rather than using the stale snapshot captured
@@ -525,25 +534,66 @@ object ProcessMonitor {
                     val currentAllowed = launcherAllowedProcesses
                     if (currentAllowed.isEmpty()) return@forEach
 
-                    val exeName = ph.info().command().orElse(null)
-                        ?.substringAfterLast('\\')
-                        ?.substringAfterLast('/')
-                        ?.lowercase() ?: return@forEach
                     if (
-                        !LinuxProcessSafety.isProtectedProcess(ph.pid(), exeName) &&
+                        !LinuxProcessSafety.isProtectedProcess(observation.pid, exeName) &&
                         exeName !in launcherSafeProcesses &&
                         exeName !in currentAllowed
                     ) {
                         if (tryAcquireCooldown("sweep:$exeName", now)) {
-                            // Two-layer kill for maximum reliability:
-                            //   1. destroyForcibly() — instant JVM-level SIGKILL, no subprocess overhead
-                            //   2. taskkill /F /PID  — backup for processes running at higher integrity
-                            //      (e.g. launched via "Run as administrator") that JVM cannot destroy
-                            try { ph.destroyForcibly() } catch (_: Exception) {}
-                            killProcessByPid(ph.pid())
+                            // Unknown identities and same-PID replacements are
+                            // never actionable. Acquire the handle before the
+                            // final fresh identity check, then target that handle.
+                            val processHandle = ProcessHandle.of(observation.pid)
+                                .orElse(null)
+                                ?: return@forEach
+                            val freshIdentity = repository.readProcess(observation.pid)
+                                .processInstanceIdentity
+                            if (freshIdentity != identity || !processHandle.isAlive) {
+                                return@forEach
+                            }
+                            try {
+                                processHandle.destroyForcibly()
+                            } catch (exception: Exception) {
+                                EnforcementLog.warn(
+                                    "ProcessMonitor",
+                                    "Could not terminate Linux process instance $identity",
+                                    exception
+                                )
+                            }
                         }
                     }
                 }
+            } else {
+                ProcessHandle.allProcesses()
+                    .filter { ph ->
+                        ph.isAlive && ph.pid() != ownPid && ph.info().command().isPresent
+                    }
+                    .forEach { ph ->
+                        // Re-read launcherAllowedProcesses on every iteration.
+                        // If exit() fired mid-sweep (clearing the set), stop killing
+                        // immediately rather than using the stale snapshot captured
+                        // at the top of tickPoll().
+                        val currentAllowed = launcherAllowedProcesses
+                        if (currentAllowed.isEmpty()) return@forEach
+
+                        val exeName = ph.info().command().orElse(null)
+                            ?.substringAfterLast('\\')
+                            ?.substringAfterLast('/')
+                            ?.lowercase() ?: return@forEach
+                        if (
+                            !LinuxProcessSafety.isProtectedProcess(ph.pid(), exeName) &&
+                            exeName !in launcherSafeProcesses &&
+                            exeName !in currentAllowed
+                        ) {
+                            if (tryAcquireCooldown("sweep:$exeName", now)) {
+                                // Two-layer kill for maximum reliability on Windows:
+                                // destroyForcibly first, then taskkill as a fallback.
+                                try { ph.destroyForcibly() } catch (_: Exception) {}
+                                killProcessByPid(ph.pid())
+                            }
+                        }
+                    }
+            }
         } catch (e: Exception) {
             // The entire kiosk sweep loop crashed silently. This is critical:
             // while launcherSweep() is dead, background processes go unkilled.
@@ -751,8 +801,8 @@ object ProcessMonitor {
      */
     private suspend fun enforceBlock(processName: String, pid: Long = 0L) {
         // Final defense: rules can be stale, manually entered, or created by a
-        // different feature after picker validation. Never terminate FocusFlow,
-        // its Linux process tree, or protected session infrastructure.
+        // different feature after picker validation. Never terminate FocusFlow's
+        // exact Linux PID or classified system/session infrastructure.
         if (LinuxProcessSafety.isProtectedProcess(pid, processName)) return
         if (pid > 0L) killProcessByPid(pid) else killProcessByName(processName)
         SoundAversion.playBlockAlert()

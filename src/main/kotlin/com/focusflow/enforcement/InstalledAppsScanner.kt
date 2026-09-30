@@ -320,33 +320,59 @@ object InstalledAppsScanner {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
+    private data class RunningProcessObservation(
+        val pid: Long,
+        val command: String?,
+        val commandLine: String,
+        val comm: String?,
+        val argv: List<String>
+    )
+
+    private fun runningProcessObservations(): List<RunningProcessObservation> {
+        if (isLinux) {
+            return LinuxProcessRepository.system.snapshot().processes.map { process ->
+                RunningProcessObservation(
+                    pid = process.pid,
+                    command = process.executablePath,
+                    commandLine = "",
+                    comm = process.comm,
+                    argv = process.argv
+                )
+            }
+        }
+
+        return ProcessHandle.allProcesses()
+            .mapNotNull { process ->
+                val info = process.info()
+                RunningProcessObservation(
+                    pid = process.pid(),
+                    command = info.command().orElse(null),
+                    commandLine = info.commandLine().orElse(""),
+                    comm = null,
+                    argv = emptyList()
+                )
+            }
+            .toList()
+    }
+
     fun getRunningApps(): List<ScannedApp> {
         val running: List<ScannedApp> = try {
-            ProcessHandle.allProcesses().toList()
-                .mapNotNull { ph ->
-                    // Use orElse(null) on a single call to avoid the TOCTOU race where
-                    // isPresent() returns true but the process exits before get() is called,
-                    // causing NoSuchElementException on the second command() invocation.
-                    val info = ph.info()
-                    val pid = ph.pid()
-                    val command = info.command().orElse(null)
-                    val procExe = if (isLinux) readLinuxProcExe(pid) else null
-                    val cmd = procExe ?: command
-                    val commandLine = info.commandLine().orElse("")
-                        .ifBlank { if (isLinux) readLinuxProcFile(pid, "cmdline").orEmpty() else "" }
-                    val comm = if (isLinux) readLinuxProcFile(pid, "comm") else null
+            runningProcessObservations()
+                .mapNotNull { process ->
+                    val pid = process.pid
+                    val cmd = process.command
+                    val commandLine = process.commandLine
+                    val comm = process.comm
                     val commandName = java.io.File(cmd ?: comm ?: return@mapNotNull null)
                         .name
                         .lowercase(Locale.ROOT)
-                    // Flatpak's host process is reported as "flatpak" by
-                    // ProcessHandle.command(), while its command line contains
-                    // the app ID. Use the same normalization as desktop files
-                    // so installed and running entries share a process key.
-                    val normalized = if (isLinux) normalizeLinuxExec(commandLine) else null
+                    // Linux argv is already tokenized by the process repository;
+                    // do not reconstruct a shell command before interpreting it.
+                    val normalized = if (isLinux) normalizeLinuxArgv(process.argv) else null
                     val sandboxPackage = if (
                         isLinux && commandName in setOf("bwrap", "xdg-dbus-proxy")
                     ) {
-                        linuxPackageIdFromCommandLine(commandLine)
+                        linuxPackageIdFromArgv(process.argv)
                     } else {
                         null
                     }
@@ -358,8 +384,7 @@ object InstalledAppsScanner {
                     val aliases = (
                         listOf(exe, commandName, comm.orEmpty()) +
                             normalized?.aliases.orEmpty() +
-                            listOfNotNull(normalized?.packageId, sandboxPackage) +
-                            linuxCommandLineAliases(commandLine)
+                            listOfNotNull(normalized?.packageId, sandboxPackage)
                         )
                         .map { it.trim().lowercase(Locale.ROOT) }
                         .filter { it.isNotBlank() && it !in setOf("flatpak", "snap", "env") }
@@ -369,7 +394,9 @@ object InstalledAppsScanner {
                         displayName = display,
                         isRunning = true,
                         exePath = cmd,
-                        execCommand = commandLine.takeIf { it.isNotBlank() },
+                        // Running argv may contain secrets. Keep it in the raw
+                        // observation, but never cache it as a desktop Exec string.
+                        execCommand = commandLine.takeIf { !isLinux && it.isNotBlank() },
                         processAliases = aliases,
                         packageId = normalized?.packageId ?: sandboxPackage,
                         source = AppSource.RUNNING_ONLY,
@@ -409,7 +436,11 @@ object InstalledAppsScanner {
                 }
                 .values
                 .toList()
-        } catch (e: Exception) { emptyList() }
+        } catch (e: LinuxProcessRepositoryException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
+        }
 
         // Populate path cache from running processes (most accurate paths)
         running.forEach { app ->
@@ -525,7 +556,11 @@ object InstalledAppsScanner {
         displayName: String? = null
     ): AppDescriptor? {
         val normalized = ProcessNameNormalizer.normalizeManual(processName) ?: return null
-        if (LinuxProcessSafety.isProtectedProcessName(normalized)) return null
+        if (
+            isLinux &&
+            (LinuxProcessSafety.isProtectedProcessName(normalized) ||
+                LinuxProcessSafety.isGenericRuntimeProcessName(normalized))
+        ) return null
         return AppDescriptor(
             processName = normalized,
             displayName = displayName?.trim().takeIf { !it.isNullOrBlank() }
@@ -1048,9 +1083,17 @@ object InstalledAppsScanner {
      * ProcessHandle and the Linux foreground poller, while retaining the
      * original command in ScannedApp.execCommand.
      */
-    private fun normalizeLinuxExec(exec: String): NormalizedLinuxExec? {
-        val tokens = tokenizeDesktopExec(exec)
-            .filterNot { it.startsWith("%") }
+    private fun normalizeLinuxExec(exec: String): NormalizedLinuxExec? =
+        normalizeLinuxArgvTokens(tokenizeDesktopExec(exec), fullCommand = exec)
+
+    private fun normalizeLinuxArgv(argv: List<String>): NormalizedLinuxExec? =
+        normalizeLinuxArgvTokens(argv, fullCommand = "")
+
+    private fun normalizeLinuxArgvTokens(
+        rawTokens: List<String>,
+        fullCommand: String
+    ): NormalizedLinuxExec? {
+        val tokens = rawTokens.filterNot { it.startsWith("%") }
         if (tokens.isEmpty()) return null
 
         var index = 0
@@ -1093,7 +1136,7 @@ object InstalledAppsScanner {
             return NormalizedLinuxExec(
                 processName = flatpakName,
                 command = command,
-                fullCommand = exec,
+                fullCommand = fullCommand,
                 aliases = listOfNotNull(appId),
                 packageId = appId
             )
@@ -1110,7 +1153,7 @@ object InstalledAppsScanner {
             return NormalizedLinuxExec(
                 processName = snapId,
                 command = command,
-                fullCommand = exec,
+                fullCommand = fullCommand,
                 aliases = listOf(snapId),
                 packageId = snapId
             )
@@ -1122,7 +1165,7 @@ object InstalledAppsScanner {
         return NormalizedLinuxExec(
             processName = processName,
             command = command,
-            fullCommand = exec,
+            fullCommand = fullCommand,
             aliases = listOf(processName)
         )
     }
@@ -1262,34 +1305,11 @@ object InstalledAppsScanner {
             }
             .toSet()
 
-    private fun readLinuxProcExe(pid: Long): String? = try {
-        Files.readSymbolicLink(Path.of("/proc", pid.toString(), "exe")).toString()
-    } catch (_: Exception) {
-        null
-    }
-
-    private fun readLinuxProcFile(pid: Long, name: String): String? = try {
-        Files.readString(Path.of("/proc", pid.toString(), name))
-            .replace('\u0000', ' ')
-            .trim()
-            .takeIf { it.isNotBlank() }
-    } catch (_: Exception) {
-        null
-    }
-
-    private fun linuxPackageIdFromCommandLine(commandLine: String): String? =
-        tokenizeDesktopExec(commandLine)
-            .firstOrNull {
-                it.matches(Regex("^[A-Za-z0-9][A-Za-z0-9_.-]*\\.[A-Za-z0-9_.-]+$"))
-            }
+    private fun linuxPackageIdFromArgv(argv: List<String>): String? =
+        argv.firstOrNull {
+            it.matches(Regex("^[A-Za-z0-9][A-Za-z0-9_.-]*\\.[A-Za-z0-9_.-]+$"))
+        }
             ?.takeIf { it.contains('.') }
-
-    private fun linuxCommandLineAliases(commandLine: String): List<String> =
-        tokenizeDesktopExec(commandLine)
-            .filter { it.matches(Regex("^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$")) }
-            .map { it.lowercase(Locale.ROOT) }
-            .filter { it.length > 1 }
-            .distinct()
 
     private fun strongerConfidence(
         first: AppDetectionConfidence,

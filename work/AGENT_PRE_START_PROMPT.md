@@ -1,0 +1,69 @@
+# Process Identity Workstream — Agent Pre-Start Prompt
+
+Use this prompt for a session assigned to FocusFlow process/application identity
+work. The controlling contract is [`Process.md`](Process.md); the
+repository-specific batches and checkboxes are in
+[`Process-Tracker.md`](Process-Tracker.md).
+
+## Assignment
+
+Work only on the batch and tracker IDs explicitly assigned by the user. If no
+batch or IDs are assigned, pause and ask which batch to take. Before editing,
+briefly restate the assigned scope, its dependencies, and the acceptance checks.
+Do not silently widen the scope or implement later batches “while nearby.”
+
+The user requested no subagents for this workstream: do not spawn or delegate to
+subagents. Work directly in this session and coordinate through the tracker.
+
+## Before editing
+
+1. Read `replit.md`, `work/Process.md`, and `work/Process-Tracker.md`.
+2. Read `.agents/memory/MEMORY.md` and the relevant linked topics, especially
+   process safety, Linux app discovery, stored identity, migration
+   backup/atomicity, and the Linux batch execution protocol.
+3. Check `git status --short`. Preserve all pre-existing edits and deletions;
+   do not reset, restore, stash, or overwrite unrelated work.
+4. Verify the assigned checkboxes are still open. Search the current code and
+   call sites before relying on paths or descriptions in the spec; those are
+   guidance, while current code is authoritative about what exists.
+5. Identify the narrowest files and tests that implement the assigned items.
+   Follow current project conventions and avoid unrelated refactors.
+
+## Required safety rules
+
+- Follow the V7 final authority in `Process.md`, even where historical sections
+  differ:
+  - v1 authorization identity is PID plus non-null process start ticks;
+  - pidfd cannot make an unknown identity known or destructively killable;
+  - raw process snapshots, derived runtime metadata, and catalog correlation
+    remain separate;
+  - authorization distinguishes `ALLOW`,
+    `DENY_AND_SAFE_TO_TERMINATE`, and `UNKNOWN` / unsafe;
+  - cgroup membership, FocusFlow ancestry, capture timing, or generic runtime
+    names never grant blanket authorization.
+- Do not persist or log raw command lines that may contain credentials or
+  tokens.
+- Preserve existing database values and migrations additively. Follow the
+  migration backup/atomicity rules; never replace the live database after a
+  failed migration.
+- Preserve Windows behavior. Keep platform-specific code behind the existing
+  platform boundaries.
+- Keep database, filesystem, and process I/O off Compose/UI threads.
+- Do not check a tracker item merely because code compiles. Require focused
+  tests or other evidence that proves its stated acceptance behavior.
+
+## Implementation and verification
+
+1. Implement only the assigned tracker IDs, including their required tests and
+   documentation evidence.
+2. Run the narrowest relevant tests first, then the broader checks required by
+   the batch. If a check cannot run, record the exact reason and leave affected
+   boxes unchecked.
+3. Review your diff for accidental scope expansion and confirm no pre-existing
+   user changes were overwritten.
+4. Update only verified checkboxes in `Process-Tracker.md`. Add a completion-log
+   row with tracker IDs, changed areas, exact commands/results, manual evidence
+   or limits, and the next batch.
+5. Finish with a short handoff: completed IDs, files/areas changed, verification
+   results, unresolved risks, and the next uncompleted batch. Never imply that
+   unverified work is done.

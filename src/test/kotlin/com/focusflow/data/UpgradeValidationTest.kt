@@ -496,6 +496,84 @@ class UpgradeValidationTest {
     }
 
     @Test
+    fun `Launch and Detect configuration survives launcher session cleanup`() {
+        withDatabaseHome(resources = listOf("schema-v8.sql")) {
+            Database.setSetting("launcher_selected_apps", "editor")
+            val stored = Database.getCanonicalAppReferences(
+                "setting:launcher_selected_apps",
+                "launcher_selected_apps"
+            ).single()
+            val referenceId = stored.reference.referenceId
+            val runtime = RuntimeDefinition(
+                id = "$referenceId:captured-primary",
+                referenceId = referenceId,
+                role = RuntimeRole.PRIMARY,
+                selector = SelectorExpression.Predicate(
+                    RuntimeSelector.ExecutablePath("/opt/editor/bin/editor")
+                ),
+                executionEnvironment = ExecutionEnvironment.NATIVE,
+                runtimeFamily = null,
+                authorizationPurpose = RuntimeAuthorizationPurpose.PRIMARY_RUNTIME
+            )
+            val launch = LaunchDefinition(
+                id = "$referenceId:launch",
+                referenceId = referenceId,
+                type = "desktop-entry",
+                executablePath = "/usr/bin/gio",
+                executable = "gio",
+                argv = listOf("launch", "/usr/share/applications/editor.desktop"),
+                workingDirectory = null,
+                desktopFilePath = "/usr/share/applications/editor.desktop",
+                desktopId = "editor.desktop",
+                handoffPolicy = "observe-target"
+            )
+            val configured = Database.saveLaunchCaptureConfiguration(
+                stored.copy(
+                    reference = stored.reference.copy(
+                        stableAppId = "desktop:editor.desktop",
+                        displayName = "Editor",
+                        source = AppReferenceSource.CATALOG_NATIVE,
+                        resolutionStatus = AppResolutionStatus.RESOLVED,
+                        conflictStatus = "none",
+                        runtimeDefinitions = listOf(runtime)
+                    )
+                ),
+                launch,
+                runtime
+            )
+
+            assertEquals(launch, Database.getLaunchDefinition(referenceId))
+            assertEquals(listOf(runtime), Database.getRuntimeDefinitions(referenceId))
+            assertEquals(launch.id, configured?.launchDefinitionId)
+
+            Database.saveFocusLauncherSession(
+                FocusLauncherSession(
+                    apps = listOf(
+                        FocusLauncherSessionApp(
+                            processName = "editor",
+                            displayName = "Editor",
+                            exePath = "/opt/editor/bin/editor",
+                            canonicalReference = configured
+                        )
+                    ),
+                    sessionStartMs = 20L,
+                    pinHash = "session-pin-hash"
+                )
+            )
+            Database.clearFocusLauncherSession()
+
+            val persisted = Database.getCanonicalAppReferences(
+                "setting:launcher_selected_apps",
+                "launcher_selected_apps"
+            ).single().reference
+            assertEquals(referenceId, persisted.referenceId)
+            assertEquals(launch.id, persisted.launchDefinitionId)
+            assertEquals(listOf(runtime), persisted.runtimeDefinitions)
+            assertEquals(launch, Database.getLaunchDefinition(referenceId))
+        }
+    }
+
+    @Test
     fun `Linux database survives application reinstall with stale references intact`() {
         withDatabaseHome(
             resources = listOf("schema-v8.sql"),

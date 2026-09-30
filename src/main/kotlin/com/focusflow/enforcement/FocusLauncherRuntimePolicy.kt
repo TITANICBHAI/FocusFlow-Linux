@@ -7,6 +7,8 @@ import com.focusflow.data.models.RuntimeAuthorizationPurpose
 data class LauncherSessionProcessAssociation(
     val processInstanceKey: ProcessInstanceKey,
     val applicationReferenceId: String,
+    val runtimeDefinitionId: String,
+    val role: RuntimeRole,
     val observationFingerprint: ProcessFingerprint
 )
 
@@ -74,7 +76,15 @@ object FocusLauncherRuntimePolicy {
         val referenceId = decision.attribution.applicationReferenceId
             ?.takeIf(String::isNotBlank)
             ?: return null
-        if (decision.attribution.runtimeDefinitionId.isNullOrBlank()) return null
+        val runtimeDefinitionId = decision.attribution.runtimeDefinitionId
+            ?.takeIf(String::isNotBlank)
+            ?: return null
+        val role = when (decision.attribution.status) {
+            ProcessAttributionStatus.MATCHED_PRIMARY -> RuntimeRole.PRIMARY
+            ProcessAttributionStatus.MATCHED_HELPER -> RuntimeRole.HELPER
+            ProcessAttributionStatus.MATCHED_LAUNCHER -> RuntimeRole.LAUNCHER
+            else -> return null
+        }
         if (
             decision.attribution.status !in setOf(
                 ProcessAttributionStatus.MATCHED_PRIMARY,
@@ -85,6 +95,8 @@ object FocusLauncherRuntimePolicy {
         return LauncherSessionProcessAssociation(
             processInstanceKey = key,
             applicationReferenceId = referenceId,
+            runtimeDefinitionId = runtimeDefinitionId,
+            role = role,
             observationFingerprint = process.fingerprint
         )
     }

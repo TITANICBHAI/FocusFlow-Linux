@@ -21,10 +21,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.focusflow.data.Database
+import com.focusflow.data.models.AppResolutionStatus
 import com.focusflow.data.models.CanonicalAppReference
 import com.focusflow.data.models.FocusLauncherPreset
+import com.focusflow.data.models.RuntimeAuthorizationPurpose
+import com.focusflow.data.models.StoredCanonicalAppReference
+import com.focusflow.enforcement.AppSource
 import com.focusflow.enforcement.AppDescriptor
 import com.focusflow.enforcement.InstalledAppsScanner
+import com.focusflow.enforcement.LaunchCaptureSelection
+import com.focusflow.enforcement.RuntimeRole
 import com.focusflow.enforcement.stableCatalogKey
 import com.focusflow.enforcement.toCanonicalAppReference
 import com.focusflow.enforcement.isWindows
@@ -32,6 +38,7 @@ import com.focusflow.i18n.LocalizationManager
 import com.focusflow.services.FocusLauncherApp
 import com.focusflow.services.FocusLauncherService
 import com.focusflow.ui.components.LinuxAppPicker
+import com.focusflow.ui.components.LinuxLaunchAndDetectDialog
 import com.focusflow.ui.components.catalogKey
 import com.focusflow.ui.components.FfVerticalScrollbar
 import com.focusflow.ui.components.rememberInstalledAppCatalogState
@@ -93,15 +100,50 @@ fun FocusLauncherScreen() {
     var linuxSelectionInitialized by remember { mutableStateOf(false) }
     var hasPersistedLinuxSelection by remember { mutableStateOf(false) }
     var manualLinuxApps     by remember { mutableStateOf<List<FocusLauncherApp>>(emptyList()) }
-    val launcherReferenceCache = remember {
-        mutableMapOf<String, CanonicalAppReference>()
+    var launcherPersistedReferences by remember {
+        mutableStateOf<List<CanonicalAppReference>>(emptyList())
     }
+    var launcherReferenceCache by remember {
+        mutableStateOf<Map<String, CanonicalAppReference>>(emptyMap())
+    }
+    var launchDetectTarget by remember { mutableStateOf<FocusLauncherApp?>(null) }
+    var showLaunchDetectMenu by remember { mutableStateOf(false) }
     val catalogState = rememberInstalledAppCatalogState(enabled = !isWindows)
 
-    fun launcherReferenceFor(app: AppDescriptor): CanonicalAppReference =
-        app.canonicalReference ?: launcherReferenceCache.getOrPut(app.stableCatalogKey()) {
-            app.toCanonicalAppReference()
+    fun launcherReferenceFor(app: AppDescriptor): CanonicalAppReference {
+        val key = app.stableCatalogKey()
+        launcherReferenceCache[key]?.let { return it }
+        val base = app.canonicalReference ?: app.toCanonicalAppReference()
+        val identityCandidates = listOfNotNull(
+            app.desktopId,
+            app.packageId,
+            app.processName.takeIf(String::isNotBlank)
+        )
+        val persisted = launcherPersistedReferences.firstOrNull { reference ->
+            reference.stableAppId in identityCandidates
+        } ?: launcherPersistedReferences.firstOrNull { reference ->
+            listOfNotNull(
+                reference.primaryProcessName,
+                reference.legacyProcessName
+            ).any { name -> name.equals(app.processName, ignoreCase = true) }
         }
+        val resolved = if (persisted == null) {
+            base
+        } else {
+            base.copy(
+                referenceId = persisted.referenceId,
+                stableAppId = base.stableAppId ?: persisted.stableAppId,
+                displayName = app.displayName,
+                legacyProcessName = persisted.legacyProcessName ?: base.legacyProcessName,
+                primaryProcessName = base.primaryProcessName ?: persisted.primaryProcessName,
+                processAliases = base.processAliases.ifEmpty { persisted.processAliases },
+                runtimeDefinitions = persisted.runtimeDefinitions,
+                launchDefinitionId = persisted.launchDefinitionId
+            )
+        }
+        launcherReferenceCache = launcherReferenceCache + (key to resolved)
+        return resolved
+    }
 
     // Checked once on composition — running "net session" is a blocking call so we
     // do it inside remember{} rather than on every recomposition.
@@ -114,6 +156,12 @@ fun FocusLauncherScreen() {
     LaunchedEffect(Unit) {
         // Load persisted selection; fall back to all-selected if none saved yet
         val persisted = withContext(Dispatchers.IO) { Database.getSetting("launcher_selected_apps") }
+        launcherPersistedReferences = withContext(Dispatchers.IO) {
+            Database.getCanonicalAppReferences(
+                "setting:launcher_selected_apps",
+                "launcher_selected_apps"
+            ).map { it.reference }
+        }
         launcherPresets = withContext(Dispatchers.IO) { Database.getFocusLauncherPresets() }
         val saved = persisted.orEmpty().split(",").filter { it.isNotBlank() }.toSet()
         if (isWindows) {
@@ -561,6 +609,52 @@ fun FocusLauncherScreen() {
                         selectedApps = if (checked) selectedApps - key else selectedApps + key
                     }
                 )
+            }
+        }
+
+        if (!isWindows && appsForSession.any { it.processName.isNotBlank() }) {
+            item(key = "linuxLaunchAndDetect") {
+                Column(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                        .background(Surface2).padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "Configure an app launch",
+                        color = OnSurface,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "Launch & Detect observes this launch for configuration only; it does not add a runtime authorization rule.",
+                        color = OnSurface2,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Box {
+                        OutlinedButton(
+                            onClick = { showLaunchDetectMenu = true },
+                            enabled = appsForSession.any { it.processName.isNotBlank() }
+                        ) {
+                            Text("Launch & Detect")
+                        }
+                        DropdownMenu(
+                            expanded = showLaunchDetectMenu,
+                            onDismissRequest = { showLaunchDetectMenu = false }
+                        ) {
+                            appsForSession
+                                .filter { it.processName.isNotBlank() }
+                                .take(100)
+                                .forEach { app ->
+                                    DropdownMenuItem(
+                                        text = { Text(app.displayName) },
+                                        onClick = {
+                                            launchDetectTarget = app
+                                            showLaunchDetectMenu = false
+                                        }
+                                    )
+                                }
+                        }
+                    }
+                }
             }
         }
 
@@ -1077,6 +1171,116 @@ fun FocusLauncherScreen() {
             }
         )
     }
+
+    launchDetectTarget?.let { target ->
+        val descriptor = catalogState.apps.firstOrNull { catalogApp ->
+            target.selectionKey?.let { catalogApp.stableCatalogKey() == it } == true ||
+                catalogApp.processName.equals(target.processName, ignoreCase = true)
+        } ?: AppDescriptor(
+            processName = target.processName,
+            displayName = target.displayName,
+            isRunning = false,
+            exePath = target.exePath,
+            source = AppSource.MANUAL,
+            canonicalReference = target.canonicalReference
+        )
+        val targetReference = target.canonicalReference
+            ?: launcherReferenceFor(descriptor)
+        LinuxLaunchAndDetectDialog(
+            app = descriptor,
+            reference = targetReference,
+            onDismiss = { launchDetectTarget = null },
+            onSave = { selection ->
+                val savedReference = runCatching {
+                    persistLaunchCaptureConfiguration(
+                        selection = selection,
+                        target = target,
+                        targetReference = targetReference,
+                        selectedApps = appsForSession
+                    )
+                }.getOrNull()
+                if (savedReference == null) {
+                    false
+                } else {
+                    launcherPersistedReferences =
+                        (launcherPersistedReferences.filterNot {
+                            it.referenceId == savedReference.referenceId
+                        } + savedReference)
+                    launcherReferenceCache =
+                        launcherReferenceCache + (descriptor.stableCatalogKey() to savedReference)
+                    true
+                }
+            }
+        )
+    }
+}
+
+private suspend fun persistLaunchCaptureConfiguration(
+    selection: LaunchCaptureSelection,
+    target: FocusLauncherApp,
+    targetReference: CanonicalAppReference,
+    selectedApps: List<FocusLauncherApp>
+): CanonicalAppReference? = withContext(Dispatchers.IO) {
+    val selectedProcessNames = selectedApps
+        .map { it.processName.trim() }
+        .filter(String::isNotBlank)
+        .distinct()
+    if (selectedProcessNames.none { it.equals(target.processName, ignoreCase = true) }) {
+        return@withContext null
+    }
+
+    Database.setSetting(
+        "launcher_selected_apps",
+        selectedProcessNames.joinToString(",")
+    )
+    val stored = Database.getCanonicalAppReferences(
+        "setting:launcher_selected_apps",
+        "launcher_selected_apps"
+    ).firstOrNull { item ->
+        listOfNotNull(
+            item.reference.primaryProcessName,
+            item.reference.legacyProcessName
+        ).any { it.equals(target.processName, ignoreCase = true) }
+    } ?: return@withContext null
+
+    val runtimeDefinition = selection.runtimeDefinition.copy(
+        referenceId = stored.reference.referenceId
+    )
+    val launchDefinition = selection.launchDefinition.copy(
+        referenceId = stored.reference.referenceId
+    )
+    val priorDefinitions = (
+        stored.reference.runtimeDefinitions + targetReference.runtimeDefinitions
+        ).distinctBy { it.id }
+    val updatedReference = targetReference.copy(
+        referenceId = stored.reference.referenceId,
+        stableAppId = targetReference.stableAppId ?: stored.reference.stableAppId,
+        displayName = targetReference.displayName ?: target.displayName,
+        legacyProcessName = stored.reference.legacyProcessName
+            ?: targetReference.legacyProcessName
+            ?: target.processName,
+        primaryProcessName = targetReference.primaryProcessName
+            ?: stored.reference.primaryProcessName
+            ?: target.processName,
+        runtimeDefinitions = priorDefinitions.filterNot {
+            it.enabled &&
+                it.role == RuntimeRole.PRIMARY &&
+                it.authorizationPurpose == RuntimeAuthorizationPurpose.PRIMARY_RUNTIME
+        } + runtimeDefinition,
+        launchDefinitionId = stored.reference.launchDefinitionId,
+        resolutionStatus = AppResolutionStatus.RESOLVED,
+        conflictStatus = "none"
+    )
+    Database.saveLaunchCaptureConfiguration(
+        StoredCanonicalAppReference(
+            ownerType = "setting:launcher_selected_apps",
+            ownerId = "launcher_selected_apps",
+            position = stored.position,
+            reference = updatedReference
+        ),
+        launchDefinition,
+        runtimeDefinition
+    )
 }
 
 @Composable

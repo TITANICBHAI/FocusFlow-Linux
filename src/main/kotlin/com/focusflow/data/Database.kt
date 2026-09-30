@@ -1741,6 +1741,10 @@ object Database {
         if (!isReady) return
         connection.autoCommit = false
         try {
+            val configuredSettingReferences = getAppReferences(
+                OWNER_LAUNCHER_SETTING,
+                "launcher_selected_apps"
+            ).associateBy { it.id }
             val referenceIds = getCanonicalAppReferences(
                 OWNER_LAUNCHER_SESSION,
                 "session:1"
@@ -1752,7 +1756,26 @@ object Database {
                 "DELETE FROM focus_launcher_session WHERE id = 1"
             ).use { it.executeUpdate() }
             deleteAppReferences(OWNER_LAUNCHER_SESSION, "session:1")
-            referenceIds.distinct().forEach(::deleteCanonicalAppReference)
+            referenceIds.distinct().forEach { referenceId ->
+                val settingReference = configuredSettingReferences[referenceId]
+                if (settingReference == null) {
+                    deleteCanonicalAppReference(referenceId)
+                } else {
+                    connection.prepareStatement(
+                        """
+                        UPDATE canonical_app_references
+                        SET owner_type = ?, owner_id = ?, position = ?
+                        WHERE reference_id = ?
+                        """.trimIndent()
+                    ).use { statement ->
+                        statement.setString(1, OWNER_LAUNCHER_SETTING)
+                        statement.setString(2, "launcher_selected_apps")
+                        statement.setInt(3, settingReference.position)
+                        statement.setString(4, referenceId)
+                        statement.executeUpdate()
+                    }
+                }
+            }
             connection.commit()
         } catch (e: Exception) {
             try { connection.rollback() } catch (_: Exception) {}
@@ -2152,6 +2175,64 @@ object Database {
             }
         }
         return definition
+    }
+
+    /**
+     * Saves a Launch & Detect result under its persistent launcher-selection
+     * reference. Runtime selectors replace enabled primary selectors for that
+     * reference; helper/launcher definitions remain intact.
+     */
+    @Synchronized fun saveLaunchCaptureConfiguration(
+        stored: StoredCanonicalAppReference,
+        launchDefinition: LaunchDefinition,
+        primaryRuntime: RuntimeDefinition
+    ): CanonicalAppReference {
+        check(isReady) { "Database is not initialized" }
+        val referenceId = stored.reference.referenceId
+        require(referenceId.isNotBlank()) { "Reference ID cannot be blank" }
+        require(launchDefinition.referenceId == referenceId) {
+            "Launch definition must belong to the selected application reference"
+        }
+        require(primaryRuntime.referenceId == referenceId) {
+            "Runtime definition must belong to the selected application reference"
+        }
+        require(primaryRuntime.role == RuntimeRole.PRIMARY) {
+            "Launch & Detect must produce a primary runtime definition"
+        }
+        return inTransaction {
+            val existingLaunch = getLaunchDefinition(referenceId)
+            val launchToStore = launchDefinition.copy(
+                id = existingLaunch?.id ?: launchDefinition.id,
+                referenceId = referenceId
+            )
+            val existingPrimaryIds = getRuntimeDefinitions(referenceId)
+                .filter {
+                    it.enabled &&
+                        it.role == RuntimeRole.PRIMARY &&
+                        it.authorizationPurpose == RuntimeAuthorizationPurpose.PRIMARY_RUNTIME
+                }
+                .map { it.id }
+
+            upsertCanonicalAppReference(
+                stored.copy(
+                    reference = stored.reference.copy(
+                        launchDefinitionId = existingLaunch?.id
+                    )
+                )
+            )
+            existingPrimaryIds.forEach(::deleteRuntimeDefinition)
+            upsertRuntimeDefinition(primaryRuntime)
+            upsertLaunchDefinition(launchToStore)
+            upsertCanonicalAppReference(
+                stored.copy(
+                    reference = stored.reference.copy(
+                        launchDefinitionId = launchToStore.id
+                    )
+                )
+            )
+            getCanonicalAppReference(referenceId)?.reference
+                ?: error("Canonical app reference disappeared after capture save")
+        }
     }
 
     @Synchronized fun getLaunchDefinition(referenceId: String): LaunchDefinition? =

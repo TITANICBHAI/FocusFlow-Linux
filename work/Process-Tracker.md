@@ -203,26 +203,26 @@ landed with this batch if its tracker scope is explicitly assigned.
 
 Depends on: Batches 1, 2, 3, and 5.
 
-- [ ] **PI-6.1 — Treat Launch & Detect as configuration-time discovery**
+- [x] **PI-6.1 — Treat Launch & Detect as configuration-time discovery**
   A user-triggered launch flow builds a launch definition; it is not itself a
   permanent runtime authorization rule.
-- [ ] **PI-6.2 — Isolate capture to a launch-instance baseline**
+- [x] **PI-6.2 — Isolate capture to a launch-instance baseline**
   Record the baseline at launch and observe only relevant changes for that launch
   instance; pre-existing processes must not become candidates by default.
-- [ ] **PI-6.3 — Detect both process creation and same-instance exec**
+- [x] **PI-6.3 — Detect both process creation and same-instance exec**
   Polling is the required first backend. Detect newly created PIDs and relevant
   image/argument changes on a still-live PID.
-- [ ] **PI-6.4 — Keep candidate and associated states separate**
+- [x] **PI-6.4 — Keep candidate and associated states separate**
   Observation, timing, parentage, or cgroup membership alone cannot authorize a
   candidate. Define explicit states and expiry/timeout behavior.
-- [ ] **PI-6.5 — Handle launcher exit and reparenting**
+- [x] **PI-6.5 — Handle launcher exit and reparenting**
   Preserve valid app attribution across launcher exit/reparenting without
   assuming that launcher termination proves the runtime has started.
-- [ ] **PI-6.6 — Make launcher auto-close identity-safe**
+- [x] **PI-6.6 — Make launcher auto-close identity-safe**
   Revalidate the launcher's current PID plus start ticks immediately before
   closing it; do not close if that same instance has become the runtime or its
   identity is ambiguous.
-- [ ] **PI-6.7 — Test launch races and cleanup**
+- [x] **PI-6.7 — Test launch races and cleanup**
   Cover baseline isolation, candidate-to-associated transition, exec handoff,
   launcher exit/reparenting, cancellation, timeout, runtime exit, PID reuse, and
   same-instance close safety.
@@ -294,3 +294,4 @@ Add one row per completed batch. Do not claim completion based only on a build.
 | 2 | 2026-09-30 | PI-2.1–PI-2.7 | LinuxProcessSelectors, LinuxProcessRuntimeMetadata, LinuxProcessMatcher, privacy-safe Linux snapshot formatting, InstalledAppsScanner Linux running-process interpretation, focused tests | `gradle test --tests com.focusflow.enforcement.LinuxProcessSelectorsTest --tests com.focusflow.enforcement.LinuxProcessMatcherTest --tests com.focusflow.enforcement.InstalledAppsScannerLinuxTest --tests com.focusflow.enforcement.LinuxProcessRepositoryTest --tests com.focusflow.enforcement.LinuxProcessSafetyTest --no-daemon` — passed (47 tests); `git diff --check` — passed | Covered versioned selector round-trips and empty-expression validation; typed comparison rules; missing-field and correlation uncertainty; multi-candidate ambiguity; Java structured args; generic/broad selector UNKNOWN; identity-bound revalidation; and argv redaction. Windows runtime unavailable; changed scanner interpretation is Linux-only and Windows enforcement paths were not edited. | Batch 3 |
 | 3 | 2026-09-30 | PI-3.1–PI-3.6 | `UpgradeValidationTest`; verified `AppReference`, migrations V9–V11, database CRUD, and preflight-backup/rollback paths | `gradle test --tests com.focusflow.data.StoredDataMigrationV9Test --tests com.focusflow.data.StoredDataMigrationV10Test --tests com.focusflow.data.StoredDataMigrationV11Test --tests com.focusflow.data.MigrationSafetyTest --tests com.focusflow.data.StoredDataFixtureTest --tests com.focusflow.data.UpgradeValidationTest --tests com.focusflow.data.models.CanonicalAppReferenceTest --no-daemon` — passed (27 tests); `git diff --check` — passed | Temporary SQLite fixtures covered fresh, legacy, duplicate, stale/unresolved, generic `java`, malformed source data, CRUD round-trips, backup failure, and interrupted migration rollback. No production database or Windows runtime was used. | Batch 4 |
 | 5 | 2026-09-30 | PI-5.1–PI-5.5 | FocusLauncherScreen reference propagation; FocusLauncherService lifecycle/restore paths; FocusLauncherRuntimePolicy and ProcessMonitor; session reference/runtime-definition persistence and cleanup; policy and SQLite tests | `gradle test --no-daemon` — passed (154 tests, 0 failures, 0 errors, 2 skipped); `git diff --check` — passed; Start application workflow restarted and remained running at `:run` | Tests cover selected/unselected refs, generic Java uncertainty, ambiguity/staleness, unknown/changed identity, authorization clearing, Windows legacy name-set adapter, and DB recovery/teardown. No Windows runtime or real destructive process test was available; VNC workflow has no browser port. Batch 4 checkboxes were left unchanged. | Batch 6 |
+| 6 | 2026-09-30 | PI-6.1–PI-6.7 | LinuxLaunchCapture tracker/controller and tests; Linux Launch & Detect dialog and Focus Launcher integration; persisted launch/runtime definitions and session-cleanup preservation; launcher runtime association metadata | `gradle test --no-daemon` — passed (165 tests, 0 failures, 0 errors, 2 skipped); `git diff --check` — passed; Start application workflow restarted and running | Tests cover baseline isolation, explicit candidate attribution, same-PID exec, reparenting, bounded grace/timeout, cancellation, runtime exit, PID reuse, unknown identity, close identity checks, raw command omission, and SQLite persistence through cleanup. Desktop app process was running under the VNC workflow; no browser screenshot port, real app handoff, destructive close, or Windows runtime was exercised. | Batch 7 |

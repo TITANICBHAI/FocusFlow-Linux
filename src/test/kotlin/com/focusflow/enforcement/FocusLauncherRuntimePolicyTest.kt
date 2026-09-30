@@ -195,6 +195,8 @@ class FocusLauncherRuntimePolicyTest {
         val association = LauncherSessionProcessAssociation(
             processInstanceKey = key,
             applicationReferenceId = "selected-editor",
+            runtimeDefinitionId = "selected-editor:runtime",
+            role = RuntimeRole.PRIMARY,
             observationFingerprint = process.fingerprint
         )
 

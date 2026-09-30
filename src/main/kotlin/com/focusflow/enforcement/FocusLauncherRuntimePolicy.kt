@@ -2,11 +2,12 @@ package com.focusflow.enforcement
 
 import com.focusflow.data.models.AppResolutionStatus
 import com.focusflow.data.models.CanonicalAppReference
+import com.focusflow.data.models.RuntimeAuthorizationPurpose
 
 data class LauncherSessionProcessAssociation(
     val processInstanceKey: ProcessInstanceKey,
     val applicationReferenceId: String,
-    val observationFingerprint: String
+    val observationFingerprint: ProcessFingerprint
 )
 
 /**
@@ -39,7 +40,9 @@ object FocusLauncherRuntimePolicy {
                     .filter { definition ->
                         definition.enabled &&
                             definition.referenceId == reference.referenceId &&
-                            definition.id.isNotBlank()
+                            definition.id.isNotBlank() &&
+                            definition.authorizationPurpose !=
+                                RuntimeAuthorizationPurpose.LAUNCH_HANDOFF_ONLY
                     }
                     .map { definition ->
                         ApplicationRuntimeCandidate(
@@ -71,6 +74,7 @@ object FocusLauncherRuntimePolicy {
         val referenceId = decision.attribution.applicationReferenceId
             ?.takeIf(String::isNotBlank)
             ?: return null
+        if (decision.attribution.runtimeDefinitionId.isNullOrBlank()) return null
         if (
             decision.attribution.status !in setOf(
                 ProcessAttributionStatus.MATCHED_PRIMARY,
@@ -84,4 +88,21 @@ object FocusLauncherRuntimePolicy {
             observationFingerprint = process.fingerprint
         )
     }
+
+    /**
+     * Destructive launcher enforcement requires the exact observed process
+     * instance and fingerprint to survive a fresh authorization decision.
+     */
+    fun mayTerminate(
+        priorDecision: ProcessAuthorizationDecision,
+        observedProcess: LinuxProcessSnapshot,
+        currentProcess: LinuxProcessSnapshot,
+        selectedCandidates: List<ApplicationRuntimeCandidate>
+    ): Boolean =
+        isSameKnownProcessObservation(observedProcess, currentProcess) &&
+            LinuxProcessAuthorizer.revalidateForDestructiveAction(
+                priorDecision = priorDecision,
+                currentContext = selectorContext(currentProcess),
+                candidates = selectedCandidates
+            )
 }

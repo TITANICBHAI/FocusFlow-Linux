@@ -155,15 +155,54 @@ object ProcessMonitor {
      * system process) will be killed. This is inverse of normal blocking.
      */
     @Volatile var launcherAllowedProcesses: Set<String> = emptySet()
+        private set
 
     /** Linux launcher authorization is driven by selected references, not names. */
     @Volatile var launcherRuntimeCandidates: List<ApplicationRuntimeCandidate> = emptyList()
+        private set
 
     /** Ephemeral session associations; never merged into global safe processes. */
     @Volatile var launcherAuthorizedInstances:
         Map<ProcessInstanceKey, LauncherSessionProcessAssociation> = emptyMap()
 
+    private val launcherAuthorizationLock = Any()
+    private var launcherAuthorizationVersion = 0L
+
+    private data class LinuxLauncherAuthorizationSnapshot(
+        val version: Long,
+        val candidates: List<ApplicationRuntimeCandidate>
+    )
+
     @Volatile var onLauncherForegroundChanged: ((String, Long) -> Unit)? = null
+
+    private fun linuxLauncherAuthorizationSnapshot(): LinuxLauncherAuthorizationSnapshot =
+        synchronized(launcherAuthorizationLock) {
+            LinuxLauncherAuthorizationSnapshot(
+                launcherAuthorizationVersion,
+                launcherRuntimeCandidates
+            )
+        }
+
+    private fun isCurrentLinuxLauncherAuthorization(version: Long): Boolean =
+        synchronized(launcherAuthorizationLock) {
+            launcherAuthorizationVersion == version &&
+                launcherRuntimeCandidates.isNotEmpty()
+        }
+
+    private fun destroyForCurrentLinuxLauncherAuthorization(
+        version: Long,
+        processHandle: ProcessHandle
+    ): Boolean = synchronized(launcherAuthorizationLock) {
+        if (
+            launcherAuthorizationVersion != version ||
+            launcherRuntimeCandidates.isEmpty() ||
+            !processHandle.isAlive
+        ) {
+            false
+        } else {
+            processHandle.destroyForcibly()
+        }
+    }
 
     private fun hasLauncherAuthorizationInputs(): Boolean =
         if (isLinux) launcherRuntimeCandidates.isNotEmpty()
@@ -171,19 +210,23 @@ object ProcessMonitor {
 
     fun installLinuxLauncherAuthorization(
         candidates: List<ApplicationRuntimeCandidate>
-    ) {
+    ) = synchronized(launcherAuthorizationLock) {
+        launcherAuthorizationVersion += 1L
         launcherAllowedProcesses = emptySet()
         launcherAuthorizedInstances = emptyMap()
         launcherRuntimeCandidates = candidates.toList()
     }
 
-    fun installLegacyLauncherAuthorization(processNames: Set<String>) {
-        launcherRuntimeCandidates = emptyList()
-        launcherAuthorizedInstances = emptyMap()
-        launcherAllowedProcesses = processNames
-    }
+    fun installLegacyLauncherAuthorization(processNames: Set<String>) =
+        synchronized(launcherAuthorizationLock) {
+            launcherAuthorizationVersion += 1L
+            launcherRuntimeCandidates = emptyList()
+            launcherAuthorizedInstances = emptyMap()
+            launcherAllowedProcesses = processNames
+        }
 
-    fun clearLauncherAuthorization() {
+    fun clearLauncherAuthorization() = synchronized(launcherAuthorizationLock) {
+        launcherAuthorizationVersion += 1L
         launcherAllowedProcesses = emptySet()
         launcherRuntimeCandidates = emptyList()
         launcherAuthorizedInstances = emptyMap()
@@ -547,15 +590,23 @@ object ProcessMonitor {
         try {
             if (isLinux) {
                 val repository = LinuxProcessRepository.system
-                val candidates = launcherRuntimeCandidates
+                val authorization = linuxLauncherAuthorizationSnapshot()
+                val candidates = authorization.candidates
                 if (candidates.isEmpty()) {
-                    launcherAuthorizedInstances = emptyMap()
+                    synchronized(launcherAuthorizationLock) {
+                        if (launcherAuthorizationVersion == authorization.version) {
+                            launcherAuthorizedInstances = emptyMap()
+                        }
+                    }
                     return
                 }
                 val previousAssociations = launcherAuthorizedInstances
                 val authorizedInstances =
                     LinkedHashMap<ProcessInstanceKey, LauncherSessionProcessAssociation>()
                 repository.snapshot().processes.forEach { observation ->
+                    if (!isCurrentLinuxLauncherAuthorization(authorization.version)) {
+                        return@forEach
+                    }
                     if (observation.pid == ownPid) return@forEach
                     val identity =
                         observation.processInstanceIdentity as? ProcessInstanceIdentity.Known
@@ -565,11 +616,9 @@ object ProcessMonitor {
                         previousAssociation != null &&
                         previousAssociation.observationFingerprint != observation.fingerprint
                     ) {
-                        // Same PID/start time but a changed executable/argv
-                        // fingerprint is an unclassified exec handoff. Keep the
-                        // session association for this instance, but never use a
-                        // changed observation as a destructive target.
-                        authorizedInstances[identity.key] = previousAssociation
+                        // Do not carry an old authorization association across an
+                        // unclassified same-instance exec/image change. Revisit it
+                        // on the next sweep after the new observation is stable.
                         return@forEach
                     }
 
@@ -584,10 +633,8 @@ object ProcessMonitor {
                         processName.lowercase() in launcherSafeProcesses
                     ) return@forEach
 
-                    val currentCandidates = launcherRuntimeCandidates
-                    if (currentCandidates.isEmpty()) return@forEach
                     val context = FocusLauncherRuntimePolicy.selectorContext(observation)
-                    val decision = LinuxProcessAuthorizer.decide(context, currentCandidates)
+                    val decision = LinuxProcessAuthorizer.decide(context, candidates)
                     FocusLauncherRuntimePolicy.association(decision, observation)?.let { association ->
                         authorizedInstances[identity.key] = association
                     }
@@ -606,27 +653,29 @@ object ProcessMonitor {
                     // immediately before termination. Unknown, replaced, or
                     // newly authorized instances are not destructive targets.
                     val freshObservation = repository.readProcess(observation.pid)
-                    val currentAuthorization = launcherRuntimeCandidates
+                    val currentAuthorization = linuxLauncherAuthorizationSnapshot()
                     if (
-                        currentAuthorization.isEmpty() ||
-                        !isSameKnownProcessObservation(observation, freshObservation) ||
+                        currentAuthorization.version != authorization.version ||
+                        currentAuthorization.candidates.isEmpty() ||
                         LinuxProcessSafety.isProtectedProcess(
                             freshObservation.pid,
                             freshObservation.comm ?: freshObservation.executableBasename
                         ) ||
                         (freshObservation.comm ?: freshObservation.executableBasename)
                             ?.lowercase() in launcherSafeProcesses ||
-                        !LinuxProcessAuthorizer.revalidateForDestructiveAction(
+                        !FocusLauncherRuntimePolicy.mayTerminate(
                             priorDecision = decision,
-                            currentContext = FocusLauncherRuntimePolicy.selectorContext(
-                                freshObservation
-                            ),
-                            candidates = currentAuthorization
+                            observedProcess = observation,
+                            currentProcess = freshObservation,
+                            selectedCandidates = currentAuthorization.candidates
                         )
                     ) return@forEach
 
                     try {
-                        processHandle.destroyForcibly()
+                        destroyForCurrentLinuxLauncherAuthorization(
+                            authorization.version,
+                            processHandle
+                        )
                     } catch (exception: Exception) {
                         EnforcementLog.warn(
                             "ProcessMonitor",
@@ -635,7 +684,14 @@ object ProcessMonitor {
                         )
                     }
                 }
-                launcherAuthorizedInstances = authorizedInstances.toMap()
+                synchronized(launcherAuthorizationLock) {
+                    if (
+                        launcherAuthorizationVersion == authorization.version &&
+                        launcherRuntimeCandidates.isNotEmpty()
+                    ) {
+                        launcherAuthorizedInstances = authorizedInstances.toMap()
+                    }
+                }
             } else {
                 ProcessHandle.allProcesses()
                     .filter { ph ->

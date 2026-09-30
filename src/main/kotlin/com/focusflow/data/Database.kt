@@ -1570,9 +1570,21 @@ object Database {
             }
         } ?: return null
 
+        val canonicalReferencesByPosition = getCanonicalAppReferences(
+            OWNER_LAUNCHER_SESSION,
+            "session:1"
+        ).groupBy { it.position }.mapValues { (_, references) ->
+            references.firstOrNull {
+                it.reference.runtimeDefinitions.isNotEmpty()
+            } ?: references.first()
+        }
+        val legacyReferencesByPosition = getAppReferences(
+            OWNER_LAUNCHER_SESSION,
+            "session:1"
+        ).associateBy { it.position }
         val apps = connection.prepareStatement(
             """
-            SELECT process_name, display_name, exe_path
+            SELECT position, process_name, display_name, exe_path
             FROM focus_launcher_session_apps
             WHERE session_id = 1
             ORDER BY position ASC
@@ -1581,17 +1593,23 @@ object Database {
             ps.executeQuery().use { rs ->
                 buildList {
                     while (rs.next()) {
+                        val position = rs.getInt("position")
                         val rawProcess = rs.getString("process_name")
-                        val process = effectiveProcessList(
-                            OWNER_LAUNCHER_SESSION,
-                            "session:1",
-                            listOf(rawProcess)
-                        ).firstOrNull() ?: rawProcess
+                        val canonicalReference =
+                            canonicalReferencesByPosition[position]?.reference
+                        val sidecarProcess =
+                            legacyReferencesByPosition[position]?.primaryProcessName
+                        val process = canonicalProcessForRead(
+                            canonicalReference?.primaryProcessName
+                                ?: sidecarProcess
+                                ?: rawProcess
+                        ) ?: rawProcess
                         add(
                             FocusLauncherSessionApp(
                                 processName = process,
                                 displayName = rs.getString("display_name"),
-                                exePath = rs.getString("exe_path")
+                                exePath = rs.getString("exe_path"),
+                                canonicalReference = canonicalReference
                             )
                         )
                     }
@@ -1605,8 +1623,10 @@ object Database {
         if (!isReady) return
         connection.autoCommit = false
         try {
-            val normalizedApps = session.apps.mapNotNull { app ->
-                canonicalProcessForWrite(app.processName)?.let { app to it }
+            val normalizedApps = session.apps.map { app ->
+                app to canonicalProcessForWrite(app.processName)
+            }.filter { (app, process) ->
+                process != null || app.canonicalReference != null
             }
             connection.prepareStatement(
                 """
@@ -1641,7 +1661,7 @@ object Database {
             ).use { ps ->
                 normalizedApps.forEachIndexed { index, (app, process) ->
                     ps.setInt(1, index)
-                    ps.setString(2, process)
+                    ps.setString(2, process.orEmpty())
                     ps.setString(3, app.displayName)
                     ps.setString(4, app.exePath)
                     ps.addBatch()
@@ -1651,8 +1671,63 @@ object Database {
             syncAppReferences(
                 OWNER_LAUNCHER_SESSION,
                 "session:1",
-                normalizedApps.map { (app, process) -> process to app.displayName }
+                normalizedApps.mapNotNull { (app, process) ->
+                    process?.let { it to app.displayName }
+                }
             )
+
+            val legacyReferences = getAppReferences(
+                OWNER_LAUNCHER_SESSION,
+                "session:1"
+            ).sortedBy { it.position }
+            val retainedReferenceIds = legacyReferences.map { it.id }.toMutableSet()
+            val explicitReferenceIds = normalizedApps.mapNotNull {
+                it.first.canonicalReference?.referenceId
+            }
+            retainedReferenceIds.addAll(explicitReferenceIds)
+            legacyReferences
+                .filter { it.id !in explicitReferenceIds }
+                .flatMap { getRuntimeDefinitions(it.id) }
+                .forEach { deleteRuntimeDefinition(it.id) }
+            var legacyPosition = 0
+            normalizedApps.forEachIndexed { position, (app, process) ->
+                val legacyReference = if (process != null) {
+                    legacyReferences.getOrNull(legacyPosition++)
+                        ?.let { readCanonicalAppReference(it.id)?.reference }
+                } else {
+                    null
+                }
+                val reference = app.canonicalReference ?: legacyReference ?: return@forEachIndexed
+                val referenceForSession = reference.copy(
+                    legacyProcessName = reference.legacyProcessName ?: process,
+                    primaryProcessName = reference.primaryProcessName ?: process
+                )
+                upsertCanonicalAppReference(
+                    StoredCanonicalAppReference(
+                        ownerType = OWNER_LAUNCHER_SESSION,
+                        ownerId = "session:1",
+                        position = position,
+                        reference = referenceForSession
+                    )
+                )
+
+                val runtimeDefinitions = app.canonicalReference
+                    ?.runtimeDefinitions
+                    .orEmpty()
+                val retainedDefinitionIds = runtimeDefinitions.map { it.id }.toSet()
+                getRuntimeDefinitions(reference.referenceId)
+                    .filter { it.id !in retainedDefinitionIds }
+                    .forEach { deleteRuntimeDefinition(it.id) }
+                runtimeDefinitions.forEach(::upsertRuntimeDefinition)
+            }
+
+            getCanonicalAppReferences(
+                OWNER_LAUNCHER_SESSION,
+                "session:1"
+            ).map { it.reference.referenceId }
+                .filter { it !in retainedReferenceIds }
+                .distinct()
+                .forEach(::deleteCanonicalAppReference)
             connection.commit()
         } catch (e: Exception) {
             try { connection.rollback() } catch (_: Exception) {}
@@ -1666,6 +1741,10 @@ object Database {
         if (!isReady) return
         connection.autoCommit = false
         try {
+            val referenceIds = getCanonicalAppReferences(
+                OWNER_LAUNCHER_SESSION,
+                "session:1"
+            ).map { it.reference.referenceId }
             connection.prepareStatement(
                 "DELETE FROM focus_launcher_session_apps WHERE session_id = 1"
             ).use { it.executeUpdate() }
@@ -1673,6 +1752,7 @@ object Database {
                 "DELETE FROM focus_launcher_session WHERE id = 1"
             ).use { it.executeUpdate() }
             deleteAppReferences(OWNER_LAUNCHER_SESSION, "session:1")
+            referenceIds.distinct().forEach(::deleteCanonicalAppReference)
             connection.commit()
         } catch (e: Exception) {
             try { connection.rollback() } catch (_: Exception) {}

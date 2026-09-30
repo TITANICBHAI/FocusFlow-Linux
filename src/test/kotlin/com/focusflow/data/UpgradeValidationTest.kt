@@ -7,6 +7,9 @@ import com.focusflow.data.models.LaunchDefinition
 import com.focusflow.data.models.RuntimeAuthorizationPurpose
 import com.focusflow.data.models.RuntimeDefinition
 import com.focusflow.data.models.StoredCanonicalAppReference
+import com.focusflow.data.models.CanonicalAppReference
+import com.focusflow.data.models.FocusLauncherSession
+import com.focusflow.data.models.FocusLauncherSessionApp
 import com.focusflow.services.AutoBackupService
 import com.focusflow.enforcement.ExecutionEnvironment
 import com.focusflow.enforcement.RuntimeFamily
@@ -405,6 +408,89 @@ class UpgradeValidationTest {
                     home,
                     "SELECT process_name FROM focus_launcher_session_apps WHERE session_id = 1"
                 )
+            )
+        }
+    }
+
+    @Test
+    fun `Focus Launcher session preserves canonical runtime references through recovery and cleanup`() {
+        withDatabaseHome(resources = listOf("schema-v8.sql")) {
+            val referenceId = "foc-launcher-editor"
+            val runtime = RuntimeDefinition(
+                id = "$referenceId:primary",
+                referenceId = referenceId,
+                role = RuntimeRole.PRIMARY,
+                selector = SelectorExpression.Predicate(
+                    RuntimeSelector.ExecutablePath("/opt/editor/bin/editor")
+                ),
+                executionEnvironment = ExecutionEnvironment.NATIVE,
+                runtimeFamily = null,
+                authorizationPurpose = RuntimeAuthorizationPurpose.PRIMARY_RUNTIME
+            )
+            val reference = CanonicalAppReference(
+                referenceId = referenceId,
+                stableAppId = "path:/opt/editor/bin/editor",
+                displayName = "Editor",
+                source = AppReferenceSource.MANUAL,
+                resolutionStatus = AppResolutionStatus.RESOLVED,
+                runtimeDefinitions = listOf(runtime)
+            )
+            val pathOnlyReference = CanonicalAppReference(
+                referenceId = "foc-launcher-path-only",
+                stableAppId = "path:/opt/tools/inspector",
+                displayName = "Inspector",
+                source = AppReferenceSource.MANUAL,
+                resolutionStatus = AppResolutionStatus.RESOLVED,
+                runtimeDefinitions = listOf(
+                    RuntimeDefinition(
+                        id = "foc-launcher-path-only:primary",
+                        referenceId = "foc-launcher-path-only",
+                        role = RuntimeRole.PRIMARY,
+                        selector = SelectorExpression.Predicate(
+                            RuntimeSelector.ExecutablePath("/opt/tools/inspector")
+                        ),
+                        executionEnvironment = ExecutionEnvironment.NATIVE,
+                        runtimeFamily = null,
+                        authorizationPurpose = RuntimeAuthorizationPurpose.PRIMARY_RUNTIME
+                    )
+                )
+            )
+            Database.saveFocusLauncherSession(
+                FocusLauncherSession(
+                    apps = listOf(
+                        FocusLauncherSessionApp(
+                            processName = "editor",
+                            displayName = "Editor",
+                            exePath = "/opt/editor/bin/editor",
+                            canonicalReference = reference
+                        ),
+                        FocusLauncherSessionApp(
+                            processName = "",
+                            displayName = "Inspector",
+                            exePath = "/opt/tools/inspector",
+                            canonicalReference = pathOnlyReference
+                        )
+                    ),
+                    sessionStartMs = 10L,
+                    pinHash = "session-pin-hash"
+                )
+            )
+
+            val restored = Database.getFocusLauncherSession()
+            assertNotNull(restored)
+            assertEquals(referenceId, restored.apps[0].canonicalReference?.referenceId)
+            assertEquals("editor", restored.apps[0].canonicalReference?.primaryProcessName)
+            assertEquals("editor", restored.apps[0].canonicalReference?.legacyProcessName)
+            assertEquals(listOf(runtime), restored.apps[0].canonicalReference?.runtimeDefinitions)
+            assertEquals(pathOnlyReference, restored.apps[1].canonicalReference)
+            assertEquals("", restored.apps[1].processName)
+
+            Database.clearFocusLauncherSession()
+            assertTrue(
+                Database.getCanonicalAppReferences(
+                    "focus_launcher_session",
+                    "session:1"
+                ).isEmpty()
             )
         }
     }

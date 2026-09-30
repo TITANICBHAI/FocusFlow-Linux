@@ -426,7 +426,7 @@ object FocusLauncherService {
      */
     fun onKillSwitchActivated() {
         if (!_isActive.value || _breakActive.value) return
-        ProcessMonitor.launcherAllowedProcesses = emptySet()
+        ProcessMonitor.clearLauncherAuthorization()
         // silent = true: suppress "Nuclear Mode OFF" — kill switch has its own notification.
         if (NuclearMode.isActive) NuclearMode.disable(silent = true)
         GlobalKeyboardHook.disable()
@@ -504,6 +504,19 @@ object FocusLauncherService {
             return
         }
         if (saved.breakActive && saved.breakEndMs <= 0L) {
+            clearStaleSessionMarkers(disableNuclear = true)
+            return
+        }
+
+        if (
+            isLinux &&
+            FocusLauncherRuntimePolicy.candidates(
+                saved.apps.mapNotNull { it.canonicalReference }
+            ).isEmpty()
+        ) {
+            // Legacy Linux sessions without recoverable app references cannot
+            // safely resume name-based authorization. Restore the desktop rather
+            // than showing an active kiosk with no reference-backed enforcement.
             clearStaleSessionMarkers(disableNuclear = true)
             return
         }
@@ -633,12 +646,11 @@ object FocusLauncherService {
      * Must be safe to call from any thread at any time, including during a crash.
      */
     fun emergencyRestoreWindows() {
+        ProcessMonitor.clearLauncherAuthorization()
         if (isLinux) {
-            ProcessMonitor.launcherAllowedProcesses = emptySet()
             showTaskbar()
             return
         }
-        ProcessMonitor.launcherAllowedProcesses = emptySet()
         try { GlobalKeyboardHook.disable() } catch (_: Throwable) {}
         try { RegistryLockdown.disable()   } catch (_: Throwable) {}
         showTaskbar()

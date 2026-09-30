@@ -21,8 +21,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.focusflow.data.Database
+import com.focusflow.data.models.CanonicalAppReference
 import com.focusflow.data.models.FocusLauncherPreset
+import com.focusflow.enforcement.AppDescriptor
 import com.focusflow.enforcement.InstalledAppsScanner
+import com.focusflow.enforcement.stableCatalogKey
+import com.focusflow.enforcement.toCanonicalAppReference
 import com.focusflow.enforcement.isWindows
 import com.focusflow.i18n.LocalizationManager
 import com.focusflow.services.FocusLauncherApp
@@ -89,7 +93,15 @@ fun FocusLauncherScreen() {
     var linuxSelectionInitialized by remember { mutableStateOf(false) }
     var hasPersistedLinuxSelection by remember { mutableStateOf(false) }
     var manualLinuxApps     by remember { mutableStateOf<List<FocusLauncherApp>>(emptyList()) }
+    val launcherReferenceCache = remember {
+        mutableMapOf<String, CanonicalAppReference>()
+    }
     val catalogState = rememberInstalledAppCatalogState(enabled = !isWindows)
+
+    fun launcherReferenceFor(app: AppDescriptor): CanonicalAppReference =
+        app.canonicalReference ?: launcherReferenceCache.getOrPut(app.stableCatalogKey()) {
+            app.toCanonicalAppReference()
+        }
 
     // Checked once on composition — running "net session" is a blocking call so we
     // do it inside remember{} rather than on every recomposition.
@@ -148,7 +160,13 @@ fun FocusLauncherScreen() {
                 linuxSelectionInitialized = true
             }
             availableApps = catalogState.apps.map {
-                FocusLauncherApp(it.processName, it.displayName, it.exePath)
+                FocusLauncherApp(
+                    processName = it.processName,
+                    displayName = it.displayName,
+                    exePath = it.exePath,
+                    canonicalReference = launcherReferenceFor(it),
+                    selectionKey = it.stableCatalogKey()
+                )
             }.filter { app ->
                 selectedApps.any { it.equals(app.processName, ignoreCase = true) }
             }.toMutableList().also { apps ->
@@ -186,7 +204,15 @@ fun FocusLauncherScreen() {
     val linuxAppsForSession = if (!isWindows) {
         val catalogApps = catalogState.apps
             .filter { app -> selectedApps.any { it.equals(app.processName, ignoreCase = true) } }
-            .map { app -> FocusLauncherApp(app.processName, app.displayName, app.exePath) }
+            .map { app ->
+                FocusLauncherApp(
+                    processName = app.processName,
+                    displayName = app.displayName,
+                    exePath = app.exePath,
+                    canonicalReference = launcherReferenceFor(app),
+                    selectionKey = app.stableCatalogKey()
+                )
+            }
         val selectedManualApps = manualLinuxApps.filter { app ->
             selectedApps.any { it.equals(app.processName, ignoreCase = true) }
         }
@@ -492,7 +518,9 @@ fun FocusLauncherScreen() {
                             manualLinuxApps = (manualLinuxApps + FocusLauncherApp(
                                 processName = manual.processName,
                                 displayName = manual.displayName,
-                                exePath = manual.exePath
+                                exePath = manual.exePath,
+                                canonicalReference = launcherReferenceFor(manual),
+                                selectionKey = manual.stableCatalogKey()
                             )).distinctBy { it.processName.lowercase() }
                         },
                     onRefresh = {

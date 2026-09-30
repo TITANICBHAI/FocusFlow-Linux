@@ -556,7 +556,7 @@ object CrashReporter {
         try { ProcessMonitor.scheduleBlockedProcesses        = emptySet() } catch (_: Throwable) {}
         try { ProcessMonitor.standaloneBlockedProcesses      = emptySet() } catch (_: Throwable) {}
         try { ProcessMonitor.dailyAllowanceBlockedProcesses  = emptySet() } catch (_: Throwable) {}
-        try { ProcessMonitor.launcherAllowedProcesses        = emptySet() } catch (_: Throwable) {}
+        try { ProcessMonitor.clearLauncherAuthorization() } catch (_: Throwable) {}
         try { FocusSessionService.end(completed = false)     } catch (_: Throwable) {}
         // Mark in DB that a crash occurred — useful for next-launch recovery dialogs
         try { Database.setSetting("last_crash_version", appVersion) } catch (_: Throwable) {}

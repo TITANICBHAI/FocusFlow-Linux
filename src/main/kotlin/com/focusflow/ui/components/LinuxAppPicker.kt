@@ -74,6 +74,7 @@ import com.focusflow.enforcement.ManualLinuxAppTargetParser
 import com.focusflow.enforcement.ManualLinuxTargetInput
 import com.focusflow.enforcement.ManualLinuxTargetType
 import com.focusflow.enforcement.CatalogMatchStatus
+import com.focusflow.enforcement.stableCatalogKey
 import com.focusflow.enforcement.toCanonicalAppReference
 import com.focusflow.data.models.CanonicalAppReference
 import com.focusflow.enforcement.LinuxProcessSafety

@@ -21,3 +21,17 @@ platform-specific features.
 **How to apply:** Use a versioned preserve-legacy decision table for known
 patterns, keep unknown settings untouched, and never treat the decision metadata
 as permission to remove the original setting.
+
+For launcher-session recovery, canonical references must follow the full
+session-row positions even when the legacy process-name sidecar contains fewer
+entries. The compact legacy list is compatibility data, not the authoritative
+selected-app list.
+
+**Why:** Path-only references have no legacy process name. Compacting them out
+shifts later sidecar positions and can associate a recovered process name with
+the wrong selected application.
+
+**How to apply:** Persist one session slot per selected reference, keep
+compatibility process rows separate, and clear session-owned references and
+runtime definitions during teardown. Never infer canonical identity from a
+compacted process-name index.

@@ -183,19 +183,19 @@ Depends on: Batch 3.
 Depends on: Batches 2 and 3; Batch 4 selection work may be completed first or
 landed with this batch if its tracker scope is explicitly assigned.
 
-- [ ] **PI-5.1 — Replace Linux launcher name-set authorization**
+- [x] **PI-5.1 — Replace Linux launcher name-set authorization**
   Make selected application references and runtime definitions the Linux
   authorization inputs; keep legacy process-name adaptation at a single boundary.
-- [ ] **PI-5.2 — Associate only matched, known process instances**
+- [x] **PI-5.2 — Associate only matched, known process instances**
   Require a valid process-instance key and a definite application attribution
   before adding an instance to active session authorization.
-- [ ] **PI-5.3 — Separate global protection from session authorization**
+- [x] **PI-5.3 — Separate global protection from session authorization**
   System/session safety, FocusFlow ownership, selected applications, and
   launcher-session associations must remain distinct policy sources.
-- [ ] **PI-5.4 — Revalidate before destructive enforcement**
+- [x] **PI-5.4 — Revalidate before destructive enforcement**
   Recheck identity and authorization immediately before a kill; unknown or
   changed identity is not a destructive target.
-- [ ] **PI-5.5 — Test Focus Launcher state and platform compatibility**
+- [x] **PI-5.5 — Test Focus Launcher state and platform compatibility**
   Cover selected and unselected apps, unrelated generic runtimes, ambiguous or
   stale references, lifecycle teardown, and unchanged Windows behavior.
 
@@ -293,3 +293,4 @@ Add one row per completed batch. Do not claim completion based only on a build.
 | 1 | 2026-09-30 | PI-1.1–PI-1.6 | LinuxProcessRepository and LinuxProcessRepositoryTest; consumers use the shared repository | `gradle test --tests com.focusflow.enforcement.LinuxProcessRepositoryTest --no-daemon` — passed; source audit found `/proc` process enumeration only in LinuxProcessRepository (specialized socket-table reads remain in NetworkBlocker) | Repository test suite covers procfs parsing, partial/disappearing processes, generation IDs, PID reuse, same-instance exec fingerprints, and live-pidfd/missing-start-ticks non-identity. No Windows runtime available. | Batch 2 |
 | 2 | 2026-09-30 | PI-2.1–PI-2.7 | LinuxProcessSelectors, LinuxProcessRuntimeMetadata, LinuxProcessMatcher, privacy-safe Linux snapshot formatting, InstalledAppsScanner Linux running-process interpretation, focused tests | `gradle test --tests com.focusflow.enforcement.LinuxProcessSelectorsTest --tests com.focusflow.enforcement.LinuxProcessMatcherTest --tests com.focusflow.enforcement.InstalledAppsScannerLinuxTest --tests com.focusflow.enforcement.LinuxProcessRepositoryTest --tests com.focusflow.enforcement.LinuxProcessSafetyTest --no-daemon` — passed (47 tests); `git diff --check` — passed | Covered versioned selector round-trips and empty-expression validation; typed comparison rules; missing-field and correlation uncertainty; multi-candidate ambiguity; Java structured args; generic/broad selector UNKNOWN; identity-bound revalidation; and argv redaction. Windows runtime unavailable; changed scanner interpretation is Linux-only and Windows enforcement paths were not edited. | Batch 3 |
 | 3 | 2026-09-30 | PI-3.1–PI-3.6 | `UpgradeValidationTest`; verified `AppReference`, migrations V9–V11, database CRUD, and preflight-backup/rollback paths | `gradle test --tests com.focusflow.data.StoredDataMigrationV9Test --tests com.focusflow.data.StoredDataMigrationV10Test --tests com.focusflow.data.StoredDataMigrationV11Test --tests com.focusflow.data.MigrationSafetyTest --tests com.focusflow.data.StoredDataFixtureTest --tests com.focusflow.data.UpgradeValidationTest --tests com.focusflow.data.models.CanonicalAppReferenceTest --no-daemon` — passed (27 tests); `git diff --check` — passed | Temporary SQLite fixtures covered fresh, legacy, duplicate, stale/unresolved, generic `java`, malformed source data, CRUD round-trips, backup failure, and interrupted migration rollback. No production database or Windows runtime was used. | Batch 4 |
+| 5 | 2026-09-30 | PI-5.1–PI-5.5 | FocusLauncherScreen reference propagation; FocusLauncherService lifecycle/restore paths; FocusLauncherRuntimePolicy and ProcessMonitor; session reference/runtime-definition persistence and cleanup; policy and SQLite tests | `gradle test --no-daemon` — passed (154 tests, 0 failures, 0 errors, 2 skipped); `git diff --check` — passed; Start application workflow restarted and remained running at `:run` | Tests cover selected/unselected refs, generic Java uncertainty, ambiguity/staleness, unknown/changed identity, authorization clearing, Windows legacy name-set adapter, and DB recovery/teardown. No Windows runtime or real destructive process test was available; VNC workflow has no browser port. Batch 4 checkboxes were left unchanged. | Batch 6 |

@@ -134,23 +134,23 @@ Depends on: Batch 1.
 
 Depends on: Batch 2. Extend the existing sidecar and migration safety design.
 
-- [ ] **PI-3.1 — Define the reference/runtime/launch model boundary**
+- [x] **PI-3.1 — Define the reference/runtime/launch model boundary**
   Give every internal reference a stable `referenceId`; keep external app IDs
   optional, process names optional/legacy, and launch definitions separate from
   runtime definitions.
-- [ ] **PI-3.2 — Persist runtime and launch definitions additively**
+- [x] **PI-3.2 — Persist runtime and launch definitions additively**
   Version selector serialization and add only the schema needed after inspecting
   the current database version. Keep legacy source fields readable and intact.
-- [ ] **PI-3.3 — Preserve stale, ambiguous, and generic legacy references**
+- [x] **PI-3.3 — Preserve stale, ambiguous, and generic legacy references**
   Do not silently rewrite unresolved values or convert a legacy `java` entry
   into a broad runtime allow rule.
-- [ ] **PI-3.4 — Add repository adapters and round-trip operations**
+- [x] **PI-3.4 — Add repository adapters and round-trip operations**
   Create/read/update/delete the new reference metadata while maintaining
   compatibility with existing process-bearing models and owners.
-- [ ] **PI-3.5 — Gate migration with verified backup and atomic rollback**
+- [x] **PI-3.5 — Gate migration with verified backup and atomic rollback**
   Follow the existing migration backup/atomicity contract; migration failure
   must not replace or corrupt the live database.
-- [ ] **PI-3.6 — Add migration, rollback, and compatibility fixtures**
+- [x] **PI-3.6 — Add migration, rollback, and compatibility fixtures**
   Cover fresh, legacy, duplicate, unresolved, malformed, and interrupted cases;
   prove original user data remains readable after success and failure.
 
@@ -292,3 +292,4 @@ Add one row per completed batch. Do not claim completion based only on a build.
 | 0 | 2026-09-30 | PI-0.1–PI-0.4 | LinuxProcessSafety, InstalledAppsScanner, LinuxAppPicker, ProcessMonitor, LinuxProcessSafetyTest | `gradle test --tests com.focusflow.enforcement.LinuxProcessSafetyTest --tests com.focusflow.enforcement.NuclearModeLinuxTest --tests com.focusflow.enforcement.InstalledAppsScannerLinuxTest --tests com.focusflow.ui.components.LinuxAppPickerFilterTest --tests com.focusflow.enforcement.WinApiBindingsLinuxTest --no-daemon` — passed (34 tests); `git diff --check` — passed | No Windows runtime available. Direct diff review confirmed Windows-specific safe-name and manual-target paths are unchanged; new generic-runtime target restriction is Linux-gated. | Batch 1 |
 | 1 | 2026-09-30 | PI-1.1–PI-1.6 | LinuxProcessRepository and LinuxProcessRepositoryTest; consumers use the shared repository | `gradle test --tests com.focusflow.enforcement.LinuxProcessRepositoryTest --no-daemon` — passed; source audit found `/proc` process enumeration only in LinuxProcessRepository (specialized socket-table reads remain in NetworkBlocker) | Repository test suite covers procfs parsing, partial/disappearing processes, generation IDs, PID reuse, same-instance exec fingerprints, and live-pidfd/missing-start-ticks non-identity. No Windows runtime available. | Batch 2 |
 | 2 | 2026-09-30 | PI-2.1–PI-2.7 | LinuxProcessSelectors, LinuxProcessRuntimeMetadata, LinuxProcessMatcher, privacy-safe Linux snapshot formatting, InstalledAppsScanner Linux running-process interpretation, focused tests | `gradle test --tests com.focusflow.enforcement.LinuxProcessSelectorsTest --tests com.focusflow.enforcement.LinuxProcessMatcherTest --tests com.focusflow.enforcement.InstalledAppsScannerLinuxTest --tests com.focusflow.enforcement.LinuxProcessRepositoryTest --tests com.focusflow.enforcement.LinuxProcessSafetyTest --no-daemon` — passed (47 tests); `git diff --check` — passed | Covered versioned selector round-trips and empty-expression validation; typed comparison rules; missing-field and correlation uncertainty; multi-candidate ambiguity; Java structured args; generic/broad selector UNKNOWN; identity-bound revalidation; and argv redaction. Windows runtime unavailable; changed scanner interpretation is Linux-only and Windows enforcement paths were not edited. | Batch 3 |
+| 3 | 2026-09-30 | PI-3.1–PI-3.6 | `UpgradeValidationTest`; verified `AppReference`, migrations V9–V11, database CRUD, and preflight-backup/rollback paths | `gradle test --tests com.focusflow.data.StoredDataMigrationV9Test --tests com.focusflow.data.StoredDataMigrationV10Test --tests com.focusflow.data.StoredDataMigrationV11Test --tests com.focusflow.data.MigrationSafetyTest --tests com.focusflow.data.StoredDataFixtureTest --tests com.focusflow.data.UpgradeValidationTest --tests com.focusflow.data.models.CanonicalAppReferenceTest --no-daemon` — passed (27 tests); `git diff --check` — passed | Temporary SQLite fixtures covered fresh, legacy, duplicate, stale/unresolved, generic `java`, malformed source data, CRUD round-trips, backup failure, and interrupted migration rollback. No production database or Windows runtime was used. | Batch 4 |

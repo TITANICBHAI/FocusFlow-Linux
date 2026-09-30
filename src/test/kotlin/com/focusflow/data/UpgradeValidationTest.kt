@@ -22,6 +22,7 @@ import java.sql.DriverManager
 import kotlin.io.path.readText
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -86,6 +87,52 @@ class UpgradeValidationTest {
                     home,
                     "SELECT COUNT(*) FROM app_references WHERE owner_type = 'block_rule'"
                 )
+            )
+        }
+    }
+
+    @Test
+    fun `fresh and malformed legacy fixtures migrate without rewriting source data`() {
+        withDatabaseHome(
+            resources = listOf("schema-v8.sql", "fresh.sql")
+        ) { home ->
+            assertEquals(11, databaseVersion(home))
+            assertEquals("true", Database.getSetting("onboarding_complete"))
+            assertEquals(
+                0L,
+                queryLong(home, "SELECT COUNT(*) FROM canonical_app_references")
+            )
+        }
+
+        withDatabaseHome(
+            resources = listOf("schema-v8.sql", "malformed.sql")
+        ) { home ->
+            assertEquals(11, databaseVersion(home))
+            assertEquals(
+                "firefox.exe,, ,bad",
+                queryString(
+                    home,
+                    "SELECT focus_blocked_apps FROM tasks WHERE id = 'malformed-task'"
+                )
+            )
+            assertEquals(
+                "missing.exe,,",
+                queryString(
+                    home,
+                    "SELECT process_names FROM block_schedules WHERE id = 'malformed-schedule'"
+                )
+            )
+            assertEquals(
+                "vpn.exe,, ,broken",
+                queryString(
+                    home,
+                    "SELECT value FROM settings WHERE key = 'vpn_custom_processes'"
+                )
+            )
+            assertEquals(
+                listOf("firefox.exe", "bad"),
+                Database.getAppReferences("task_focus_apps", "malformed-task")
+                    .map { it.legacyProcessName }
             )
         }
     }
@@ -229,6 +276,7 @@ class UpgradeValidationTest {
             assertFailsWith<IllegalArgumentException> {
                 Database.getRuntimeDefinitions(referenceId)
             }
+            assertTrue(Database.deleteRuntimeDefinition("malformed-runtime"))
 
             assertEquals(referenceId, Database.getCanonicalAppReference(referenceId)
                 ?.reference?.referenceId)
@@ -237,7 +285,6 @@ class UpgradeValidationTest {
                 Database.getCanonicalAppReference(referenceId)
                     ?.reference?.launchDefinitionId
             )
-            assertTrue(Database.deleteRuntimeDefinition("malformed-runtime"))
             assertTrue(Database.deleteRuntimeDefinition(runtime.id))
             assertTrue(Database.deleteLaunchDefinition(referenceId))
             assertTrue(Database.deleteCanonicalAppReference(referenceId))
@@ -426,7 +473,7 @@ class UpgradeValidationTest {
             }
         ) { home ->
             assertEquals(8, databaseVersionOfFile(preUpgradeBackup))
-            assertEquals(10, databaseVersion(home))
+            assertEquals(11, databaseVersion(home))
 
             Database.upsertBlockRule(
                 BlockRule(
@@ -440,14 +487,14 @@ class UpgradeValidationTest {
             assertTrue(Database.getBlockRules().any { it.id == "after-backup" })
 
             // Restore the v8 backup as an application-upgrade rollback. The
-            // restore path reopens the database, so v9/v10 run again.
+            // restore path reopens the database, so v9/v10/v11 run again.
             assertIs<AutoBackupService.RestoreResult.Success>(
                 AutoBackupService.restoreBackup(preUpgradeBackup)
             )
 
             assertTrue(Database.getBlockRules().any { it.id == "before-backup" })
             assertFalse(Database.getBlockRules().any { it.id == "after-backup" })
-            assertEquals(10, databaseVersion(home))
+            assertEquals(11, databaseVersion(home))
         }
     }
 
@@ -457,7 +504,7 @@ class UpgradeValidationTest {
             resources = listOf("schema-v8.sql"),
             beforeInit = ::insertActiveData
         ) { home ->
-            assertEquals(10, databaseVersion(home))
+            assertEquals(11, databaseVersion(home))
 
             val task = Database.getTasks().single { it.id == "active-task" }
             assertEquals(listOf("discord", "focus-helper"), task.focusBlockedApps)

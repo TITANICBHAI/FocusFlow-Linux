@@ -415,6 +415,52 @@ class InstalledAppsScannerLinuxTest {
     }
 
     @Test
+    fun `running argv is not treated as arbitrary aliases or package identity`() {
+        val javaIdentity = InstalledAppsScanner.runningProcessIdentityForTesting(
+            argv = listOf(
+                "/usr/bin/java",
+                "-cp",
+                "/opt/game/*",
+                "org.example.Game",
+                "--session",
+                "secret-value"
+            ),
+            executablePath = "/usr/bin/java"
+        )
+        assertNull(javaIdentity)
+
+        val flatpakIdentity = InstalledAppsScanner.runningProcessIdentityForTesting(
+            argv = listOf(
+                "/usr/bin/flatpak",
+                "run",
+                "org.example.Editor",
+                "--session",
+                "secret-value"
+            ),
+            executablePath = "/usr/bin/flatpak"
+        )
+        assertEquals(
+            Triple("flatpak", "org.example.Editor", emptyList<String>()),
+            flatpakIdentity
+        )
+        assertEquals(
+            listOf("editor"),
+            InstalledAppsScanner.runningAliasesForTesting(
+                processName = "editor",
+                executableName = "editor",
+                comm = "Editor"
+            )
+        )
+        assertTrue(
+            InstalledAppsScanner.runningAliasesForTesting(
+                processName = "flatpak",
+                executableName = "flatpak",
+                comm = "flatpak"
+            ).isEmpty()
+        )
+    }
+
+    @Test
     fun `catalog creates manual entries without adding a Linux exe suffix`() {
         val manual = InstalledAppCatalog.createManualProcessEntry("focus-helper")
 

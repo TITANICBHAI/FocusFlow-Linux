@@ -80,6 +80,15 @@ data class LinuxProcessSnapshot(
     /** A comparison value only; argv is hashed so it is not retained here. */
     val fingerprint: ProcessFingerprint
         get() = ProcessFingerprint.from(this)
+
+    /** Prevent accidental logging of raw, potentially credential-bearing argv. */
+    override fun toString(): String =
+        "LinuxProcessSnapshot(pid=$pid, processStartTicks=$processStartTicks, " +
+            "uid=$uid, parentPid=$parentPid, processGroupId=$processGroupId, " +
+            "sessionId=$sessionId, comm=$comm, executablePath=$executablePath, " +
+            "executableBasename=$executableBasename, argv=<redacted:${argv.size} arguments>, " +
+            "workingDirectory=$workingDirectory, cgroupPath=$cgroupPath, " +
+            "ioState=$ioState, fieldStatuses=$fieldStatuses)"
 }
 
 /** One immutable result of a complete procfs directory sweep. */

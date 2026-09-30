@@ -84,22 +84,22 @@ Prerequisite: none. Do this before broadening Linux identity behavior.
 
 Depends on: Batch 0.
 
-- [ ] **PI-1.1 — Define the raw process snapshot**
+- [x] **PI-1.1 — Define the raw process snapshot**
   Keep it limited to observed Linux process facts; do not mix in runtime family,
   application catalog IDs, package identity, or authorization decisions.
-- [ ] **PI-1.2 — Implement one canonical process repository**
+- [x] **PI-1.2 — Implement one canonical process repository**
   Produce one consistent snapshot generation per sweep and make downstream
   discovery/enforcement consume it instead of re-reading `/proc` independently.
-- [ ] **PI-1.3 — Parse procfs robustly**
+- [x] **PI-1.3 — Parse procfs robustly**
   Handle parenthesized `comm`, NUL-separated arguments, executable/cwd links,
   start ticks, inaccessible or disappearing processes, and partial observations.
-- [ ] **PI-1.4 — Enforce the process-instance identity rule**
+- [x] **PI-1.4 — Enforce the process-instance identity rule**
   Construct an authorization key only when both PID and non-null start ticks
   are known. Represent missing identity explicitly as unknown.
-- [ ] **PI-1.5 — Detect same-PID image/exec changes**
+- [x] **PI-1.5 — Detect same-PID image/exec changes**
   Add a derived fingerprint that can detect relevant process changes without
   treating a reused PID as the old process.
-- [ ] **PI-1.6 — Test identity and observation edge cases**
+- [x] **PI-1.6 — Test identity and observation edge cases**
   Cover procfs parsing, partial data, process disappearance, PID reuse, same-PID
   exec, and `(pid, null)` with a live pidfd remaining unknown and non-killable.
 
@@ -107,26 +107,26 @@ Depends on: Batch 0.
 
 Depends on: Batch 1.
 
-- [ ] **PI-2.1 — Define serializable `ALL` / `ANY` selector expressions**
+- [x] **PI-2.1 — Define serializable `ALL` / `ANY` selector expressions**
   Specify empty-expression and short-circuit semantics explicitly; serialization
   must not rely on ambiguous defaults.
-- [ ] **PI-2.2 — Add typed selectors and per-type comparison rules**
+- [x] **PI-2.2 — Add typed selectors and per-type comparison rules**
   Cover process name, executable basename/path, desktop/package identity,
   structured arguments, main class, working directory, runtime family, and
   execution environment. Paths remain case-sensitive.
-- [ ] **PI-2.3 — Separate runtime family from execution environment**
+- [x] **PI-2.3 — Separate runtime family from execution environment**
   A runtime such as Java and an environment such as a container/package source
   are distinct facts and must not be collapsed into one selector.
-- [ ] **PI-2.4 — Return evidence-bearing attribution results**
+- [x] **PI-2.4 — Return evidence-bearing attribution results**
   Support zero, one, and multiple matching applications; preserve ambiguity and
   confidence as evidence rather than turning either into authorization.
-- [ ] **PI-2.5 — Implement the three-state authorization decision**
+- [x] **PI-2.5 — Implement the three-state authorization decision**
   Keep `ALLOW`, proven-safe denial, and unknown/unsafe distinct; require final
   process-instance revalidation before any destructive action.
-- [ ] **PI-2.6 — Make argument interpretation structured and privacy-safe**
+- [x] **PI-2.6 — Make argument interpretation structured and privacy-safe**
   Remove arbitrary argv-token aliases and dotted-token package inference. Do not
   persist or log raw command lines that may contain secrets.
-- [ ] **PI-2.7 — Add selector/matcher/auth tests**
+- [x] **PI-2.7 — Add selector/matcher/auth tests**
   Cover boolean semantics, case rules, missing fields, ambiguity, authorization
   states, and the difference between “observed” and “authorized.”
 
@@ -290,3 +290,5 @@ Add one row per completed batch. Do not claim completion based only on a build.
 | Batch | Date | Tracker IDs completed | Changed areas | Commands/tests and results | Manual evidence or environment limits | Next batch |
 |---|---|---|---|---|---|---|
 | 0 | 2026-09-30 | PI-0.1–PI-0.4 | LinuxProcessSafety, InstalledAppsScanner, LinuxAppPicker, ProcessMonitor, LinuxProcessSafetyTest | `gradle test --tests com.focusflow.enforcement.LinuxProcessSafetyTest --tests com.focusflow.enforcement.NuclearModeLinuxTest --tests com.focusflow.enforcement.InstalledAppsScannerLinuxTest --tests com.focusflow.ui.components.LinuxAppPickerFilterTest --tests com.focusflow.enforcement.WinApiBindingsLinuxTest --no-daemon` — passed (34 tests); `git diff --check` — passed | No Windows runtime available. Direct diff review confirmed Windows-specific safe-name and manual-target paths are unchanged; new generic-runtime target restriction is Linux-gated. | Batch 1 |
+| 1 | 2026-09-30 | PI-1.1–PI-1.6 | LinuxProcessRepository and LinuxProcessRepositoryTest; consumers use the shared repository | `gradle test --tests com.focusflow.enforcement.LinuxProcessRepositoryTest --no-daemon` — passed; source audit found `/proc` process enumeration only in LinuxProcessRepository (specialized socket-table reads remain in NetworkBlocker) | Repository test suite covers procfs parsing, partial/disappearing processes, generation IDs, PID reuse, same-instance exec fingerprints, and live-pidfd/missing-start-ticks non-identity. No Windows runtime available. | Batch 2 |
+| 2 | 2026-09-30 | PI-2.1–PI-2.7 | LinuxProcessSelectors, LinuxProcessRuntimeMetadata, LinuxProcessMatcher, privacy-safe Linux snapshot formatting, InstalledAppsScanner Linux running-process interpretation, focused tests | `gradle test --tests com.focusflow.enforcement.LinuxProcessSelectorsTest --tests com.focusflow.enforcement.LinuxProcessMatcherTest --tests com.focusflow.enforcement.InstalledAppsScannerLinuxTest --tests com.focusflow.enforcement.LinuxProcessRepositoryTest --tests com.focusflow.enforcement.LinuxProcessSafetyTest --no-daemon` — passed (47 tests); `git diff --check` — passed | Covered versioned selector round-trips and empty-expression validation; typed comparison rules; missing-field and correlation uncertainty; multi-candidate ambiguity; Java structured args; generic/broad selector UNKNOWN; identity-bound revalidation; and argv redaction. Windows runtime unavailable; changed scanner interpretation is Linux-only and Windows enforcement paths were not edited. | Batch 3 |

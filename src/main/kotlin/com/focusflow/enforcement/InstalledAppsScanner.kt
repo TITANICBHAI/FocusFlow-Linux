@@ -185,6 +185,7 @@ object InstalledAppsScanner {
      * process names before it can be passed to a launcher or matcher.
      */
     private val SAFE_LINUX_PROCESS_NAME = Regex("^[a-z0-9][a-z0-9_.+-]*$")
+    private val SAFE_LINUX_PACKAGE_ID = Regex("^[A-Za-z0-9][A-Za-z0-9_.+-]*$")
 
     private val windowsCurated = mapOf(
         "chrome.exe"            to "Google Chrome",
@@ -369,19 +370,16 @@ object InstalledAppsScanner {
                         .lowercase(Locale.ROOT)
                     // Linux argv is already tokenized by the process repository;
                     // do not reconstruct a shell command before interpreting it.
-                    val normalized = if (isLinux) normalizeLinuxArgv(process.argv) else null
+                    val normalized = if (isLinux) {
+                        normalizeLinuxArgv(process.argv, cmd)
+                    } else {
+                        null
+                    }
                     val exe = normalized?.processName
                         ?: comm?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotBlank() }
                         ?: commandName
                     val display = curated[exe] ?: friendlyName(exe)
-                    val aliases = (
-                        listOf(exe, commandName, comm.orEmpty()) +
-                            normalized?.aliases.orEmpty() +
-                            listOfNotNull(normalized?.packageId)
-                        )
-                        .map { it.trim().lowercase(Locale.ROOT) }
-                        .filter { it.isNotBlank() && it !in setOf("flatpak", "snap", "env") }
-                        .distinct()
+                    val aliases = runningProcessAliases(exe, commandName, comm)
                     ScannedApp(
                         processName = exe,
                         displayName = display,
@@ -1079,8 +1077,62 @@ object InstalledAppsScanner {
     private fun normalizeLinuxExec(exec: String): NormalizedLinuxExec? =
         normalizeLinuxArgvTokens(tokenizeDesktopExec(exec), fullCommand = exec)
 
-    private fun normalizeLinuxArgv(argv: List<String>): NormalizedLinuxExec? =
-        normalizeLinuxArgvTokens(argv, fullCommand = "")
+    /**
+     * Raw running-process argv is not a source of application aliases. Only a
+     * verified Flatpak/Snap launcher invocation can supply a package ID, and
+     * that ID stays in the package field rather than becoming a process alias.
+     */
+    private fun normalizeLinuxArgv(
+        argv: List<String>,
+        executablePath: String?
+    ): NormalizedLinuxExec? {
+        val actualExecutable = executablePath
+            ?.let { java.io.File(it).name.lowercase(Locale.ROOT) }
+            ?: return null
+        val argvExecutable = argv.firstOrNull()
+            ?.let { java.io.File(it).name.lowercase(Locale.ROOT) }
+            ?: return null
+        if (actualExecutable != argvExecutable || argv.getOrNull(1) != "run") return null
+        if (actualExecutable !in setOf("flatpak", "snap")) return null
+
+        val packageId = argv.getOrNull(2)
+            ?.takeIf { SAFE_LINUX_PACKAGE_ID.matches(it) }
+            ?: return null
+        return NormalizedLinuxExec(
+            processName = actualExecutable,
+            command = executablePath,
+            fullCommand = "",
+            aliases = emptyList(),
+            packageId = packageId
+        )
+    }
+
+    private fun runningProcessAliases(
+        processName: String,
+        executableName: String,
+        comm: String?
+    ): List<String> =
+        listOf(processName, executableName, comm.orEmpty())
+            .map { it.trim().lowercase(Locale.ROOT) }
+            .filter {
+                it.isNotBlank() &&
+                    it !in setOf("flatpak", "snap", "env")
+            }
+            .distinct()
+
+    internal fun runningProcessIdentityForTesting(
+        argv: List<String>,
+        executablePath: String?
+    ): Triple<String, String?, List<String>>? =
+        normalizeLinuxArgv(argv, executablePath)?.let {
+            Triple(it.processName, it.packageId, it.aliases)
+        }
+
+    internal fun runningAliasesForTesting(
+        processName: String,
+        executableName: String,
+        comm: String?
+    ): List<String> = runningProcessAliases(processName, executableName, comm)
 
     private fun normalizeLinuxArgvTokens(
         rawTokens: List<String>,

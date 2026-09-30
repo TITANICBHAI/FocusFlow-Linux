@@ -2,14 +2,17 @@ package com.focusflow.services
 
 import com.focusflow.data.Database
 import com.focusflow.data.models.DailyAllowance
+import com.focusflow.enforcement.LinuxProcessCompatibilityAdapter
+import com.focusflow.enforcement.LinuxLegacyTargetStatus
 import com.focusflow.enforcement.LinuxProcessRepository
 import com.focusflow.enforcement.LinuxProcessSafety
 import com.focusflow.enforcement.LinuxProcessSnapshot
+import com.focusflow.enforcement.LinuxProcessDecisionDiagnostics
 import com.focusflow.enforcement.ProcessInstanceIdentity
 import com.focusflow.enforcement.ProcessMonitor
+import com.focusflow.enforcement.SelectorMatchStatus
 import com.focusflow.enforcement.getForegroundProcessName
 import com.focusflow.enforcement.isLinux
-import com.focusflow.enforcement.isSameKnownProcessObservation
 import com.focusflow.enforcement.isWindows
 import com.focusflow.enforcement.killProcessByName
 import kotlinx.coroutines.*
@@ -36,7 +39,8 @@ object DailyAllowanceTracker {
         val pid: Long,
         val processName: String,
         val processHandle: ProcessHandle? = null,
-        val linuxObservation: LinuxProcessSnapshot? = null
+        val linuxObservation: LinuxProcessSnapshot? = null,
+        val legacyTargetName: String? = null
     )
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -147,20 +151,42 @@ object DailyAllowanceTracker {
 
         val runningMap: Map<String, List<RunningProcessTarget>> = try {
             if (isLinux) {
-                LinuxProcessRepository.system.snapshot().processes
-                    .mapNotNull { observation ->
+                val processes = LinuxProcessRepository.system.snapshot().processes
+                var unknownObservations = 0
+                val targets = allowances.flatMap { allowance ->
+                    processes.mapNotNull { observation ->
                         if (observation.pid == ownPid) return@mapNotNull null
+                        val evaluation = LinuxProcessCompatibilityAdapter.evaluate(
+                            observation,
+                            listOf(allowance.processName)
+                        )
+                        if (evaluation.selectorStatus == SelectorMatchStatus.INSUFFICIENT_DATA ||
+                            evaluation.status == LinuxLegacyTargetStatus.UNKNOWN
+                        ) {
+                            unknownObservations++
+                        }
+                        if (evaluation.selectorStatus != SelectorMatchStatus.MATCH) {
+                            return@mapNotNull null
+                        }
                         val processName = observation.executableBasename
-                            ?.lowercase()
-                            ?.takeIf { it.isNotBlank() }
-                            ?: return@mapNotNull null
-                        processName to RunningProcessTarget(
+                            ?: observation.comm
+                            ?: allowance.processName.lowercase()
+                        allowance.processName.lowercase() to RunningProcessTarget(
                             pid = observation.pid,
                             processName = processName,
-                            linuxObservation = observation
+                            linuxObservation = observation,
+                            legacyTargetName = allowance.processName
                         )
                     }
-                    .groupBy({ it.first }, { it.second })
+                }
+                if (unknownObservations > 0) {
+                    LinuxProcessDecisionDiagnostics.recordAggregate(
+                        "DailyAllowanceTracker",
+                        "unknown-target-observations",
+                        "outcome=UNKNOWN reason=ALLOWANCE_TARGET_OBSERVATION_INCOMPLETE"
+                    )
+                }
+                targets.groupBy({ it.first }, { it.second })
             } else {
                 ProcessHandle.allProcesses()
                     .toList()
@@ -250,25 +276,96 @@ object DailyAllowanceTracker {
         } else if (isLinux) {
             val repository = LinuxProcessRepository.system
             targets?.forEach { target ->
-                val expected = target.linuxObservation ?: return@forEach
-                if (expected.processInstanceIdentity !is ProcessInstanceIdentity.Known) {
-                    return@forEach
-                }
-                if (
-                    target.pid == ownPid ||
-                    LinuxProcessSafety.isProtectedProcess(target.pid, target.processName)
-                ) {
-                    return@forEach
-                }
-                val processHandle = ProcessHandle.of(target.pid).orElse(null)
-                    ?: return@forEach
-                val current = repository.readProcess(target.pid)
-                if (
-                    isSameKnownProcessObservation(expected, current) &&
-                    current.executableBasename?.equals(target.processName, ignoreCase = true) == true &&
-                    processHandle.isAlive
-                ) {
-                    runCatching { processHandle.destroyForcibly() }
+                try {
+                    val expected = target.linuxObservation
+                    if (expected == null) {
+                        LinuxProcessDecisionDiagnostics.recordAggregate(
+                            "DailyAllowanceTracker",
+                            "missing-observation:${target.pid}",
+                            "outcome=UNKNOWN reason=PROCESS_OBSERVATION_UNAVAILABLE pid=${target.pid}"
+                        )
+                        return@forEach
+                    }
+                    if (expected.processInstanceIdentity !is ProcessInstanceIdentity.Known) {
+                        LinuxProcessDecisionDiagnostics.recordAggregate(
+                            "DailyAllowanceTracker",
+                            "unknown-process-instance:${target.pid}",
+                            "outcome=UNKNOWN reason=UNKNOWN_PROCESS_INSTANCE pid=${target.pid}"
+                        )
+                        return@forEach
+                    }
+                    val protectionCategory =
+                        LinuxProcessSafety.protectionClassification(target.pid, expected.comm)
+                            ?: LinuxProcessSafety.protectionClassification(
+                                target.pid,
+                                expected.executableBasename
+                            )
+                    if (protectionCategory != null || target.pid == ownPid) {
+                        LinuxProcessDecisionDiagnostics.recordAggregate(
+                            "DailyAllowanceTracker",
+                            "protected-process:${target.pid}",
+                            "outcome=ALLOW reason=GLOBAL_PROTECTION " +
+                                "category=${protectionCategory?.category ?: "FOCUSFLOW_SELF"} " +
+                                "pid=${target.pid}"
+                        )
+                        return@forEach
+                    }
+                    val processHandle = ProcessHandle.of(target.pid).orElse(null)
+                    if (processHandle == null) {
+                        LinuxProcessDecisionDiagnostics.recordAggregate(
+                            "DailyAllowanceTracker",
+                            "not-live:${target.pid}",
+                            "outcome=UNKNOWN reason=PROCESS_NOT_LIVE pid=${target.pid}"
+                        )
+                        return@forEach
+                    }
+                    val current = repository.readProcess(target.pid)
+                    val currentMatches =
+                        LinuxProcessCompatibilityAdapter.revalidateMatch(
+                            expected,
+                            current,
+                            listOf(target.legacyTargetName ?: processName)
+                        ) && processHandle.isAlive
+                    if (!currentMatches) {
+                        LinuxProcessDecisionDiagnostics.recordAggregate(
+                            "DailyAllowanceTracker",
+                            "current-revalidation:${target.pid}",
+                            "outcome=UNKNOWN reason=FINAL_PROCESS_REVALIDATION_FAILED " +
+                                "pid=${target.pid}"
+                        )
+                        return@forEach
+                    }
+                    val finalObservation = repository.readProcess(target.pid)
+                    if (
+                        LinuxProcessCompatibilityAdapter.revalidateMatch(
+                            expected,
+                            finalObservation,
+                            listOf(target.legacyTargetName ?: processName)
+                        ) &&
+                        processHandle.isAlive
+                    ) {
+                        LinuxProcessDecisionDiagnostics.recordAggregate(
+                            "DailyAllowanceTracker",
+                            "terminated:${target.pid}",
+                            "outcome=DENY_AND_SAFE_TO_TERMINATE " +
+                                "reason=DAILY_ALLOWANCE_TARGET_REVALIDATED pid=${target.pid}"
+                        )
+                        runCatching { processHandle.destroyForcibly() }
+                    } else {
+                        LinuxProcessDecisionDiagnostics.recordAggregate(
+                            "DailyAllowanceTracker",
+                            "final-revalidation:${target.pid}",
+                            "outcome=UNKNOWN reason=FINAL_PROCESS_REVALIDATION_FAILED " +
+                                "pid=${target.pid}"
+                        )
+                    }
+                } catch (exception: Exception) {
+                    LinuxProcessDecisionDiagnostics.recordAggregate(
+                        "DailyAllowanceTracker",
+                        "revalidation-error:${target.pid}",
+                        "outcome=UNKNOWN reason=PROCESS_REVALIDATION_FAILED " +
+                            "cause=${exception.javaClass.simpleName} pid=${target.pid}"
+                    )
                 }
             }
         } else {

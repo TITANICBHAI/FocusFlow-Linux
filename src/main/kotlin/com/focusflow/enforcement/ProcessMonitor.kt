@@ -208,6 +208,19 @@ object ProcessMonitor {
         if (isLinux) launcherRuntimeCandidates.isNotEmpty()
         else launcherAllowedProcesses.isNotEmpty()
 
+    private fun linuxProtectionCategory(process: LinuxProcessSnapshot): String? =
+        (
+            LinuxProcessSafety.protectionClassification(process.pid, process.comm)
+                ?: LinuxProcessSafety.protectionClassification(
+                    process.pid,
+                    process.executableBasename
+                )
+            )?.category?.name
+
+    private fun isLinuxLauncherSafe(process: LinuxProcessSnapshot): Boolean =
+        listOfNotNull(process.comm, process.executableBasename)
+            .any { it.lowercase() in launcherSafeProcesses }
+
     fun installLinuxLauncherAuthorization(
         candidates: List<ApplicationRuntimeCandidate>
     ) = synchronized(launcherAuthorizationLock) {
@@ -610,7 +623,18 @@ object ProcessMonitor {
                     if (observation.pid == ownPid) return@forEach
                     val identity =
                         observation.processInstanceIdentity as? ProcessInstanceIdentity.Known
-                            ?: return@forEach
+                    if (identity == null) {
+                        val unknownDecision = LinuxProcessAuthorizer.decide(
+                            FocusLauncherRuntimePolicy.selectorContext(observation),
+                            candidates
+                        )
+                        LinuxProcessDecisionDiagnostics.recordAuthorization(
+                            "ProcessMonitor",
+                            unknownDecision,
+                            observation
+                        )
+                        return@forEach
+                    }
                     val previousAssociation = previousAssociations[identity.key]
                     if (
                         previousAssociation != null &&
@@ -622,19 +646,29 @@ object ProcessMonitor {
                         return@forEach
                     }
 
-                    val processName = observation.comm
-                        ?: observation.executableBasename
-                        ?: return@forEach
                     // These protections are global/session safety policy. They
                     // remain separate from selected application references and
                     // from the session-local instance associations below.
-                    if (
-                        LinuxProcessSafety.isProtectedProcess(observation.pid, processName) ||
-                        processName.lowercase() in launcherSafeProcesses
-                    ) return@forEach
+                    val protectionCategory = linuxProtectionCategory(observation)
+                    val launcherSafe = isLinuxLauncherSafe(observation)
+                    if (protectionCategory != null || launcherSafe) {
+                        LinuxProcessDecisionDiagnostics.recordAggregate(
+                            "ProcessMonitor",
+                            "launcher-global-protection:${identity.key}",
+                            "outcome=ALLOW reason=GLOBAL_PROTECTION " +
+                                "category=${protectionCategory ?: "CLASSIFIED_LAUNCHER_SAFE"} " +
+                                "pid=${identity.key.pid}"
+                        )
+                        return@forEach
+                    }
 
                     val context = FocusLauncherRuntimePolicy.selectorContext(observation)
                     val decision = LinuxProcessAuthorizer.decide(context, candidates)
+                    LinuxProcessDecisionDiagnostics.recordAuthorization(
+                        "ProcessMonitor",
+                        decision,
+                        observation
+                    )
                     FocusLauncherRuntimePolicy.association(decision, observation)?.let { association ->
                         authorizedInstances[identity.key] = association
                     }
@@ -654,22 +688,60 @@ object ProcessMonitor {
                     // newly authorized instances are not destructive targets.
                     val freshObservation = repository.readProcess(observation.pid)
                     val currentAuthorization = linuxLauncherAuthorizationSnapshot()
+                    val freshProtectionCategory = linuxProtectionCategory(freshObservation)
+                    val currentlyLauncherSafe = isLinuxLauncherSafe(freshObservation)
+                    val currentDecision = currentAuthorization.candidates
+                        .takeIf { it.isNotEmpty() }
+                        ?.let {
+                            LinuxProcessAuthorizer.decide(
+                                FocusLauncherRuntimePolicy.selectorContext(freshObservation),
+                                it
+                            )
+                        }
+                    currentDecision?.let {
+                        LinuxProcessDecisionDiagnostics.recordAuthorization(
+                            "ProcessMonitor",
+                            it,
+                            freshObservation
+                        )
+                    }
+                    if (currentAuthorization.version != authorization.version ||
+                        currentAuthorization.candidates.isEmpty()
+                    ) {
+                        LinuxProcessDecisionDiagnostics.recordAggregate(
+                            "ProcessMonitor",
+                            "launcher-policy-changed:${identity.key}",
+                            "outcome=UNKNOWN reason=AUTHORIZATION_POLICY_CHANGED " +
+                                "pid=${identity.key.pid} startTicks=${identity.key.processStartTicks}"
+                        )
+                        return@forEach
+                    }
+                    if (freshProtectionCategory != null || currentlyLauncherSafe) {
+                        LinuxProcessDecisionDiagnostics.recordAggregate(
+                            "ProcessMonitor",
+                            "launcher-protected:${identity.key}",
+                            "outcome=ALLOW reason=GLOBAL_PROTECTION " +
+                                "category=${freshProtectionCategory ?: "CLASSIFIED_LAUNCHER_SAFE"} " +
+                                "pid=${identity.key.pid}"
+                        )
+                        return@forEach
+                    }
                     if (
-                        currentAuthorization.version != authorization.version ||
-                        currentAuthorization.candidates.isEmpty() ||
-                        LinuxProcessSafety.isProtectedProcess(
-                            freshObservation.pid,
-                            freshObservation.comm ?: freshObservation.executableBasename
-                        ) ||
-                        (freshObservation.comm ?: freshObservation.executableBasename)
-                            ?.lowercase() in launcherSafeProcesses ||
                         !FocusLauncherRuntimePolicy.mayTerminate(
                             priorDecision = decision,
                             observedProcess = observation,
                             currentProcess = freshObservation,
                             selectedCandidates = currentAuthorization.candidates
                         )
-                    ) return@forEach
+                    ) {
+                        LinuxProcessDecisionDiagnostics.recordAggregate(
+                            "ProcessMonitor",
+                            "launcher-revalidation:${identity.key}",
+                            "outcome=UNKNOWN reason=FINAL_AUTHORIZATION_REVALIDATION_FAILED " +
+                                "pid=${identity.key.pid} startTicks=${identity.key.processStartTicks}"
+                        )
+                        return@forEach
+                    }
 
                     try {
                         destroyForCurrentLinuxLauncherAuthorization(
@@ -748,7 +820,31 @@ object ProcessMonitor {
         "searchapp.exe"
     )
 
-    private suspend fun checkProcess(processName: String, pid: Long = 0L) {
+    private suspend fun checkProcess(reportedProcessName: String, pid: Long = 0L) {
+        val linuxObservation = if (isLinux) {
+            if (pid <= 0L) {
+                EnforcementLog.info(
+                    "ProcessMonitor",
+                    "outcome=UNKNOWN reason=INVALID_FOREGROUND_PID pid=$pid"
+                )
+                return
+            }
+            try {
+                LinuxProcessRepository.system.readProcess(pid)
+            } catch (exception: Exception) {
+                EnforcementLog.info(
+                    "ProcessMonitor",
+                    "outcome=UNKNOWN reason=LINUX_PROCESS_OBSERVATION_UNAVAILABLE " +
+                        "pid=$pid cause=${exception.javaClass.simpleName}"
+                )
+                return
+            }
+        } else {
+            null
+        }
+        val processName = linuxObservation?.comm
+            ?: linuxObservation?.executableBasename
+            ?: reportedProcessName
         val lower = processName.lowercase()
         val now   = System.currentTimeMillis()
 
@@ -813,17 +909,54 @@ object ProcessMonitor {
         val resolvedLower = resolvedName.lowercase()
 
         // ── 0. VPN process blocking ───────────────────────────────────────────
-        if (VpnBlocker.isVpnProcess(resolvedLower)) {
+        val matchesVpnBlock = if (isLinux && linuxObservation != null) {
+            if (!VpnBlocker.isEnabled) {
+                false
+            } else {
+                val evaluation = LinuxProcessCompatibilityAdapter.evaluate(
+                    linuxObservation,
+                    VpnBlocker.getAllBlockedProcesses()
+                )
+                LinuxProcessDecisionDiagnostics.recordLegacyTarget(
+                    "ProcessMonitor",
+                    evaluation,
+                    linuxObservation
+                )
+                evaluation.mayEnforce
+            }
+        } else {
+            VpnBlocker.isVpnProcess(resolvedLower)
+        }
+        if (matchesVpnBlock) {
             if (tryAcquireCooldown("vpn:$resolvedLower", now)) {
-                enforceBlock(resolvedName)
+                enforceBlock(
+                    resolvedName,
+                    pid,
+                    linuxObservation,
+                    VpnBlocker.getAllBlockedProcesses()
+                )
             }
             return
         }
 
         // ── 1. Process-name blocking ──────────────────────────────────────────
-        if (blocked.any { resolvedLower == it.lowercase() }) {
+        val blockedEvaluation = if (isLinux && linuxObservation != null) {
+            LinuxProcessCompatibilityAdapter.evaluate(linuxObservation, blocked)
+                .also {
+                    LinuxProcessDecisionDiagnostics.recordLegacyTarget(
+                        "ProcessMonitor",
+                        it,
+                        linuxObservation
+                    )
+                }
+        } else {
+            null
+        }
+        val blockedMatch = blockedEvaluation?.mayEnforce
+            ?: blocked.any { resolvedLower == it.lowercase() }
+        if (blockedMatch) {
             if (tryAcquireCooldown(resolvedLower, now)) {
-                enforceBlock(resolvedName, pid)
+                enforceBlock(resolvedName, pid, linuxObservation, blocked)
             }
             return
         }
@@ -835,8 +968,22 @@ object ProcessMonitor {
                 val netTitle = getForegroundWindowTitle() ?: ""
                 val netTitleLower = netTitle.lowercase()
                 netRules.forEach { rule ->
-                    val processMatches = rule.targetProcess == null ||
-                        rule.targetProcess.lowercase() == resolvedLower
+                    val processMatches = when {
+                        rule.targetProcess == null -> true
+                        isLinux && linuxObservation != null -> {
+                            val evaluation = LinuxProcessCompatibilityAdapter.evaluate(
+                                linuxObservation,
+                                listOf(rule.targetProcess)
+                            )
+                            LinuxProcessDecisionDiagnostics.recordLegacyTarget(
+                                "ProcessMonitor",
+                                evaluation,
+                                linuxObservation
+                            )
+                            evaluation.mayEnforce
+                        }
+                        else -> rule.targetProcess.lowercase() == resolvedLower
+                    }
                     if (!processMatches) return@forEach
                     if (netTitleLower.contains(rule.pattern.lowercase())) {
                         val netKey = "net:${rule.id}:$resolvedLower"
@@ -861,8 +1008,17 @@ object ProcessMonitor {
 
         if (!tryAcquireCooldown("kw:$resolvedLower", now)) return
 
-        // Kill by PID when available — closes only the specific browser window.
-        if (pid > 0L) killProcessByPid(pid) else killProcessByName(resolvedName)
+        // Linux destructive actions require the same known process instance that
+        // supplied the foreground/title evidence. Windows retains its existing
+        // targeted PID/name behavior.
+        if (isLinux) {
+            val expected = linuxObservation ?: return
+            if (!terminateLinuxObservationSafely(expected)) return
+        } else if (pid > 0L) {
+            killProcessByPid(pid)
+        } else {
+            killProcessByName(resolvedName)
+        }
         SoundAversion.playBlockAlert()
 
         val displayName = resolvedName.removeSuffix(".exe").replaceFirstChar { it.uppercase() }
@@ -928,12 +1084,22 @@ object ProcessMonitor {
      * Shared kill + log + notify path for process-name block triggers.
      * Kills by PID when available (targeted), falls back to name-based kill.
      */
-    private suspend fun enforceBlock(processName: String, pid: Long = 0L) {
+    private suspend fun enforceBlock(
+        processName: String,
+        pid: Long = 0L,
+        linuxExpected: LinuxProcessSnapshot? = null,
+        linuxTargets: Iterable<String> = emptyList()
+    ) {
         // Final defense: rules can be stale, manually entered, or created by a
         // different feature after picker validation. Never terminate FocusFlow's
         // exact Linux PID or classified system/session infrastructure.
-        if (LinuxProcessSafety.isProtectedProcess(pid, processName)) return
-        if (pid > 0L) killProcessByPid(pid) else killProcessByName(processName)
+        if (isLinux) {
+            val expected = linuxExpected ?: return
+            if (!terminateLinuxObservationSafely(expected, linuxTargets)) return
+        } else {
+            if (LinuxProcessSafety.isProtectedProcess(pid, processName)) return
+            if (pid > 0L) killProcessByPid(pid) else killProcessByName(processName)
+        }
         SoundAversion.playBlockAlert()
 
         val displayName = processName.removeSuffix(".exe").replaceFirstChar { it.uppercase() }
@@ -947,9 +1113,118 @@ object ProcessMonitor {
             AppBlocker.showOverlay(displayName)
         }
 
-        val rule = cachedBlockRules.find { it.processName.equals(processName, ignoreCase = true) }
+        val rule = if (isLinux && linuxExpected != null) {
+            cachedBlockRules.firstOrNull { candidate ->
+                LinuxProcessCompatibilityAdapter.evaluate(
+                    linuxExpected,
+                    listOf(candidate.processName)
+                ).selectorStatus == SelectorMatchStatus.MATCH
+            }
+        } else {
+            cachedBlockRules.find { it.processName.equals(processName, ignoreCase = true) }
+        }
         if (rule?.blockNetwork == true) {
             NetworkBlocker.addRule(processName)
+        }
+    }
+
+    /**
+     * Final Linux guard shared by name, keyword, schedule, session, allowance,
+     * and standalone blocking. Name-based policies are re-matched through the
+     * compatibility adapter; title-based policies still require a stable,
+     * unchanged process-instance observation.
+     */
+    private fun terminateLinuxObservationSafely(
+        expected: LinuxProcessSnapshot,
+        legacyTargets: Iterable<String>? = null
+    ): Boolean {
+        val identity = expected.processInstanceIdentity as? ProcessInstanceIdentity.Known
+        if (identity == null) {
+            LinuxProcessDecisionDiagnostics.recordAggregate(
+                "ProcessMonitor",
+                "unknown-process-instance:${expected.pid}",
+                "outcome=UNKNOWN reason=UNKNOWN_PROCESS_INSTANCE pid=${expected.pid}"
+            )
+            return false
+        }
+
+        val protectionCategory = linuxProtectionCategory(expected)
+        if (protectionCategory != null) {
+            LinuxProcessDecisionDiagnostics.recordAggregate(
+                "ProcessMonitor",
+                "protected-process:${identity.key}",
+                "outcome=ALLOW reason=GLOBAL_PROTECTION category=$protectionCategory " +
+                    "pid=${expected.pid}"
+            )
+            return false
+        }
+
+        return try {
+            val repository = LinuxProcessRepository.system
+            val current = repository.readProcess(expected.pid)
+            val stillMatches = if (legacyTargets == null) {
+                isSameKnownProcessObservation(expected, current)
+            } else {
+                LinuxProcessCompatibilityAdapter.revalidateMatch(
+                    expected,
+                    current,
+                    legacyTargets
+                )
+            }
+            if (!stillMatches) {
+                EnforcementLog.info(
+                    "ProcessMonitor",
+                    "outcome=UNKNOWN reason=PROCESS_IDENTITY_OR_TARGET_CHANGED " +
+                        "pid=${identity.key.pid} startTicks=${identity.key.processStartTicks}"
+                )
+                return false
+            }
+            val processHandle = ProcessHandle.of(identity.key.pid).orElse(null)
+            if (processHandle == null || !processHandle.isAlive) {
+                LinuxProcessDecisionDiagnostics.recordAggregate(
+                    "ProcessMonitor",
+                    "not-live:${identity.key}",
+                    "outcome=UNKNOWN reason=PROCESS_NOT_LIVE " +
+                        "pid=${identity.key.pid} startTicks=${identity.key.processStartTicks}"
+                )
+                return false
+            }
+            // Check the canonical observation again immediately before signalling.
+            val finalObservation = repository.readProcess(identity.key.pid)
+            val finalCheck = if (legacyTargets == null) {
+                isSameKnownProcessObservation(expected, finalObservation)
+            } else {
+                LinuxProcessCompatibilityAdapter.revalidateMatch(
+                    expected,
+                    finalObservation,
+                    legacyTargets
+                )
+            }
+            if (!finalCheck || !processHandle.isAlive) {
+                LinuxProcessDecisionDiagnostics.recordAggregate(
+                    "ProcessMonitor",
+                    "final-recheck:${identity.key}",
+                    "outcome=UNKNOWN reason=FINAL_PROCESS_REVALIDATION_FAILED " +
+                        "pid=${identity.key.pid} startTicks=${identity.key.processStartTicks}"
+                )
+                return false
+            }
+            EnforcementLog.info(
+                "ProcessMonitor",
+                "outcome=DENY_AND_SAFE_TO_TERMINATE " +
+                    "reason=${if (legacyTargets == null) "FOREGROUND_POLICY_REVALIDATED" else "LEGACY_TARGET_REVALIDATED"} " +
+                    "pid=${identity.key.pid} startTicks=${identity.key.processStartTicks}"
+            )
+            processHandle.destroyForcibly()
+            true
+        } catch (exception: Exception) {
+            EnforcementLog.warn(
+                "ProcessMonitor",
+                "Linux termination was not performed after a failed identity recheck " +
+                    "for pid=${identity.key.pid}",
+                exception
+            )
+            false
         }
     }
 

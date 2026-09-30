@@ -226,17 +226,33 @@ object NetworkBlocker {
             // repository; `/proc/<pid>/net` below remains the specialized socket
             // table read that supplies remote-address observations.
             val repository = LinuxProcessRepository.system
-            val matchingProcesses = repository.snapshot().processes.filter { process ->
-                process.processInstanceIdentity is ProcessInstanceIdentity.Known &&
-                    process.executableBasename?.let { base ->
-                        base.equals(lower, ignoreCase = true) ||
-                            base.equals(lower.removeSuffix(".exe"), ignoreCase = true) ||
-                            base.equals(processName, ignoreCase = true)
-                    } == true
+            val processSnapshot = repository.snapshot()
+            var unknownMatches = 0
+            val matchingProcesses = processSnapshot.processes.filter { process ->
+                val evaluation = LinuxProcessCompatibilityAdapter.evaluate(
+                    process,
+                    listOf(processName)
+                )
+                if (evaluation.status == LinuxLegacyTargetStatus.UNKNOWN) {
+                    unknownMatches++
+                }
+                evaluation.mayEnforce
             }
 
             if (matchingProcesses.isEmpty()) {
-                linuxRuleMessages[lower] = "Target process is not running; waiting to retry"
+                if (unknownMatches > 0) {
+                    linuxRuleMessages[lower] =
+                        "Target process identity is unknown for $unknownMatches observation(s); " +
+                            "no network target was applied"
+                    LinuxProcessDecisionDiagnostics.recordAggregate(
+                        "NetworkBlocker",
+                        "unknown-target:$lower",
+                        "outcome=UNKNOWN reason=PROCESS_TARGET_OR_IDENTITY_UNKNOWN " +
+                            "target=$lower"
+                    )
+                } else {
+                    linuxRuleMessages[lower] = "Target process is not running; waiting to retry"
+                }
                 return@Thread
             }
 
@@ -244,11 +260,21 @@ object NetworkBlocker {
             val ips = mutableSetOf<String>()
             for (observed in matchingProcesses) {
                 val beforeRead = repository.readProcess(observed.pid)
-                if (!isSameKnownProcessObservation(observed, beforeRead)) continue
+                if (!LinuxProcessCompatibilityAdapter.revalidateMatch(
+                        observed,
+                        beforeRead,
+                        listOf(processName)
+                    )
+                ) continue
                 val processIps = parseLinuxProcNetTcp(observed.pid, "tcp") +
                     parseLinuxProcNetTcp(observed.pid, "tcp6")
                 val afterRead = repository.readProcess(observed.pid)
-                if (isSameKnownProcessObservation(observed, afterRead)) {
+                if (LinuxProcessCompatibilityAdapter.revalidateMatch(
+                        observed,
+                        afterRead,
+                        listOf(processName)
+                    )
+                ) {
                     ips += processIps
                 }
             }

@@ -177,7 +177,15 @@ object NuclearMode {
                 }
                 .filter { it in escapeProcesses && shouldBlockInstallerProcess(it) }
                 .toSet()
-        } catch (_: Exception) {
+        } catch (exception: Exception) {
+            if (isLinux) {
+                LinuxProcessDecisionDiagnostics.recordAggregate(
+                    "NuclearMode",
+                    "escape-scan-error",
+                    "outcome=UNKNOWN reason=ESCAPE_PROCESS_SCAN_FAILED " +
+                        "cause=${exception.javaClass.simpleName}"
+                )
+            }
             emptySet()
         }
     }
@@ -186,19 +194,43 @@ object NuclearMode {
         return try {
             if (isLinux) {
                 val repository = LinuxProcessRepository.system
-                return repository.snapshot().processes
-                    .mapNotNull { observation ->
-                        if (observation.pid == ownPid) return@mapNotNull null
-                        val exeName = observation.executableBasename
-                            ?.lowercase()
-                            ?.takeIf { it.isNotBlank() }
-                            ?: return@mapNotNull null
-                        exeName.takeIf {
-                            !LinuxProcessSafety.isProtectedProcess(observation.pid, it)
-                        }
+                var unknownObservations = 0
+                val found = repository.snapshot().processes.flatMap { observation ->
+                    if (observation.pid == ownPid) return@flatMap emptySet()
+                    val protection =
+                        LinuxProcessSafety.protectionClassification(
+                            observation.pid,
+                            observation.comm
+                        ) ?: LinuxProcessSafety.protectionClassification(
+                            observation.pid,
+                            observation.executableBasename
+                        )
+                    if (protection != null) {
+                        LinuxProcessDecisionDiagnostics.recordAggregate(
+                            "NuclearMode",
+                            "protected-escape-scan:${observation.pid}",
+                            "outcome=ALLOW reason=GLOBAL_PROTECTION " +
+                                "category=${protection.category} pid=${observation.pid}"
+                        )
+                        return@flatMap emptySet()
                     }
-                    .filter { it in escapeProcesses }
-                    .toSet()
+                    val evaluation = LinuxProcessCompatibilityAdapter.evaluate(
+                        observation,
+                        escapeProcesses
+                    )
+                    if (evaluation.status == LinuxLegacyTargetStatus.UNKNOWN) {
+                        unknownObservations++
+                    }
+                    if (evaluation.mayEnforce) evaluation.matchedTargetNames else emptySet()
+                }.toSet()
+                if (unknownObservations > 0) {
+                    LinuxProcessDecisionDiagnostics.recordAggregate(
+                        "NuclearMode",
+                        "unknown-escape-observations",
+                        "outcome=UNKNOWN reason=ESCAPE_TARGET_OBSERVATION_INCOMPLETE"
+                    )
+                }
+                return found
             }
             ProcessHandle.allProcesses()
                 .filter { ph -> ph.pid() != ownPid && ph.info().command().isPresent }
@@ -213,7 +245,17 @@ object NuclearMode {
                 }
                 .filter { it in escapeProcesses }
                 .toSet()
-        } catch (_: Exception) { emptySet() }
+        } catch (exception: Exception) {
+            if (isLinux) {
+                LinuxProcessDecisionDiagnostics.recordAggregate(
+                    "NuclearMode",
+                    "escape-fallback-scan-error",
+                    "outcome=UNKNOWN reason=ESCAPE_PROCESS_SCAN_FAILED " +
+                        "cause=${exception.javaClass.simpleName}"
+                )
+            }
+            emptySet()
+        }
     }
 
     /**
@@ -286,36 +328,113 @@ object NuclearMode {
         if (isLinux) {
             try {
                 val repository = LinuxProcessRepository.system
+                var unknownObservations = 0
+                var failedRevalidations = 0
                 repository.snapshot().processes.forEach { observation ->
                     if (observation.pid == ownPid) return@forEach
-                    if (observation.processInstanceIdentity !is ProcessInstanceIdentity.Known) {
+                    val evaluation = LinuxProcessCompatibilityAdapter.evaluate(observation, found)
+                    if (evaluation.status == LinuxLegacyTargetStatus.UNKNOWN) {
+                        unknownObservations++
                         return@forEach
                     }
-                    val exeName = observation.executableBasename
-                        ?.lowercase()
-                        ?: return@forEach
-                    if (
-                        exeName !in found ||
-                        LinuxProcessSafety.isProtectedProcess(observation.pid, exeName)
-                    ) {
+                    if (evaluation.status != LinuxLegacyTargetStatus.MATCH) return@forEach
+                    val protection =
+                        LinuxProcessSafety.protectionClassification(
+                            observation.pid,
+                            observation.comm
+                        ) ?: LinuxProcessSafety.protectionClassification(
+                            observation.pid,
+                            observation.executableBasename
+                        )
+                    if (protection != null) {
+                        LinuxProcessDecisionDiagnostics.recordAggregate(
+                            "NuclearMode",
+                            "protected-escape-kill:${observation.pid}",
+                            "outcome=ALLOW reason=GLOBAL_PROTECTION " +
+                                "category=${protection.category} pid=${observation.pid}"
+                        )
                         return@forEach
                     }
                     val processHandle = ProcessHandle.of(observation.pid)
                         .orElse(null)
-                        ?: return@forEach
+                    if (processHandle == null) {
+                        failedRevalidations++
+                        return@forEach
+                    }
                     val freshObservation = repository.readProcess(observation.pid)
-                    if (
-                        !isSameKnownProcessObservation(observation, freshObservation) ||
-                        freshObservation.executableBasename?.lowercase() != exeName ||
-                        !processHandle.isAlive
-                    ) {
+                    val freshProtection =
+                        LinuxProcessSafety.protectionClassification(
+                            freshObservation.pid,
+                            freshObservation.comm
+                        ) ?: LinuxProcessSafety.protectionClassification(
+                            freshObservation.pid,
+                            freshObservation.executableBasename
+                        )
+                    if (freshProtection != null) {
+                        LinuxProcessDecisionDiagnostics.recordAggregate(
+                            "NuclearMode",
+                            "fresh-protected-escape:${observation.pid}",
+                            "outcome=ALLOW reason=GLOBAL_PROTECTION " +
+                                "category=${freshProtection.category} pid=${observation.pid}"
+                        )
+                        return@forEach
+                    }
+                    val targetStillValid =
+                        LinuxProcessCompatibilityAdapter.revalidateMatch(
+                            observation,
+                            freshObservation,
+                            found
+                        ) && processHandle.isAlive
+                    if (!targetStillValid) {
+                        failedRevalidations++
+                        return@forEach
+                    }
+                    val identity = observation.processInstanceIdentity as?
+                        ProcessInstanceIdentity.Known
+                    if (identity == null) {
+                        unknownObservations++
                         return@forEach
                     }
                     try {
+                        LinuxProcessDecisionDiagnostics.recordAggregate(
+                            "NuclearMode",
+                            "terminated-escape:${identity.key}",
+                            "outcome=DENY_AND_SAFE_TO_TERMINATE " +
+                                "reason=NUCLEAR_ESCAPE_TARGET_REVALIDATED " +
+                                "pid=${identity.key.pid} startTicks=${identity.key.processStartTicks}"
+                        )
                         processHandle.destroyForcibly()
-                    } catch (_: Exception) {}
+                    } catch (exception: Exception) {
+                        LinuxProcessDecisionDiagnostics.recordAggregate(
+                            "NuclearMode",
+                            "escape-signal-failed:${identity.key}",
+                            "outcome=UNKNOWN reason=ESCAPE_PROCESS_SIGNAL_FAILED " +
+                                "cause=${exception.javaClass.simpleName} pid=${identity.key.pid}"
+                        )
+                    }
                 }
-            } catch (_: Exception) {}
+                if (unknownObservations > 0) {
+                    LinuxProcessDecisionDiagnostics.recordAggregate(
+                        "NuclearMode",
+                        "unknown-escape-identities",
+                        "outcome=UNKNOWN reason=ESCAPE_TARGET_IDENTITY_OR_MATCH_UNKNOWN"
+                    )
+                }
+                if (failedRevalidations > 0) {
+                    LinuxProcessDecisionDiagnostics.recordAggregate(
+                        "NuclearMode",
+                        "escape-revalidation-failed",
+                        "outcome=UNKNOWN reason=FINAL_ESCAPE_TARGET_REVALIDATION_FAILED"
+                    )
+                }
+            } catch (exception: Exception) {
+                LinuxProcessDecisionDiagnostics.recordAggregate(
+                    "NuclearMode",
+                    "escape-enforcement-error",
+                    "outcome=UNKNOWN reason=ESCAPE_ENFORCEMENT_FAILED " +
+                        "cause=${exception.javaClass.simpleName}"
+                )
+            }
         }
 
         // Tally and periodically persist escape attempts

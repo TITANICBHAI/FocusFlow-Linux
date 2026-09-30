@@ -3,10 +3,14 @@ package com.focusflow.services
 import com.focusflow.data.Database
 import com.focusflow.data.models.FocusLauncherSession
 import com.focusflow.data.models.FocusLauncherSessionApp
+import com.focusflow.data.models.CanonicalAppReference
 import com.focusflow.enforcement.GlobalKeyboardHook
 import com.focusflow.enforcement.NuclearMode
 import com.focusflow.enforcement.RegistryLockdown
 import com.focusflow.enforcement.ProcessMonitor
+import com.focusflow.enforcement.FocusLauncherRuntimePolicy
+import com.focusflow.enforcement.LinuxProcessAuthorizer
+import com.focusflow.enforcement.LinuxProcessRepository
 import com.focusflow.enforcement.User32Extra
 import com.focusflow.enforcement.isWindows
 import com.focusflow.enforcement.isLinux
@@ -21,7 +25,9 @@ import java.awt.TrayIcon
 data class FocusLauncherApp(
     val processName: String,
     val displayName: String,
-    val exePath: String? = null
+    val exePath: String? = null,
+    val canonicalReference: CanonicalAppReference? = null,
+    val selectionKey: String? = null
 )
 
 object FocusLauncherService {
@@ -129,10 +135,46 @@ object FocusLauncherService {
         return raw.isNotBlank() && sha256(raw) == stored
     }
 
-    fun onForegroundChanged(processName: String) {
+    fun onForegroundChanged(processName: String, pid: Long = 0L) {
         if (!_isActive.value || _breakActive.value) return
+        if (isLinux) {
+            val candidates = ProcessMonitor.launcherRuntimeCandidates
+            if (candidates.isEmpty() || pid <= 0L) {
+                _overlayVisible.value = true
+                return
+            }
+            scope.launch {
+                val process = runCatching {
+                    LinuxProcessRepository.system.readProcess(pid)
+                }.getOrNull()
+                val association = process?.let {
+                    val decision = LinuxProcessAuthorizer.decide(
+                        FocusLauncherRuntimePolicy.selectorContext(it),
+                        candidates
+                    )
+                    FocusLauncherRuntimePolicy.association(decision, it)
+                }
+                _overlayVisible.value = association == null
+            }
+            return
+        }
         val allowed = _sessionApps.value.map { it.processName.lowercase() }.toSet()
         _overlayVisible.value = processName.lowercase() !in allowed
+    }
+
+    private fun applyLauncherAuthorization(apps: List<FocusLauncherApp>) {
+        if (isLinux) {
+            ProcessMonitor.installLinuxLauncherAuthorization(
+                FocusLauncherRuntimePolicy.candidates(
+                    apps.mapNotNull { it.canonicalReference }
+                )
+            )
+        } else {
+            ProcessMonitor.installLegacyLauncherAuthorization(
+                apps.mapNotNull { it.processName.takeIf(String::isNotBlank)?.lowercase() }
+                    .toSet()
+            )
+        }
     }
 
     private fun sha256(input: String): String =
@@ -146,6 +188,16 @@ object FocusLauncherService {
         breaksAllowed: Int = 1,
         breakSeconds: Int = 5 * 60
     ) {
+        if (isLinux && FocusLauncherRuntimePolicy.candidates(
+                apps.mapNotNull { it.canonicalReference }
+            ).isEmpty()
+        ) {
+            EnforcementLog.warn(
+                "FocusLauncher",
+                "Session start refused: no resolved application runtime definitions were selected"
+            )
+            return
+        }
         // Re-entrancy guard: if a session is already running, ignore the call.
         // The UI disable the Enter button while active, but this prevents any
         // race from triggering a double-enter that would orphan timer jobs.
@@ -174,8 +226,7 @@ object FocusLauncherService {
         }
         persistSession()
 
-        val allowedSet = apps.map { it.processName.lowercase() }.toSet()
-        ProcessMonitor.launcherAllowedProcesses = allowedSet
+        applyLauncherAuthorization(apps)
         ProcessMonitor.onLauncherForegroundChanged = ::onForegroundChanged
 
         // silent = true: NuclearMode is an implementation detail of kiosk mode;
@@ -235,7 +286,7 @@ object FocusLauncherService {
         Database.setSetting(HARD_LOCK_KEY, "false")
         Database.setSetting(LAUNCHER_PIN_KEY, "")
 
-        ProcessMonitor.launcherAllowedProcesses = emptySet()
+        ProcessMonitor.clearLauncherAuthorization()
 
         // silent = true: suppress the "Nuclear Mode OFF / Normal operation resumed"
         // tray notification — the user exited kiosk mode, not nuclear mode explicitly.
@@ -291,7 +342,7 @@ object FocusLauncherService {
         breakEndMs = System.currentTimeMillis() + breakDurationSeconds * 1_000L
         persistSession()
 
-        ProcessMonitor.launcherAllowedProcesses = emptySet()
+        ProcessMonitor.clearLauncherAuthorization()
         // silent = true: suppress "Nuclear Mode OFF" notification during a focus break —
         // the user paused kiosk mode temporarily, not nuclear mode explicitly.
         if (NuclearMode.isActive) NuclearMode.disable(silent = true)
@@ -344,8 +395,7 @@ object FocusLauncherService {
         // NOTE: _breakActive is already false — compareAndSet(true, false) at the top set it.
 
         if (_isActive.value) {
-            val allowedSet = _sessionApps.value.map { it.processName.lowercase() }.toSet()
-            ProcessMonitor.launcherAllowedProcesses = allowedSet
+            applyLauncherAuthorization(_sessionApps.value)
             // silent = true: suppress "Nuclear Mode ON" notification when kiosk
             // automatically re-engages after a break — it would be jarring/confusing.
             NuclearMode.enable(silent = true)
@@ -391,14 +441,13 @@ object FocusLauncherService {
      */
     fun onKillSwitchDeactivated() {
         if (!_isActive.value || _breakActive.value) return
-        val allowedSet = _sessionApps.value.map { it.processName.lowercase() }.toSet()
-        ProcessMonitor.launcherAllowedProcesses = allowedSet
+            applyLauncherAuthorization(_sessionApps.value)
         // Re-check: exit() uses compareAndSet as its very first operation, so there is
         // a narrow window where this function passed the initial guard, exit() then ran
         // and set _isActive to false, and we would proceed to re-engage enforcement
         // during a session teardown. Catch that case and abort cleanly.
         if (!_isActive.value) {
-            ProcessMonitor.launcherAllowedProcesses = emptySet()
+            ProcessMonitor.clearLauncherAuthorization()
             return
         }
         // silent = true: suppress "Nuclear Mode ON" — kill switch deactivation already
@@ -438,7 +487,7 @@ object FocusLauncherService {
         //   this up for us — we must do it ourselves on every startup.
         showTaskbar()
         try { RegistryLockdown.disable() } catch (_: Throwable) {}
-        ProcessMonitor.launcherAllowedProcesses = emptySet()
+        ProcessMonitor.clearLauncherAuthorization()
 
         val hadMarkers =
             Database.getSetting(CRASH_GUARD_KEY) == "true" ||
@@ -472,7 +521,12 @@ object FocusLauncherService {
         breakDurationSeconds = saved.breakDurationSeconds.coerceAtLeast(1)
         breakSecondsAccumulated.set(saved.breakSecondsAccumulated.coerceAtLeast(0L))
         _sessionApps.value = saved.apps.map {
-            FocusLauncherApp(it.processName, it.displayName, it.exePath)
+            FocusLauncherApp(
+                processName = it.processName,
+                displayName = it.displayName,
+                exePath = it.exePath,
+                canonicalReference = it.canonicalReference
+            )
         }
         _sessionStartMs.value = saved.sessionStartMs
         _sessionEndMs.value = saved.sessionEndMs
@@ -512,7 +566,7 @@ object FocusLauncherService {
         _breakActive.value = true
         _breakRemainingSeconds.value = remaining
         ProcessMonitor.onLauncherForegroundChanged = ::onForegroundChanged
-        ProcessMonitor.launcherAllowedProcesses = emptySet()
+        ProcessMonitor.clearLauncherAuthorization()
         if (NuclearMode.isActive) NuclearMode.disable(silent = true)
         GlobalKeyboardHook.disable()
         RegistryLockdown.disable()
@@ -534,8 +588,7 @@ object FocusLauncherService {
     }
 
     private fun reenableLauncherRestrictions() {
-        val allowedSet = _sessionApps.value.map { it.processName.lowercase() }.toSet()
-        ProcessMonitor.launcherAllowedProcesses = allowedSet
+        applyLauncherAuthorization(_sessionApps.value)
         ProcessMonitor.onLauncherForegroundChanged = ::onForegroundChanged
         NuclearMode.enable(silent = true)
         GlobalKeyboardHook.enable()
@@ -550,7 +603,12 @@ object FocusLauncherService {
         Database.saveFocusLauncherSession(
             FocusLauncherSession(
                 apps = _sessionApps.value.map {
-                    FocusLauncherSessionApp(it.processName, it.displayName, it.exePath)
+                    FocusLauncherSessionApp(
+                        processName = it.processName,
+                        displayName = it.displayName,
+                        exePath = it.exePath,
+                        canonicalReference = it.canonicalReference
+                    )
                 },
                 sessionStartMs = _sessionStartMs.value,
                 sessionEndMs = _sessionEndMs.value,

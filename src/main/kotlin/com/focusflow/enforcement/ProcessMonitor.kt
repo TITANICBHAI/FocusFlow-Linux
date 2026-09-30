@@ -156,13 +156,44 @@ object ProcessMonitor {
      */
     @Volatile var launcherAllowedProcesses: Set<String> = emptySet()
 
+    /** Linux launcher authorization is driven by selected references, not names. */
+    @Volatile var launcherRuntimeCandidates: List<ApplicationRuntimeCandidate> = emptyList()
+
+    /** Ephemeral session associations; never merged into global safe processes. */
+    @Volatile var launcherAuthorizedInstances:
+        Map<ProcessInstanceKey, LauncherSessionProcessAssociation> = emptyMap()
+
+    @Volatile var onLauncherForegroundChanged: ((String, Long) -> Unit)? = null
+
+    private fun hasLauncherAuthorizationInputs(): Boolean =
+        if (isLinux) launcherRuntimeCandidates.isNotEmpty()
+        else launcherAllowedProcesses.isNotEmpty()
+
+    fun installLinuxLauncherAuthorization(
+        candidates: List<ApplicationRuntimeCandidate>
+    ) {
+        launcherAllowedProcesses = emptySet()
+        launcherAuthorizedInstances = emptyMap()
+        launcherRuntimeCandidates = candidates.toList()
+    }
+
+    fun installLegacyLauncherAuthorization(processNames: Set<String>) {
+        launcherRuntimeCandidates = emptyList()
+        launcherAuthorizedInstances = emptyMap()
+        launcherAllowedProcesses = processNames
+    }
+
+    fun clearLauncherAuthorization() {
+        launcherAllowedProcesses = emptySet()
+        launcherRuntimeCandidates = emptyList()
+        launcherAuthorizedInstances = emptyMap()
+    }
+
     /**
      * Called for every launcher foreground transition so the dedicated launcher
      * windows can lower themselves for allowed apps and reclaim topmost order
      * for everything else.
      */
-    @Volatile var onLauncherForegroundChanged: ((processName: String) -> Unit)? = null
-
     /**
      * For Linux: /proc/cmdline parsing may reveal the executable base name.
      * This utility strips path prefixes (like "/usr/bin/" or "./") to get the
@@ -390,8 +421,8 @@ object ProcessMonitor {
 
         // Launcher visibility must observe allowed apps too, before the normal
         // enforcement cooldown can discard a repeated foreground event.
-        if (launcherAllowedProcesses.isNotEmpty()) {
-            onLauncherForegroundChanged?.invoke(processName)
+        if (hasLauncherAuthorizationInputs()) {
+            onLauncherForegroundChanged?.invoke(processName, pid)
         }
 
         val now   = System.currentTimeMillis()
@@ -410,7 +441,7 @@ object ProcessMonitor {
             scheduleBlockedProcesses.isNotEmpty() ||
             standaloneBlockedProcesses.isNotEmpty() ||
             dailyAllowanceBlockedProcesses.isNotEmpty() ||
-            launcherAllowedProcesses.isNotEmpty() ||
+            hasLauncherAuthorizationInputs() ||
             cachedKeywordEnabled ||
             VpnBlocker.isEnabled ||
             networkCutoffKeywordEnabled
@@ -485,8 +516,7 @@ object ProcessMonitor {
         // but the actual UWP process — e.g. Calculator.exe — runs separately and
         // would escape a foreground-only check). The sweep kills any process that
         // is not in the launcher's allowed set or the permanent safe list.
-        val launcherAllowed = launcherAllowedProcesses
-        if (launcherAllowed.isNotEmpty()) {
+        if (hasLauncherAuthorizationInputs()) {
             val now = System.currentTimeMillis()
             if (now - lastLauncherSweepMs >= LAUNCHER_SWEEP_INTERVAL_MS) {
                 lastLauncherSweepMs = now
@@ -517,55 +547,95 @@ object ProcessMonitor {
         try {
             if (isLinux) {
                 val repository = LinuxProcessRepository.system
+                val candidates = launcherRuntimeCandidates
+                if (candidates.isEmpty()) {
+                    launcherAuthorizedInstances = emptyMap()
+                    return
+                }
+                val previousAssociations = launcherAuthorizedInstances
+                val authorizedInstances =
+                    LinkedHashMap<ProcessInstanceKey, LauncherSessionProcessAssociation>()
                 repository.snapshot().processes.forEach { observation ->
                     if (observation.pid == ownPid) return@forEach
                     val identity =
                         observation.processInstanceIdentity as? ProcessInstanceIdentity.Known
                             ?: return@forEach
-                    val exeName = observation.executableBasename
-                        ?.lowercase()
-                        ?: return@forEach
-
-                    // Re-read launcherAllowedProcesses on every iteration.
-                    // If exit() fired mid-sweep (clearing the set), stop killing
-                    // immediately rather than using the stale snapshot captured
-                    // at the top of tickPoll().
-                    val currentAllowed = launcherAllowedProcesses
-                    if (currentAllowed.isEmpty()) return@forEach
-
+                    val previousAssociation = previousAssociations[identity.key]
                     if (
-                        !LinuxProcessSafety.isProtectedProcess(observation.pid, exeName) &&
-                        exeName !in launcherSafeProcesses &&
-                        exeName !in currentAllowed
+                        previousAssociation != null &&
+                        previousAssociation.observationFingerprint != observation.fingerprint
                     ) {
-                        // Unknown identities and same-PID replacements are never
-                        // actionable. Acquire the handle before the final fresh
-                        // identity check, then target that handle.
-                        val processHandle = ProcessHandle.of(observation.pid)
-                            .orElse(null)
-                            ?: return@forEach
-                        val freshObservation = repository.readProcess(observation.pid)
-                        if (
-                            !isSameKnownProcessObservation(observation, freshObservation) ||
-                            freshObservation.executableBasename?.lowercase() != exeName ||
-                            !processHandle.isAlive
-                        ) {
-                            return@forEach
-                        }
-                        if (!tryAcquireCooldown("sweep:$exeName", now)) {
-                            return@forEach
-                        }
-                        try {
-                            processHandle.destroyForcibly()
-                        } catch (exception: Exception) {
-                            EnforcementLog.warn(
-                                "ProcessMonitor",
-                                "Could not terminate Linux process instance $identity",
-                                exception
-                            )
-                        }
+                        // Same PID/start time but a changed executable/argv
+                        // fingerprint is an unclassified exec handoff. Keep the
+                        // session association for this instance, but never use a
+                        // changed observation as a destructive target.
+                        authorizedInstances[identity.key] = previousAssociation
+                        return@forEach
+                    }
+
+                    val processName = observation.comm
+                        ?: observation.executableBasename
+                        ?: return@forEach
+                    // These protections are global/session safety policy. They
+                    // remain separate from selected application references and
+                    // from the session-local instance associations below.
+                    if (
+                        LinuxProcessSafety.isProtectedProcess(observation.pid, processName) ||
+                        processName.lowercase() in launcherSafeProcesses
+                    ) return@forEach
+
+                    val currentCandidates = launcherRuntimeCandidates
+                    if (currentCandidates.isEmpty()) return@forEach
+                    val context = FocusLauncherRuntimePolicy.selectorContext(observation)
+                    val decision = LinuxProcessAuthorizer.decide(context, currentCandidates)
+                    FocusLauncherRuntimePolicy.association(decision, observation)?.let { association ->
+                        authorizedInstances[identity.key] = association
+                    }
+                    if (decision.outcome != AuthorizationOutcome.DENY_AND_SAFE_TO_TERMINATE) {
+                        return@forEach
+                    }
+
+                    val processHandle = ProcessHandle.of(observation.pid)
+                        .orElse(null)
+                        ?: return@forEach
+                    if (!processHandle.isAlive ||
+                        !tryAcquireCooldown("launcher:${identity.key.pid}", now)
+                    ) return@forEach
+
+                    // Re-read both the process identity and the selected policy
+                    // immediately before termination. Unknown, replaced, or
+                    // newly authorized instances are not destructive targets.
+                    val freshObservation = repository.readProcess(observation.pid)
+                    val currentAuthorization = launcherRuntimeCandidates
+                    if (
+                        currentAuthorization.isEmpty() ||
+                        !isSameKnownProcessObservation(observation, freshObservation) ||
+                        LinuxProcessSafety.isProtectedProcess(
+                            freshObservation.pid,
+                            freshObservation.comm ?: freshObservation.executableBasename
+                        ) ||
+                        (freshObservation.comm ?: freshObservation.executableBasename)
+                            ?.lowercase() in launcherSafeProcesses ||
+                        !LinuxProcessAuthorizer.revalidateForDestructiveAction(
+                            priorDecision = decision,
+                            currentContext = FocusLauncherRuntimePolicy.selectorContext(
+                                freshObservation
+                            ),
+                            candidates = currentAuthorization
+                        )
+                    ) return@forEach
+
+                    try {
+                        processHandle.destroyForcibly()
+                    } catch (exception: Exception) {
+                        EnforcementLog.warn(
+                            "ProcessMonitor",
+                            "Could not terminate Linux process instance ${identity.key}",
+                            exception
+                        )
                     }
                 }
+                launcherAuthorizedInstances = authorizedInstances.toMap()
             } else {
                 ProcessHandle.allProcesses()
                     .filter { ph ->
@@ -648,7 +718,7 @@ object ProcessMonitor {
         // (where `blocked` is empty) a disallowed UWP app inside
         // ApplicationFrameHost.exe is still caught and killed.
         val launcherAllowed = launcherAllowedProcesses
-        if (launcherAllowed.isNotEmpty()) {
+        if (isWindows && launcherAllowed.isNotEmpty()) {
             // When the UWP frame host is foreground, resolve the actual hosted
             // child process and check it against the launcher allowlist.
             val launcherResolved = if (lower == uwpFrameHost || lower in systemFrameProcesses) {

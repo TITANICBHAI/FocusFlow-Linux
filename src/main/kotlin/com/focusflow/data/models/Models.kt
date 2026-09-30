@@ -202,7 +202,8 @@ data class FocusLauncherPreset(
 data class FocusLauncherSessionApp(
     val processName: String,
     val displayName: String,
-    val exePath: String? = null
+    val exePath: String? = null,
+    val canonicalReference: CanonicalAppReference? = null
 )
 
 /**

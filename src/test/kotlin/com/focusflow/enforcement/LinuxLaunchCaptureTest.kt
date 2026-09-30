@@ -39,11 +39,133 @@ class LinuxLaunchCaptureTest {
         val attributed = tracker.observe(
             generation(3, baselineProcess, launcher, child),
             1_030
-        ) { process ->
+        ) { process, _ ->
             if (process.pid == child.pid) attribution() else null
         }
         assertEquals(setOf(child.key()), attributed.associatedInstances)
         assertEquals(child.key(), attributed.primaryRuntimeInstance)
+    }
+
+    @Test
+    fun `Minecraft launch session attributes a later JVM and survives launcher reparenting`() {
+        val unrelatedJava = snapshot(
+            19,
+            190,
+            "java",
+            "/usr/bin/java",
+            processGroupId = 19,
+            sessionId = 19,
+            cgroupPath = "/user.slice/unrelated.scope",
+            argv = listOf("/usr/bin/java", "-cp", "tools/*", "org.example.Worker")
+        )
+        val tracker = LinuxLaunchCaptureTracker(
+            applicationReferenceId = "selected-minecraft",
+            baseline = generation(1, unrelatedJava),
+            startedAtMs = 1_000
+        )
+        tracker.setLaunchDefinition(
+            LaunchDefinition(
+                id = "minecraft-launch",
+                referenceId = "selected-minecraft",
+                type = "executable",
+                executable = "/usr/bin/minecraft-launcher"
+            )
+        )
+        val launcher = snapshot(
+            20,
+            200,
+            "minecraft-launcher",
+            "/usr/bin/minecraft-launcher",
+            processGroupId = 20,
+            sessionId = 20,
+            cgroupPath = "/user.slice/minecraft-launch.scope"
+        )
+        tracker.bindLauncher(launcher.pid, generation(2, unrelatedJava, launcher), 1_010)
+
+        fun minecraftAttribution(
+            process: LinuxProcessSnapshot,
+            evidence: LaunchSessionProcessEvidence
+        ): LaunchCaptureAttribution? {
+            val result = MinecraftRuntimeAttributor.attribute(
+                process,
+                ProcessRuntimeMetadata.from(process),
+                MinecraftLaunchSessionEvidence(
+                    selectedMinecraftReference = true,
+                    launchDefinitionArmed = tracker.view().launchDefinition != null,
+                    activeLaunchSession = evidence.active,
+                    processCreatedOrExecChanged = evidence.processCreatedOrExecChanged,
+                    relatedToLauncher = evidence.relatedToLauncher,
+                    previouslyAssociated = evidence.previouslyAssociated,
+                    unchangedLauncherImage = evidence.unchangedLauncherImage
+                )
+            )
+            if (!result.isAttributed) return null
+            return LaunchCaptureAttribution(
+                applicationReferenceId = "selected-minecraft",
+                runtimeDefinitionId = "minecraft-primary",
+                role = RuntimeRole.PRIMARY,
+                minecraftAttributionMode = result.mode,
+                explanation = result.explanation(),
+                evidence = result.evidence
+            )
+        }
+
+        val launcherOnly = tracker.observe(
+            generation(3, unrelatedJava, launcher),
+            1_020,
+            ::minecraftAttribution
+        )
+        assertTrue(launcherOnly.associatedInstances.isEmpty())
+        assertFalse(unrelatedJava.key() in launcherOnly.candidateInstances)
+
+        val minecraftRuntime = snapshot(
+            21,
+            210,
+            "java",
+            "/usr/lib/jvm/java/bin/java",
+            parentPid = launcher.pid,
+            processGroupId = 20,
+            sessionId = 20,
+            cgroupPath = "/user.slice/minecraft-launch.scope",
+            argv = listOf(
+                "/usr/lib/jvm/java/bin/java",
+                "-jar",
+                "/opt/launcher/runtime.jar",
+                "--gameDir",
+                "/home/user/.minecraft",
+                "--assetsDir=/home/user/.minecraft/assets",
+                "--version=1.21"
+            )
+        )
+        val runtimeState = tracker.observe(
+            generation(4, unrelatedJava, launcher, minecraftRuntime),
+            1_030,
+            ::minecraftAttribution
+        )
+        val associated = runtimeState.candidates.single {
+            it.processInstanceKey == minecraftRuntime.key()
+        }
+        assertEquals(LaunchCandidateStatus.ASSOCIATED, associated.status)
+        assertEquals(
+            MinecraftAttributionMode.LAUNCH_SESSION,
+            associated.attribution?.minecraftAttributionMode
+        )
+        assertTrue(runtimeState.message.orEmpty().contains("active selected launch session"))
+
+        val reparentedRuntime = minecraftRuntime.copy(parentPid = 1)
+        val afterLauncherExit = tracker.observe(
+            generation(5, unrelatedJava, reparentedRuntime),
+            1_040,
+            ::minecraftAttribution
+        )
+        assertEquals(setOf(minecraftRuntime.key()), afterLauncherExit.associatedInstances)
+        assertEquals(
+            MinecraftAttributionMode.LAUNCH_SESSION,
+            afterLauncherExit.candidates
+                .single { it.processInstanceKey == minecraftRuntime.key() }
+                .attribution
+                ?.minecraftAttributionMode
+        )
     }
 
     @Test
@@ -74,12 +196,12 @@ class LinuxLaunchCaptureTest {
         val child = snapshot(41, 410, "game", "/opt/game/bin/game", parentPid = launcher.pid)
         tracker.bindLauncher(launcher.pid, generation(1, launcher), 3_010)
         tracker.observe(generation(2, launcher, child), 3_020)
-        tracker.observe(generation(3, launcher, child), 3_030) { process ->
+        tracker.observe(generation(3, launcher, child), 3_030) { process, _ ->
             if (process.pid == child.pid) attribution() else null
         }
 
         val reparented = child.copy(parentPid = 1)
-        val state = tracker.observe(generation(4, reparented), 3_040) { process ->
+        val state = tracker.observe(generation(4, reparented), 3_040) { process, _ ->
             if (process.pid == child.pid) attribution() else null
         }
 
@@ -132,7 +254,7 @@ class LinuxLaunchCaptureTest {
         val runtime = snapshot(61, 610, "game", "/opt/game/bin/game", parentPid = launcher.pid)
         tracker.bindLauncher(launcher.pid, generation(1, launcher), 4_010)
         tracker.observe(generation(2, launcher, runtime), 4_020)
-        tracker.observe(generation(3, launcher, runtime), 4_030) { process ->
+        tracker.observe(generation(3, launcher, runtime), 4_030) { process, _ ->
             if (process.pid == runtime.pid) attribution() else null
         }
 
@@ -151,7 +273,7 @@ class LinuxLaunchCaptureTest {
         val oldRuntime = snapshot(71, 710, "game", "/opt/game/bin/game", parentPid = launcher.pid)
         tracker.bindLauncher(launcher.pid, generation(1, launcher), 5_010)
         tracker.observe(generation(2, launcher, oldRuntime), 5_020)
-        tracker.observe(generation(3, launcher, oldRuntime), 5_030) { process ->
+        tracker.observe(generation(3, launcher, oldRuntime), 5_030) { process, _ ->
             if (process.pid == oldRuntime.pid) attribution() else null
         }
         val reusedPid = snapshot(71, 711, "other", "/usr/bin/other", parentPid = launcher.pid)

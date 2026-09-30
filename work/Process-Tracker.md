@@ -231,19 +231,19 @@ Depends on: Batches 1, 2, 3, and 5.
 
 Depends on: Batches 2 and 6.
 
-- [ ] **PI-7.1 — Implement generic runtime interpretation**
+- [x] **PI-7.1 — Implement generic runtime interpretation**
   Derive runtime family/environment and structured launch facts without turning
   a generic runtime executable into an application identity.
-- [ ] **PI-7.2 — Implement explicit Minecraft attribution modes**
+- [x] **PI-7.2 — Implement explicit Minecraft attribution modes**
   Support direct runtime identification and launch-session attribution as
   separate, explainable modes.
-- [ ] **PI-7.3 — Parse Java arguments semantically**
+- [x] **PI-7.3 — Parse Java arguments semantically**
   Handle supported argument forms and selectors without relying on a single
   hardcoded main class or on `--gameDir` alone.
-- [ ] **PI-7.4 — Keep unrelated Java unauthorized**
+- [x] **PI-7.4 — Keep unrelated Java unauthorized**
   Vanilla and supported mod-loader variants may match Minecraft; unrelated Java
   must remain outside that association.
-- [ ] **PI-7.5 — Test resolver boundaries and handoff cases**
+- [x] **PI-7.5 — Test resolver boundaries and handoff cases**
   Include game-directory-only negative cases, launcher-to-JVM timing, unrelated
   Java, supported runtime variants, and desktop/package correlation that is
   explicitly non-authoritative.
@@ -295,3 +295,4 @@ Add one row per completed batch. Do not claim completion based only on a build.
 | 3 | 2026-09-30 | PI-3.1–PI-3.6 | `UpgradeValidationTest`; verified `AppReference`, migrations V9–V11, database CRUD, and preflight-backup/rollback paths | `gradle test --tests com.focusflow.data.StoredDataMigrationV9Test --tests com.focusflow.data.StoredDataMigrationV10Test --tests com.focusflow.data.StoredDataMigrationV11Test --tests com.focusflow.data.MigrationSafetyTest --tests com.focusflow.data.StoredDataFixtureTest --tests com.focusflow.data.UpgradeValidationTest --tests com.focusflow.data.models.CanonicalAppReferenceTest --no-daemon` — passed (27 tests); `git diff --check` — passed | Temporary SQLite fixtures covered fresh, legacy, duplicate, stale/unresolved, generic `java`, malformed source data, CRUD round-trips, backup failure, and interrupted migration rollback. No production database or Windows runtime was used. | Batch 4 |
 | 5 | 2026-09-30 | PI-5.1–PI-5.5 | FocusLauncherScreen reference propagation; FocusLauncherService lifecycle/restore paths; FocusLauncherRuntimePolicy and ProcessMonitor; session reference/runtime-definition persistence and cleanup; policy and SQLite tests | `gradle test --no-daemon` — passed (154 tests, 0 failures, 0 errors, 2 skipped); `git diff --check` — passed; Start application workflow restarted and remained running at `:run` | Tests cover selected/unselected refs, generic Java uncertainty, ambiguity/staleness, unknown/changed identity, authorization clearing, Windows legacy name-set adapter, and DB recovery/teardown. No Windows runtime or real destructive process test was available; VNC workflow has no browser port. Batch 4 checkboxes were left unchanged. | Batch 6 |
 | 6 | 2026-09-30 | PI-6.1–PI-6.7 | LinuxLaunchCapture tracker/controller and tests; Linux Launch & Detect dialog and Focus Launcher integration; persisted launch/runtime definitions and session-cleanup preservation; launcher runtime association metadata | `gradle test --no-daemon` — passed (165 tests, 0 failures, 0 errors, 2 skipped); `git diff --check` — passed; Start application workflow restarted and running | Tests cover baseline isolation, explicit candidate attribution, same-PID exec, reparenting, bounded grace/timeout, cancellation, runtime exit, PID reuse, unknown identity, close identity checks, raw command omission, and SQLite persistence through cleanup. Desktop app process was running under the VNC workflow; no browser screenshot port, real app handoff, destructive close, or Windows runtime was exercised. | Batch 7 |
+| 7 | 2026-10-01 | PI-7.1–PI-7.5 | LinuxProcessRuntimeMetadata and LinuxMinecraftAttribution; launch-session evidence and attribution in LinuxLaunchCapture; focused parser, selector, catalog-boundary, and handoff tests | `gradle test --tests com.focusflow.enforcement.LinuxMinecraftAttributionTest --tests com.focusflow.enforcement.LinuxProcessMatcherTest --tests com.focusflow.enforcement.LinuxLaunchCaptureTest --no-daemon` — passed (33 tests); `gradle test --no-daemon` — passed (175 tests, 0 failures, 0 errors, 2 skipped); `git diff --check` — passed; Start application workflow restarted and remained running | Tests cover Java runtime/environment derivation, structured class/JAR/module arguments and redaction, Vanilla/Fabric/Quilt/Forge/NeoForge signatures, game-directory-only and unknown-option negatives, non-authoritative catalog correlation, unrelated Java denial, selected-launcher-to-JVM timing, and reparenting. No live Minecraft launcher/runtime or Windows runtime was exercised; two tests were skipped by the existing suite configuration. | Batch 4 remains open; Batch 8 still depends on completion of Batches 1–7. |

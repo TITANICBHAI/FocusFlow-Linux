@@ -42,7 +42,18 @@ enum class LaunchCandidateStatus {
 data class LaunchCaptureAttribution(
     val applicationReferenceId: String,
     val runtimeDefinitionId: String,
-    val role: RuntimeRole
+    val role: RuntimeRole,
+    val minecraftAttributionMode: MinecraftAttributionMode? = null,
+    val explanation: String? = null,
+    val evidence: List<String> = emptyList()
+)
+
+data class LaunchSessionProcessEvidence(
+    val active: Boolean,
+    val processCreatedOrExecChanged: Boolean,
+    val relatedToLauncher: Boolean,
+    val previouslyAssociated: Boolean,
+    val unchangedLauncherImage: Boolean
 )
 
 /**
@@ -185,6 +196,8 @@ class LinuxLaunchCaptureTracker(
             .associate { it.pid to it.fingerprint }
     private val candidates = linkedMapOf<ProcessInstanceKey, LaunchCaptureCandidate>()
     private val launchRelatedPids = linkedSetOf<Long>()
+    private val launchRelatedInstances = linkedSetOf<ProcessInstanceKey>()
+    private val launchChangedInstances = linkedSetOf<ProcessInstanceKey>()
     private val unknownPids = linkedSetOf<Long>()
     private var launchRootProcessGroupId: Long? = null
     private var launchRootSessionId: Long? = null
@@ -232,7 +245,10 @@ class LinuxLaunchCaptureTracker(
     fun observe(
         generation: LinuxProcessSnapshotGeneration,
         nowMs: Long,
-        attributionFor: (LinuxProcessSnapshot) -> LaunchCaptureAttribution? = { null }
+        attributionFor: (
+            LinuxProcessSnapshot,
+            LaunchSessionProcessEvidence
+        ) -> LaunchCaptureAttribution? = { _, _ -> null }
     ): LaunchCaptureViewState = synchronized(lock) {
         if (status.isTerminal()) return@synchronized viewLocked()
 
@@ -254,23 +270,39 @@ class LinuxLaunchCaptureTracker(
             }
 
             val previous = previousKnownByKey[key]
+            val relatedNow = isLaunchRelated(process)
             val changed = when {
                 previous != null -> previous.fingerprint != process.fingerprint
                 key in baselineFingerprints -> false
                 else -> true
             }
+            if (changed) launchChangedInstances += key
+            if (changed && relatedNow) launchRelatedInstances += key
             val existing = candidates[key]
+            val sessionEvidence = LaunchSessionProcessEvidence(
+                active = !status.isTerminal(),
+                processCreatedOrExecChanged =
+                    changed || key in launchChangedInstances,
+                relatedToLauncher =
+                    relatedNow || key in launchRelatedInstances,
+                previouslyAssociated =
+                    existing?.status == LaunchCandidateStatus.ASSOCIATED,
+                unchangedLauncherImage =
+                    process.pid == launcherPid &&
+                        process.fingerprint == launcherFingerprint
+            )
             val attribution = if (changed || existing != null) {
-                runCatching { attributionFor(process) }.getOrNull()
+                runCatching { attributionFor(process, sessionEvidence) }.getOrNull()
             } else {
                 null
             }
-            if (changed && (isLaunchRelated(process) || attribution != null)) {
+            if (changed && (relatedNow || attribution != null)) {
                 recordCandidate(process, nowMs, attribution)
                 launchRelatedPids += process.pid
+                recordAttributionMessage(attribution)
             } else if (existing != null) {
                 val currentAttribution = if (attribution != null) attribution else {
-                    runCatching { attributionFor(process) }.getOrNull()
+                    runCatching { attributionFor(process, sessionEvidence) }.getOrNull()
                 }
                 candidates[key] = existing.copy(
                     comm = process.comm,
@@ -286,6 +318,7 @@ class LinuxLaunchCaptureTracker(
                     attribution = currentAttribution,
                     isRunning = true
                 )
+                recordAttributionMessage(currentAttribution)
             }
         }
 
@@ -372,6 +405,31 @@ class LinuxLaunchCaptureTracker(
     }
 
     fun view(): LaunchCaptureViewState = synchronized(lock) { viewLocked() }
+
+    fun sessionEvidenceFor(key: ProcessInstanceKey): LaunchSessionProcessEvidence? =
+        synchronized(lock) {
+            val candidate = candidates[key] ?: return@synchronized null
+            LaunchSessionProcessEvidence(
+                active = !status.isTerminal(),
+                processCreatedOrExecChanged = key in launchChangedInstances,
+                relatedToLauncher = key in launchRelatedInstances,
+                previouslyAssociated =
+                    candidate.status == LaunchCandidateStatus.ASSOCIATED,
+                unchangedLauncherImage =
+                    key == launcherKey && candidate.fingerprint == launcherFingerprint
+            )
+        }
+
+    private fun recordAttributionMessage(attribution: LaunchCaptureAttribution?) {
+        if (attribution?.minecraftAttributionMode == null) return
+        message = buildString {
+            append(attribution.explanation ?: "Minecraft runtime attributed.")
+            if (attribution.evidence.isNotEmpty()) {
+                append(' ')
+                append(attribution.evidence.joinToString(" "))
+            }
+        }
+    }
 
     private fun isLaunchRelated(process: LinuxProcessSnapshot): Boolean =
         process.pid == launcherPid ||
@@ -498,6 +556,7 @@ class LinuxLaunchCaptureController(
     private var launchedProcess: Process? = null
     private var captureJob: Job? = null
     private var reference: CanonicalAppReference? = null
+    private var selectedDisplayName: String? = null
 
     fun start(app: AppDescriptor, selectedReference: CanonicalAppReference) {
         synchronized(lock) {
@@ -524,6 +583,7 @@ class LinuxLaunchCaptureController(
                 return
             }
             reference = selectedReference
+            selectedDisplayName = app.displayName
             captureJob = scope.launch {
                 runCapture(app, definition, command, selectedReference)
             }
@@ -563,7 +623,35 @@ class LinuxLaunchCaptureController(
             else -> return@withContext null
         }
         val runtimeMetadata = ProcessRuntimeMetadata.from(current)
+        val selectedMinecraft = isMinecraftReference(selectedReference)
+        val captureSessionEvidence = currentTracker.sessionEvidenceFor(key)
+        val minecraftLaunchEvidence = captureSessionEvidence?.let { evidence ->
+            MinecraftLaunchSessionEvidence(
+                selectedMinecraftReference = selectedMinecraft,
+                launchDefinitionArmed =
+                    currentTracker.view().launchDefinition != null,
+                activeLaunchSession = evidence.active,
+                processCreatedOrExecChanged =
+                    evidence.processCreatedOrExecChanged,
+                relatedToLauncher = evidence.relatedToLauncher,
+                previouslyAssociated = evidence.previouslyAssociated,
+                unchangedLauncherImage = evidence.unchangedLauncherImage
+            )
+        }
+        val minecraftAttribution = if (selectedMinecraft) {
+            MinecraftRuntimeAttributor.attribute(
+                current,
+                runtimeMetadata,
+                minecraftLaunchEvidence
+            )
+        } else {
+            null
+        }
+        val minecraftSelector = minecraftAttribution
+            ?.takeIf { it.isAttributed }
+            ?.let { MinecraftRuntimeAttributor.selectorExpression(it, runtimeMetadata) }
         val applicationSelector = when {
+            minecraftSelector != null -> null
             !runtimeMetadata.javaLaunch.mainClass.isNullOrBlank() ->
                 RuntimeSelector.MainClass(runtimeMetadata.javaLaunch.mainClass)
             selectedReference.source == AppReferenceSource.CATALOG_FLATPAK &&
@@ -577,13 +665,16 @@ class LinuxLaunchCaptureController(
                 RuntimeSelector.DesktopId(selectedReference.stableAppId)
             else -> null
         }
-        val selector = if (applicationSelector == null) {
+        val applicationExpression = minecraftSelector ?: applicationSelector?.let {
+            SelectorExpression.Predicate(it)
+        }
+        val selector = if (applicationExpression == null) {
             SelectorExpression.Predicate(executionSelector)
         } else {
             SelectorExpression.All(
                 listOf(
                     SelectorExpression.Predicate(executionSelector),
-                    SelectorExpression.Predicate(applicationSelector)
+                    applicationExpression
                 )
             )
         }
@@ -718,7 +809,7 @@ class LinuxLaunchCaptureController(
                 val now = clockMs()
                 val generation = repository.snapshot()
                 val next = synchronized(lock) {
-                    session.observe(generation, now, ::attributeProcess)
+                session.observe(generation, now, ::attributeProcess)
                         .copy(applicationName = app.displayName)
                         .also { _state.value = it }
                 }
@@ -760,26 +851,83 @@ class LinuxLaunchCaptureController(
     }
 
     private fun attributeProcess(
-        process: LinuxProcessSnapshot
+        process: LinuxProcessSnapshot,
+        launchEvidence: LaunchSessionProcessEvidence
     ): LaunchCaptureAttribution? {
         val selectedReference = synchronized(lock) { reference } ?: return null
+        val selectedMinecraft = isMinecraftReference(selectedReference)
+        val runtimeMetadata =
+            FocusLauncherRuntimePolicy.selectorContext(process).runtimeMetadata
+        val minecraftLaunchEvidence = if (selectedMinecraft) {
+            MinecraftLaunchSessionEvidence(
+                selectedMinecraftReference = true,
+                launchDefinitionArmed =
+                    synchronized(lock) { tracker?.view()?.launchDefinition != null },
+                activeLaunchSession = launchEvidence.active,
+                processCreatedOrExecChanged =
+                    launchEvidence.processCreatedOrExecChanged,
+                relatedToLauncher = launchEvidence.relatedToLauncher,
+                previouslyAssociated = launchEvidence.previouslyAssociated,
+                unchangedLauncherImage = launchEvidence.unchangedLauncherImage
+            )
+        } else {
+            null
+        }
+        val minecraftAttribution = if (selectedMinecraft) {
+            MinecraftRuntimeAttributor.attribute(
+                process,
+                runtimeMetadata,
+                minecraftLaunchEvidence
+            )
+        } else {
+            null
+        }
         val candidates = FocusLauncherRuntimePolicy.candidates(listOf(selectedReference))
-        if (candidates.isEmpty()) return null
         val decision = LinuxProcessAuthorizer.decide(
             FocusLauncherRuntimePolicy.selectorContext(process),
             candidates
         )
         val association = FocusLauncherRuntimePolicy.association(decision, process)
-            ?: return null
-        val runtime = selectedReference.runtimeDefinitions.firstOrNull {
-            it.id == association.runtimeDefinitionId
-        } ?: return null
+        if (association != null) {
+            val runtime = selectedReference.runtimeDefinitions.firstOrNull {
+                it.id == association.runtimeDefinitionId
+            } ?: return null
+            return LaunchCaptureAttribution(
+                applicationReferenceId = association.applicationReferenceId,
+                runtimeDefinitionId = runtime.id,
+                role = runtime.role,
+                minecraftAttributionMode = minecraftAttribution
+                    ?.takeIf { it.isAttributed }
+                    ?.mode,
+                explanation = minecraftAttribution
+                    ?.takeIf { it.isAttributed }
+                    ?.explanation(),
+                evidence = minecraftAttribution
+                    ?.takeIf { it.isAttributed }
+                    ?.evidence
+                    .orEmpty()
+            )
+        }
+
+        if (selectedReference.runtimeDefinitions.isNotEmpty()) return null
+        if (minecraftAttribution?.isAttributed != true) return null
         return LaunchCaptureAttribution(
-            applicationReferenceId = association.applicationReferenceId,
-            runtimeDefinitionId = runtime.id,
-            role = runtime.role
+            applicationReferenceId = selectedReference.referenceId,
+            runtimeDefinitionId = "minecraft-${minecraftAttribution.mode}-${
+                selectedReference.referenceId
+            }",
+            role = RuntimeRole.PRIMARY,
+            minecraftAttributionMode = minecraftAttribution.mode,
+            explanation = minecraftAttribution.explanation(),
+            evidence = minecraftAttribution.evidence
         )
     }
+
+    private fun isMinecraftReference(reference: CanonicalAppReference): Boolean =
+        MinecraftReferenceClassifier.isMinecraft(
+            reference,
+            synchronized(lock) { selectedDisplayName }
+        )
 
     companion object {
         private const val FAST_POLL_MS = 250L

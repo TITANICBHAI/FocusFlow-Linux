@@ -1,7 +1,18 @@
 package com.focusflow.data
 
 import com.focusflow.data.models.BlockRule
+import com.focusflow.data.models.AppResolutionStatus
+import com.focusflow.data.models.AppReferenceSource
+import com.focusflow.data.models.LaunchDefinition
+import com.focusflow.data.models.RuntimeAuthorizationPurpose
+import com.focusflow.data.models.RuntimeDefinition
+import com.focusflow.data.models.StoredCanonicalAppReference
 import com.focusflow.services.AutoBackupService
+import com.focusflow.enforcement.ExecutionEnvironment
+import com.focusflow.enforcement.RuntimeFamily
+import com.focusflow.enforcement.RuntimeRole
+import com.focusflow.enforcement.RuntimeSelector
+import com.focusflow.enforcement.SelectorExpression
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.nio.file.Files
@@ -25,24 +36,37 @@ class UpgradeValidationTest {
     private val fixtureRoot = "migrations"
 
     @Test
-    fun `every supported schema version gate upgrades to v10`() {
+    fun `every supported schema version gate upgrades to v11`() {
         // v0 is the deliberately weak pre-schema input. Versions 1–7 are
-        // materialized from the real v1 shape plus only the schema changes that
-        // existed by that version; v8 uses the complete legacy fixture.
-        (0..8).forEach { sourceVersion ->
+        // materialized from the real v1 shape; v8 uses the complete legacy
+        // fixture and v9/v10 apply their real migration entry points.
+        (0..10).forEach { sourceVersion ->
             withDatabaseHome(
                 resources = when {
                     sourceVersion == 0 -> listOf("duplicate-v0.sql")
-                    sourceVersion == 8 -> listOf("schema-v8.sql")
+                    sourceVersion >= 8 -> listOf("schema-v8.sql")
                     else -> listOf("schema-v1.sql")
                 },
                 beforeInit = { connection ->
-                    if (sourceVersion in 1..7) {
-                        materializeSchemaVersion(connection, sourceVersion)
+                    when (sourceVersion) {
+                        in 1..7 -> materializeSchemaVersion(connection, sourceVersion)
+                        9 -> {
+                            StoredDataMigrationV9.apply(connection)
+                            connection.createStatement().use {
+                                it.executeUpdate("PRAGMA user_version = 9")
+                            }
+                        }
+                        10 -> {
+                            StoredDataMigrationV9.apply(connection)
+                            StoredDataMigrationV10.apply(connection)
+                            connection.createStatement().use {
+                                it.executeUpdate("PRAGMA user_version = 10")
+                            }
+                        }
                     }
                 }
             ) { home ->
-                assertEquals(10, databaseVersion(home))
+                assertEquals(11, databaseVersion(home))
                 assertTrue(
                     migrationBackups(home).isNotEmpty(),
                     "source version $sourceVersion should create a verified migration backup"
@@ -53,7 +77,7 @@ class UpgradeValidationTest {
         // The deliberately weak v0 fixture is also a supported upgrade input
         // and must preserve duplicate legacy rows rather than collapsing them.
         withDatabaseHome(resources = listOf("duplicate-v0.sql")) { home ->
-            assertEquals(10, databaseVersion(home))
+            assertEquals(11, databaseVersion(home))
             assertEquals(2, queryLong(home, "SELECT COUNT(*) FROM block_rules"))
             assertEquals(2, queryLong(home, "SELECT COUNT(*) FROM daily_allowances"))
             assertEquals(
@@ -63,6 +87,250 @@ class UpgradeValidationTest {
                     "SELECT COUNT(*) FROM app_references WHERE owner_type = 'block_rule'"
                 )
             )
+        }
+    }
+
+    @Test
+    fun `canonical references runtime selectors and structured launches round trip`() {
+        withDatabaseHome(
+            resources = listOf("schema-v8.sql"),
+            beforeInit = { connection ->
+                connection.createStatement().use { statement ->
+                    statement.executeUpdate(
+                        """
+                        INSERT INTO block_rules
+                            (id, process_name, display_name, enabled, block_network)
+                        VALUES
+                            ('compat-rule', 'Discord.exe', 'Discord', 1, 0),
+                            ('generic-java', 'java', 'Java', 1, 0)
+                        """.trimIndent()
+                    )
+                }
+            }
+        ) { home ->
+            val legacy = Database.getCanonicalAppReferences(
+                "block_rule",
+                "compat-rule"
+            ).single()
+            assertEquals(
+                Database.getAppReferences("block_rule", "compat-rule").single().id,
+                legacy.reference.referenceId
+            )
+            assertEquals("Discord.exe", legacy.reference.legacyProcessName)
+
+            val generic = Database.getCanonicalAppReferences(
+                "block_rule",
+                "generic-java"
+            ).single()
+            assertEquals("java", generic.reference.legacyProcessName)
+            assertEquals(AppResolutionStatus.UNRESOLVED, generic.reference.resolutionStatus)
+            assertTrue(generic.reference.runtimeDefinitions.isEmpty())
+
+            val created = Database.createCanonicalAppReference(
+                ownerType = "manual",
+                ownerId = "path-only",
+                position = 0,
+                displayName = "Path-only tool",
+                source = AppReferenceSource.MANUAL,
+                resolutionStatus = AppResolutionStatus.UNRESOLVED
+            )
+            val referenceId = created.reference.referenceId
+            assertTrue(referenceId.startsWith("foc-"))
+            assertEquals(null, created.reference.stableAppId)
+            assertEquals(null, created.reference.legacyProcessName)
+            assertTrue(Database.getAppReferences("manual", "path-only").isEmpty())
+
+            val selector = SelectorExpression.All(
+                listOf(
+                    SelectorExpression.Predicate(
+                        RuntimeSelector.ExecutableBasename("java")
+                    ),
+                    SelectorExpression.Predicate(
+                        RuntimeSelector.MainClass("org.example.Tool")
+                    )
+                )
+            )
+            val runtime = RuntimeDefinition(
+                id = "runtime-path-tool",
+                referenceId = referenceId,
+                role = RuntimeRole.PRIMARY,
+                selector = selector,
+                executionEnvironment = ExecutionEnvironment.NATIVE,
+                runtimeFamily = RuntimeFamily.JAVA,
+                authorizationPurpose = RuntimeAuthorizationPurpose.PRIMARY_RUNTIME
+            )
+            Database.upsertRuntimeDefinition(runtime)
+            assertEquals(listOf(runtime), Database.getRuntimeDefinitions(referenceId))
+
+            val launch = LaunchDefinition(
+                id = "launch-path-tool",
+                referenceId = referenceId,
+                type = "desktop-entry",
+                executablePath = "/usr/bin/java",
+                executable = "java",
+                argv = listOf(
+                    "-cp",
+                    "/opt/tool/lib/*",
+                    "--data-dir=/home/test/World One",
+                    "org.example.Tool"
+                ),
+                workingDirectory = "/home/test/World One",
+                desktopFilePath = "/home/test/.local/share/applications/tool.desktop",
+                desktopId = "tool.desktop",
+                handoffPolicy = "observe-target"
+            )
+            Database.upsertLaunchDefinition(launch)
+            assertEquals(launch, Database.getLaunchDefinition(referenceId))
+
+            val updatedLegacy = legacy.copy(
+                reference = legacy.reference.copy(stableAppId = "manual:discord")
+            )
+            Database.upsertCanonicalAppReference(updatedLegacy)
+            assertEquals(
+                "Discord.exe",
+                queryString(
+                    home,
+                    "SELECT process_name FROM block_rules WHERE id = 'compat-rule'"
+                )
+            )
+            assertEquals(
+                "Discord.exe",
+                Database.getAppReferences("block_rule", "compat-rule")
+                    .single().legacyProcessName
+            )
+
+            val invalid = runtime.copy(
+                id = "empty-runtime",
+                selector = SelectorExpression.All(emptyList())
+            )
+            assertFailsWith<IllegalArgumentException> {
+                Database.upsertRuntimeDefinition(invalid)
+            }
+
+            resetDatabaseConnection()
+            DriverManager.getConnection(
+                "jdbc:sqlite:${File(home, ".focusflow/focusflow.db").absolutePath}"
+            ).use { connection ->
+                connection.prepareStatement(
+                    """
+                    INSERT INTO app_runtime_definitions (
+                        id, reference_id, role, selector_schema_version,
+                        selector_serialization, execution_environment,
+                        runtime_family, authorization_purpose, enabled
+                    ) VALUES ('malformed-runtime', ?, 'PRIMARY', 1, 'not-a-selector',
+                              'native', 'java', 'primary_runtime', 1)
+                    """.trimIndent()
+                ).use { statement ->
+                    statement.setString(1, referenceId)
+                    statement.executeUpdate()
+                }
+            }
+            Database.init()
+            assertFailsWith<IllegalArgumentException> {
+                Database.getRuntimeDefinitions(referenceId)
+            }
+
+            assertEquals(referenceId, Database.getCanonicalAppReference(referenceId)
+                ?.reference?.referenceId)
+            assertEquals(
+                "launch-path-tool",
+                Database.getCanonicalAppReference(referenceId)
+                    ?.reference?.launchDefinitionId
+            )
+            assertTrue(Database.deleteRuntimeDefinition("malformed-runtime"))
+            assertTrue(Database.deleteRuntimeDefinition(runtime.id))
+            assertTrue(Database.deleteLaunchDefinition(referenceId))
+            assertTrue(Database.deleteCanonicalAppReference(referenceId))
+            assertEquals(null, Database.getCanonicalAppReference(referenceId))
+            assertEquals(
+                "Discord.exe",
+                Database.getAppReferences("block_rule", "compat-rule")
+                    .single().legacyProcessName
+            )
+        }
+    }
+
+    @Test
+    fun `v11 migration failure rolls back and leaves verified v10 database readable`() {
+        withDatabaseHome(
+            resources = listOf("schema-v8.sql"),
+            beforeInit = { connection ->
+                connection.createStatement().use { statement ->
+                    statement.executeUpdate(
+                        """
+                        INSERT INTO block_rules
+                            (id, process_name, display_name, enabled, block_network)
+                        VALUES ('preserved-rule', 'legacy-app', 'Legacy app', 1, 0)
+                        """.trimIndent()
+                    )
+                    StoredDataMigrationV9.apply(connection)
+                    StoredDataMigrationV10.apply(connection)
+                    statement.executeUpdate("PRAGMA user_version = 10")
+                    statement.executeUpdate(
+                        "CREATE TABLE app_runtime_definitions (id TEXT PRIMARY KEY)"
+                    )
+                }
+            }
+        ) { home ->
+            assertEquals(10, databaseVersion(home))
+            assertEquals(
+                "legacy-app",
+                queryString(home, "SELECT process_name FROM block_rules WHERE id = 'preserved-rule'")
+            )
+            assertEquals(
+                0,
+                queryLong(
+                    home,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' " +
+                        "AND name='canonical_app_references'"
+                )
+            )
+            assertTrue(
+                File(home, ".focusflow/migration-backups")
+                    .listFiles { file -> file.name.endsWith(".db") }
+                    ?.isNotEmpty() == true
+            )
+        }
+    }
+
+    @Test
+    fun `verified backup failure refuses v11 migration without fresh database recovery`() {
+        withDatabaseHome(
+            resources = listOf("schema-v8.sql"),
+            beforeInit = { connection ->
+                connection.createStatement().use { statement ->
+                    statement.executeUpdate(
+                        """
+                        INSERT INTO block_rules
+                            (id, process_name, display_name, enabled, block_network)
+                        VALUES ('preserved-rule', 'legacy-app', 'Legacy app', 1, 0)
+                        """.trimIndent()
+                    )
+                }
+                StoredDataMigrationV9.apply(connection)
+                StoredDataMigrationV10.apply(connection)
+                connection.createStatement().use {
+                    it.executeUpdate("PRAGMA user_version = 10")
+                }
+            },
+            beforeDatabaseInit = { _, home ->
+                File(home, ".focusflow/migration-backups").writeText("not a directory")
+            }
+        ) { home ->
+            assertEquals(10, databaseVersion(home))
+            assertEquals(
+                "legacy-app",
+                queryString(home, "SELECT process_name FROM block_rules WHERE id = 'preserved-rule'")
+            )
+            assertEquals(
+                0,
+                queryLong(
+                    home,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' " +
+                        "AND name='canonical_app_references'"
+                )
+            )
+            assertTrue(File(home, ".focusflow/migration-backups").isFile)
         }
     }
 
@@ -133,7 +401,7 @@ class UpgradeValidationTest {
             val secondReferences = Database.getAppReferences("block_rule", "linux-rule")
             assertEquals(firstRead, secondRead)
             assertEquals(firstReferences, secondReferences)
-            assertEquals(10, databaseVersion(home))
+            assertEquals(11, databaseVersion(home))
         }
     }
 

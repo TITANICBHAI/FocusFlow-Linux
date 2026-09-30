@@ -21,20 +21,22 @@ class CanonicalAppReferenceTest {
     }
 
     @Test
-    fun `canonical reference retains process enforcement beside stable identity`() {
+    fun `canonical reference has an internal ID and allows processless identity`() {
         val reference = CanonicalAppReference(
-            stableId = "org.mozilla.firefox",
+            referenceId = "foc-firefox",
+            stableAppId = "org.mozilla.firefox",
             displayName = "Firefox",
-            primaryProcessName = "firefox",
-            processAliases = listOf("firefox-bin"),
+            legacyProcessName = null,
             source = AppReferenceSource.CATALOG_NATIVE,
-            desktopFilePath = "/usr/share/applications/firefox.desktop",
             resolutionStatus = AppResolutionStatus.RESOLVED
         )
 
-        assertEquals("org.mozilla.firefox", reference.stableId)
-        assertEquals("firefox", reference.primaryProcessName)
-        assertEquals(listOf("firefox-bin"), reference.processAliases)
+        assertEquals("foc-firefox", reference.referenceId)
+        assertEquals("org.mozilla.firefox", reference.stableAppId)
+        assertEquals(null, reference.legacyProcessName)
+        assertEquals(null, reference.primaryProcessName)
+        assertEquals(emptyList(), reference.runtimeDefinitions)
+        assertEquals(null, reference.launchDefinitionId)
         assertEquals(AppResolutionStatus.RESOLVED, reference.resolutionStatus)
     }
 }

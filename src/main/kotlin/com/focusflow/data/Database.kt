@@ -2,6 +2,7 @@ package com.focusflow.data
 
 import com.focusflow.ProcessNameNormalizer
 import com.focusflow.data.models.*
+import com.focusflow.enforcement.*
 import java.util.UUID
 import org.sqlite.SQLiteDataSource
 import java.sql.Connection
@@ -105,6 +106,7 @@ object Database {
             localConn = ds.connection
             localConn.autoCommit = true
 
+            localConn.createStatement().use { it.execute("PRAGMA foreign_keys=ON") }
             localConn.createStatement().use { it.execute("PRAGMA journal_mode=WAL") }
             // In WAL mode, synchronous=NORMAL is crash-safe (no DB corruption risk) and
             // avoids the per-commit fsync of the default FULL mode. Data is pushed to the
@@ -187,7 +189,7 @@ object Database {
     // Every new schema change gets its own numbered migrate_vN() function.
     // Never edit an existing migrate_vN() — add a new one and bump TARGET_VERSION.
     //
-    private val TARGET_VERSION = 10
+    private val TARGET_VERSION = 11
 
     private fun migrate(dbFile: java.io.File) {
         val current = connection.createStatement()
@@ -234,6 +236,7 @@ object Database {
             if (current < 8) migrateV8()
             if (current < 9) migrateV9()
             if (current < 10) migrateV10()
+            if (current < 11) migrateV11()
 
             // Bump stored version only after ALL steps succeed
             connection.createStatement()
@@ -518,6 +521,12 @@ object Database {
     // v10 — migrate network, preset, launcher, VPN, and platform-setting references.
     private fun migrateV10() {
         StoredDataMigrationV10.apply(connection)
+    }
+
+    // v11 — add process-optional canonical references and separate runtime /
+    // launch definitions while preserving the legacy sidecar and source rows.
+    private fun migrateV11() {
+        StoredDataMigrationV11.apply(connection)
     }
 
     // v4 — network cutoff rules (domain + keyword, with optional per-app targeting)
@@ -1737,6 +1746,518 @@ object Database {
         else -> "setting:$key"
     }
 
+    /**
+     * Creates a canonical reference with a FocusFlow-owned ID. A process name
+     * is optional; the legacy owner tables remain unchanged.
+     */
+    @Synchronized fun createCanonicalAppReference(
+        ownerType: String,
+        ownerId: String,
+        position: Int,
+        stableAppId: String? = null,
+        displayName: String? = null,
+        legacyProcessName: String? = null,
+        primaryProcessName: String? = null,
+        processAliases: List<String> = emptyList(),
+        source: AppReferenceSource = AppReferenceSource.MANUAL,
+        resolutionStatus: AppResolutionStatus = AppResolutionStatus.UNRESOLVED
+    ): StoredCanonicalAppReference {
+        val reference = CanonicalAppReference(
+            referenceId = "foc-${UUID.randomUUID()}",
+            stableAppId = stableAppId,
+            displayName = displayName,
+            legacyProcessName = legacyProcessName,
+            primaryProcessName = primaryProcessName,
+            processAliases = processAliases,
+            source = source,
+            resolutionStatus = resolutionStatus
+        )
+        return upsertCanonicalAppReference(
+            StoredCanonicalAppReference(ownerType, ownerId, position, reference)
+        )
+    }
+
+    /** Upserts only canonical metadata; legacy source values are never rewritten. */
+    @Synchronized fun upsertCanonicalAppReference(
+        stored: StoredCanonicalAppReference
+    ): StoredCanonicalAppReference {
+        check(isReady) { "Database is not initialized" }
+        require(stored.ownerType.isNotBlank()) { "Reference owner type cannot be blank" }
+        require(stored.ownerId.isNotBlank()) { "Reference owner ID cannot be blank" }
+        require(stored.position >= 0) { "Reference position cannot be negative" }
+        val reference = stored.reference
+        require(reference.referenceId.isNotBlank()) { "Reference ID cannot be blank" }
+
+        inTransaction {
+            connection.prepareStatement(
+                """
+                INSERT INTO canonical_app_references (
+                    reference_id, owner_type, owner_id, position,
+                    stable_app_id, display_name, legacy_process_name,
+                    primary_process_name, process_aliases, source,
+                    resolution_status, conflict_status, conflict_group_key,
+                    last_resolved_at_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(reference_id) DO UPDATE SET
+                    owner_type = excluded.owner_type,
+                    owner_id = excluded.owner_id,
+                    position = excluded.position,
+                    stable_app_id = excluded.stable_app_id,
+                    display_name = excluded.display_name,
+                    legacy_process_name = excluded.legacy_process_name,
+                    primary_process_name = excluded.primary_process_name,
+                    process_aliases = excluded.process_aliases,
+                    source = excluded.source,
+                    resolution_status = excluded.resolution_status,
+                    conflict_status = excluded.conflict_status,
+                    conflict_group_key = excluded.conflict_group_key,
+                    last_resolved_at_ms = excluded.last_resolved_at_ms
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, reference.referenceId)
+                statement.setString(2, stored.ownerType)
+                statement.setString(3, stored.ownerId)
+                statement.setInt(4, stored.position)
+                statement.setString(5, reference.stableAppId)
+                statement.setString(6, reference.displayName)
+                statement.setString(7, reference.legacyProcessName)
+                statement.setString(8, reference.primaryProcessName)
+                statement.setString(9, reference.processAliases.joinToString(","))
+                statement.setString(10, reference.source.wireValue)
+                statement.setString(11, reference.resolutionStatus.wireValue)
+                statement.setString(12, reference.conflictStatus)
+                statement.setString(13, reference.conflictGroupKey)
+                if (reference.lastResolvedAtMs == null) {
+                    statement.setNull(14, java.sql.Types.BIGINT)
+                } else {
+                    statement.setLong(14, reference.lastResolvedAtMs)
+                }
+                statement.executeUpdate()
+            }
+
+            // Keep old process-bearing sidecar readers compatible. The original
+            // source process column is intentionally excluded from this update.
+            connection.prepareStatement(
+                """
+                UPDATE app_references
+                SET stable_app_id = ?, display_name = ?,
+                    primary_process_name = COALESCE(?, primary_process_name),
+                    process_aliases = ?, source = ?, resolution_status = ?,
+                    last_resolved_at_ms = ?, conflict_status = ?,
+                    conflict_group_key = ?
+                WHERE id = ?
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, reference.stableAppId)
+                statement.setString(2, reference.displayName)
+                statement.setString(3, reference.primaryProcessName)
+                statement.setString(4, reference.processAliases.joinToString(","))
+                statement.setString(5, reference.source.wireValue)
+                statement.setString(6, reference.resolutionStatus.wireValue)
+                if (reference.lastResolvedAtMs == null) {
+                    statement.setNull(7, java.sql.Types.BIGINT)
+                } else {
+                    statement.setLong(7, reference.lastResolvedAtMs)
+                }
+                statement.setString(8, reference.conflictStatus)
+                statement.setString(9, reference.conflictGroupKey)
+                statement.setString(10, reference.referenceId)
+                statement.executeUpdate()
+            }
+        }
+        return readCanonicalAppReference(reference.referenceId)
+            ?: error("Canonical app reference disappeared after save")
+    }
+
+    @Synchronized fun getCanonicalAppReference(
+        referenceId: String
+    ): StoredCanonicalAppReference? =
+        if (isReady) readCanonicalAppReference(referenceId) else null
+
+    @Synchronized fun getCanonicalAppReferences(
+        ownerType: String,
+        ownerId: String
+    ): List<StoredCanonicalAppReference> {
+        if (!isReady) return emptyList()
+        val referenceIds = connection.prepareStatement(
+            """
+            SELECT reference_id FROM canonical_app_references
+            WHERE owner_type = ? AND owner_id = ?
+            ORDER BY position, reference_id
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, ownerType)
+            statement.setString(2, ownerId)
+            statement.executeQuery().use { rows ->
+                buildList {
+                    while (rows.next()) add(rows.getString("reference_id"))
+                }
+            }
+        }
+        return referenceIds.mapNotNull(::readCanonicalAppReference)
+    }
+
+    /**
+     * Deletes canonical metadata and its definitions only. Any legacy owner
+     * row remains intact and can still be read by existing process-based code.
+     */
+    @Synchronized fun deleteCanonicalAppReference(referenceId: String): Boolean {
+        if (!isReady) return false
+        return inTransaction {
+            connection.prepareStatement(
+                "DELETE FROM canonical_app_references WHERE reference_id = ?"
+            ).use { statement ->
+                statement.setString(1, referenceId)
+                statement.executeUpdate() > 0
+            }
+        }
+    }
+
+    @Synchronized fun upsertRuntimeDefinition(definition: RuntimeDefinition): RuntimeDefinition {
+        check(isReady) { "Database is not initialized" }
+        require(definition.id.isNotBlank()) { "Runtime definition ID cannot be blank" }
+        require(definition.referenceId.isNotBlank()) { "Reference ID cannot be blank" }
+        val validation = RuntimeSelectorDefinition(
+            expression = definition.selector,
+            enabled = definition.enabled,
+            schemaVersion = definition.schemaVersion
+        ).validationErrors()
+        require(validation.isEmpty()) { validation.joinToString("; ") }
+
+        inTransaction {
+            requireCanonicalReferenceExists(definition.referenceId)
+            val existingReferenceId = connection.prepareStatement(
+                "SELECT reference_id FROM app_runtime_definitions WHERE id = ?"
+            ).use { statement ->
+                statement.setString(1, definition.id)
+                statement.executeQuery().use { rows ->
+                    if (rows.next()) rows.getString(1) else null
+                }
+            }
+            require(existingReferenceId == null || existingReferenceId == definition.referenceId) {
+                "Runtime definition IDs cannot be moved between references"
+            }
+            connection.prepareStatement(
+                """
+                INSERT INTO app_runtime_definitions (
+                    id, reference_id, role, selector_schema_version,
+                    selector_serialization, execution_environment,
+                    runtime_family, authorization_purpose, enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    role = excluded.role,
+                    selector_schema_version = excluded.selector_schema_version,
+                    selector_serialization = excluded.selector_serialization,
+                    execution_environment = excluded.execution_environment,
+                    runtime_family = excluded.runtime_family,
+                    authorization_purpose = excluded.authorization_purpose,
+                    enabled = excluded.enabled
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, definition.id)
+                statement.setString(2, definition.referenceId)
+                statement.setString(3, definition.role.name)
+                statement.setInt(4, definition.schemaVersion)
+                statement.setString(5, SelectorExpressionCodec.encode(definition.selector))
+                statement.setString(6, definition.executionEnvironment.wireName)
+                statement.setString(7, definition.runtimeFamily?.wireName)
+                statement.setString(8, definition.authorizationPurpose.wireValue)
+                statement.setInt(9, if (definition.enabled) 1 else 0)
+                statement.executeUpdate()
+            }
+        }
+        return definition
+    }
+
+    @Synchronized fun getRuntimeDefinitions(referenceId: String): List<RuntimeDefinition> =
+        if (isReady) readRuntimeDefinitions(referenceId) else emptyList()
+
+    @Synchronized fun deleteRuntimeDefinition(definitionId: String): Boolean {
+        if (!isReady) return false
+        return connection.prepareStatement(
+            "DELETE FROM app_runtime_definitions WHERE id = ?"
+        ).use { statement ->
+            statement.setString(1, definitionId)
+            statement.executeUpdate() > 0
+        }
+    }
+
+    @Synchronized fun upsertLaunchDefinition(definition: LaunchDefinition): LaunchDefinition {
+        check(isReady) { "Database is not initialized" }
+        require(definition.id.isNotBlank()) { "Launch definition ID cannot be blank" }
+        require(definition.referenceId.isNotBlank()) { "Reference ID cannot be blank" }
+        require(definition.type.isNotBlank()) { "Launch definition type cannot be blank" }
+        require(definition.handoffPolicy.isNotBlank()) { "Handoff policy cannot be blank" }
+        require(definition.argv.size <= 4096) { "Too many launch arguments" }
+        require(definition.argv.all { it.length <= 16_384 }) {
+            "Launch argument exceeds the size limit"
+        }
+
+        inTransaction {
+            requireCanonicalReferenceExists(definition.referenceId)
+            val existingId = connection.prepareStatement(
+                "SELECT id FROM app_launch_definitions WHERE reference_id = ?"
+            ).use { statement ->
+                statement.setString(1, definition.referenceId)
+                statement.executeQuery().use { rows ->
+                    if (rows.next()) rows.getString(1) else null
+                }
+            }
+            require(existingId == null || existingId == definition.id) {
+                "A reference already has a different launch definition ID"
+            }
+            val existingReferenceId = connection.prepareStatement(
+                "SELECT reference_id FROM app_launch_definitions WHERE id = ?"
+            ).use { statement ->
+                statement.setString(1, definition.id)
+                statement.executeQuery().use { rows ->
+                    if (rows.next()) rows.getString(1) else null
+                }
+            }
+            require(existingReferenceId == null || existingReferenceId == definition.referenceId) {
+                "Launch definition IDs cannot be moved between references"
+            }
+
+            connection.prepareStatement(
+                """
+                INSERT INTO app_launch_definitions (
+                    id, reference_id, type, executable_path, executable,
+                    working_directory, desktop_file_path, desktop_id,
+                    package_id, dbus_activatable, handoff_policy
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    type = excluded.type,
+                    executable_path = excluded.executable_path,
+                    executable = excluded.executable,
+                    working_directory = excluded.working_directory,
+                    desktop_file_path = excluded.desktop_file_path,
+                    desktop_id = excluded.desktop_id,
+                    package_id = excluded.package_id,
+                    dbus_activatable = excluded.dbus_activatable,
+                    handoff_policy = excluded.handoff_policy
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, definition.id)
+                statement.setString(2, definition.referenceId)
+                statement.setString(3, definition.type)
+                statement.setString(4, definition.executablePath)
+                statement.setString(5, definition.executable)
+                statement.setString(6, definition.workingDirectory)
+                statement.setString(7, definition.desktopFilePath)
+                statement.setString(8, definition.desktopId)
+                statement.setString(9, definition.packageId)
+                statement.setInt(10, if (definition.dbusActivatable) 1 else 0)
+                statement.setString(11, definition.handoffPolicy)
+                statement.executeUpdate()
+            }
+            connection.prepareStatement(
+                "DELETE FROM app_launch_arguments WHERE launch_definition_id = ?"
+            ).use { statement ->
+                statement.setString(1, definition.id)
+                statement.executeUpdate()
+            }
+            connection.prepareStatement(
+                """
+                INSERT INTO app_launch_arguments (launch_definition_id, position, argument)
+                VALUES (?, ?, ?)
+                """.trimIndent()
+            ).use { statement ->
+                definition.argv.forEachIndexed { position, argument ->
+                    statement.setString(1, definition.id)
+                    statement.setInt(2, position)
+                    statement.setString(3, argument)
+                    statement.addBatch()
+                }
+                statement.executeBatch()
+            }
+        }
+        return definition
+    }
+
+    @Synchronized fun getLaunchDefinition(referenceId: String): LaunchDefinition? =
+        if (isReady) readLaunchDefinition(referenceId) else null
+
+    @Synchronized fun deleteLaunchDefinition(referenceId: String): Boolean {
+        if (!isReady) return false
+        return connection.prepareStatement(
+            "DELETE FROM app_launch_definitions WHERE reference_id = ?"
+        ).use { statement ->
+            statement.setString(1, referenceId)
+            statement.executeUpdate() > 0
+        }
+    }
+
+    private fun requireCanonicalReferenceExists(referenceId: String) {
+        connection.prepareStatement(
+            "SELECT 1 FROM canonical_app_references WHERE reference_id = ?"
+        ).use { statement ->
+            statement.setString(1, referenceId)
+            statement.executeQuery().use { rows ->
+                require(rows.next()) { "Canonical app reference does not exist" }
+            }
+        }
+    }
+
+    private fun readCanonicalAppReference(
+        referenceId: String
+    ): StoredCanonicalAppReference? =
+        connection.prepareStatement(
+            """
+            SELECT reference_id, owner_type, owner_id, position, stable_app_id,
+                   display_name, legacy_process_name, primary_process_name,
+                   process_aliases, source, resolution_status, conflict_status,
+                   conflict_group_key, last_resolved_at_ms
+            FROM canonical_app_references
+            WHERE reference_id = ?
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, referenceId)
+            statement.executeQuery().use rows@ { rows ->
+                if (!rows.next()) return@rows null
+                val id = rows.getString("reference_id")
+                val launchDefinitionId = readLaunchDefinition(id)?.id
+                StoredCanonicalAppReference(
+                    ownerType = rows.getString("owner_type"),
+                    ownerId = rows.getString("owner_id"),
+                    position = rows.getInt("position"),
+                    reference = CanonicalAppReference(
+                        referenceId = id,
+                        stableAppId = rows.getString("stable_app_id"),
+                        displayName = rows.getString("display_name"),
+                        legacyProcessName = rows.getString("legacy_process_name"),
+                        primaryProcessName = rows.getString("primary_process_name"),
+                        processAliases = ProcessNameNormalizer.normalizeAliases(
+                            rows.getString("process_aliases").orEmpty().split(",")
+                        ),
+                        source = AppReferenceSource.values().firstOrNull {
+                            it.wireValue == rows.getString("source")
+                        } ?: AppReferenceSource.LEGACY,
+                        resolutionStatus = AppResolutionStatus.values().firstOrNull {
+                            it.wireValue == rows.getString("resolution_status")
+                        } ?: AppResolutionStatus.UNRESOLVED,
+                        runtimeDefinitions = readRuntimeDefinitions(id),
+                        launchDefinitionId = launchDefinitionId,
+                        conflictStatus = rows.getString("conflict_status") ?: "none",
+                        conflictGroupKey = rows.getString("conflict_group_key"),
+                        lastResolvedAtMs = rows.getLong("last_resolved_at_ms")
+                            .takeIf { !rows.wasNull() }
+                    )
+                )
+            }
+        }
+
+    private fun readRuntimeDefinitions(referenceId: String): List<RuntimeDefinition> =
+        connection.prepareStatement(
+            """
+            SELECT id, reference_id, role, selector_schema_version,
+                   selector_serialization, execution_environment, runtime_family,
+                   authorization_purpose, enabled
+            FROM app_runtime_definitions
+            WHERE reference_id = ?
+            ORDER BY id
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, referenceId)
+            statement.executeQuery().use { rows ->
+                buildList {
+                    while (rows.next()) {
+                        val schemaVersion = rows.getInt("selector_schema_version")
+                        val expression = SelectorExpressionCodec.decode(
+                            rows.getString("selector_serialization")
+                        )
+                        val enabled = rows.getInt("enabled").let {
+                            when (it) {
+                                0 -> false
+                                1 -> true
+                                else -> error("Invalid runtime definition enabled value")
+                            }
+                        }
+                        val validation = RuntimeSelectorDefinition(
+                            expression = expression,
+                            enabled = enabled,
+                            schemaVersion = schemaVersion
+                        ).validationErrors()
+                        check(validation.isEmpty()) {
+                            "Stored runtime definition is invalid: ${validation.joinToString("; ")}"
+                        }
+                        add(
+                            RuntimeDefinition(
+                                id = rows.getString("id"),
+                                referenceId = rows.getString("reference_id"),
+                                role = RuntimeRole.values().firstOrNull {
+                                    it.name == rows.getString("role")
+                                } ?: error("Unknown stored runtime role"),
+                                selector = expression,
+                                executionEnvironment = ExecutionEnvironment.values().firstOrNull {
+                                    it.wireName == rows.getString("execution_environment")
+                                } ?: error("Unknown stored execution environment"),
+                                runtimeFamily = rows.getString("runtime_family")?.let { family ->
+                                    RuntimeFamily.values().firstOrNull {
+                                        it.wireName == family
+                                    } ?: error("Unknown stored runtime family")
+                                },
+                                authorizationPurpose =
+                                    RuntimeAuthorizationPurpose.values().firstOrNull {
+                                        it.wireValue == rows.getString("authorization_purpose")
+                                    } ?: error("Unknown stored runtime authorization purpose"),
+                                enabled = enabled,
+                                schemaVersion = schemaVersion
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+    private fun readLaunchDefinition(referenceId: String): LaunchDefinition? {
+        val row = connection.prepareStatement(
+            """
+            SELECT id, reference_id, type, executable_path, executable,
+                   working_directory, desktop_file_path, desktop_id, package_id,
+                   dbus_activatable, handoff_policy
+            FROM app_launch_definitions
+            WHERE reference_id = ?
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, referenceId)
+            statement.executeQuery().use rows@ { rows ->
+                if (!rows.next()) return@rows null
+                LaunchDefinition(
+                    id = rows.getString("id"),
+                    referenceId = rows.getString("reference_id"),
+                    type = rows.getString("type"),
+                    executablePath = rows.getString("executable_path"),
+                    executable = rows.getString("executable"),
+                    workingDirectory = rows.getString("working_directory"),
+                    desktopFilePath = rows.getString("desktop_file_path"),
+                    desktopId = rows.getString("desktop_id"),
+                    packageId = rows.getString("package_id"),
+                    dbusActivatable = when (rows.getInt("dbus_activatable")) {
+                        0 -> false
+                        1 -> true
+                        else -> error("Invalid stored launch activation value")
+                    },
+                    handoffPolicy = rows.getString("handoff_policy")
+                )
+            }
+        } ?: return null
+        val argv = connection.prepareStatement(
+            """
+            SELECT argument FROM app_launch_arguments
+            WHERE launch_definition_id = ?
+            ORDER BY position
+            """.trimIndent()
+        ).use { statement ->
+            statement.setString(1, row.id)
+            statement.executeQuery().use { rows ->
+                buildList {
+                    while (rows.next()) add(rows.getString("argument"))
+                }
+            }
+        }
+        return row.copy(argv = argv)
+    }
+
     private fun readAppReferences(ownerType: String, ownerId: String): List<StoredAppReference> {
         if (!isReady) return emptyList()
         return try {
@@ -1854,6 +2375,31 @@ object Database {
                 ps.addBatch()
             }
             ps.executeBatch()
+        }
+
+        // Maintain the additive canonical view for existing process-bearing
+        // owners without replacing its runtime or launch definition children.
+        readAppReferences(ownerType, ownerId).forEach { legacy ->
+            upsertCanonicalAppReference(
+                StoredCanonicalAppReference(
+                    ownerType = ownerType,
+                    ownerId = ownerId,
+                    position = legacy.position,
+                    reference = CanonicalAppReference(
+                        referenceId = legacy.referenceId,
+                        stableAppId = legacy.stableAppId,
+                        displayName = legacy.displayName,
+                        legacyProcessName = legacy.legacyProcessName,
+                        primaryProcessName = legacy.primaryProcessName,
+                        processAliases = legacy.processAliases,
+                        source = legacy.source,
+                        resolutionStatus = legacy.resolutionStatus,
+                        conflictStatus = legacy.conflictStatus,
+                        conflictGroupKey = legacy.conflictGroupKey,
+                        lastResolvedAtMs = legacy.lastResolvedAtMs
+                    )
+                )
+            )
         }
     }
 

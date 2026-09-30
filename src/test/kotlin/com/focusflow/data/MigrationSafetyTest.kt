@@ -28,7 +28,7 @@ class MigrationSafetyTest {
                     connection = connection,
                     databaseFile = source,
                     sourceVersion = 7,
-                    targetVersion = 10
+                    targetVersion = 11
                 )
                 val backup = File(directory, "migration-backups/${result.fileName}")
 
@@ -64,7 +64,7 @@ class MigrationSafetyTest {
                         connection = connection,
                         databaseFile = File(blockedParent, "focusflow.db"),
                         sourceVersion = 7,
-                        targetVersion = 10
+                        targetVersion = 11
                     )
                 }.exceptionOrNull()
 
@@ -83,8 +83,8 @@ class MigrationSafetyTest {
             MigrationDiagnostics.write(
                 databaseDirectory = directory,
                 sourceVersion = 9,
-                targetVersion = 10,
-                backupFileName = "pre_migration_v9_to_v10_test.db",
+                targetVersion = 11,
+                backupFileName = "pre_migration_v9_to_v11_test.db",
                 counts = MigrationDiagnostics.Counts(
                     recordsExamined = 12,
                     normalized = 4,
@@ -100,7 +100,7 @@ class MigrationSafetyTest {
 
             val summary = File(directory, "migration-summary.log").readText()
             assertTrue("source_schema_version=9" in summary)
-            assertTrue("target_schema_version=10" in summary)
+            assertTrue("target_schema_version=11" in summary)
             assertTrue("records_examined=12" in summary)
             assertTrue("wal_present=true" in summary)
             assertFalse("focusflow.db" in summary)

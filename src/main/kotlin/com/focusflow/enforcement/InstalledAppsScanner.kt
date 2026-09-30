@@ -71,6 +71,22 @@ data class AppDescriptor(
     val canonicalReference: CanonicalAppReference? = null
 )
 
+internal fun AppDescriptor.stableCatalogKey(): String {
+    val canonicalStableId = canonicalReference?.stableAppId
+    val canonicalReferenceId = canonicalReference?.referenceId
+    val value = when {
+        !desktopId.isNullOrBlank() -> desktopId
+        !packageId.isNullOrBlank() -> packageId
+        source == AppSource.MANUAL && processName.isNotBlank() -> processName
+        !canonicalStableId.isNullOrBlank() -> canonicalStableId
+        !canonicalReferenceId.isNullOrBlank() -> canonicalReferenceId
+        exePath?.startsWith("/") == true -> "path:$exePath:${displayName.lowercase(Locale.ROOT)}"
+        processName.isNotBlank() -> "${displayName.lowercase(Locale.ROOT)}:$processName"
+        else -> displayName
+    }
+    return value.trim().lowercase(Locale.ROOT)
+}
+
 data class AppCatalogState(
     val apps: List<AppDescriptor> = emptyList(),
     val isRefreshing: Boolean = false,
@@ -1024,24 +1040,33 @@ object InstalledAppsScanner {
         val normalized = normalizeLinuxExec(entry.exec) ?: return null
         if (entry.tryExec != null && !isExecutableAvailable(entry.tryExec)) return null
         val packageId = entry.packageId ?: normalized.packageId
+        val trustedWindowClass = entry.startupWmClass
+            ?.trim()
+            ?.lowercase(Locale.ROOT)
+            ?.takeIf { SAFE_LINUX_PROCESS_NAME.matches(it) }
+        val processName = if (normalized.processName in setOf("flatpak", "snap")) {
+            trustedWindowClass ?: normalized.processName
+        } else {
+            normalized.processName
+        }
         val aliases = (
             normalized.aliases +
-                listOfNotNull(packageId, entry.startupWmClass)
+                listOfNotNull(entry.startupWmClass)
             )
             .map { it.lowercase(Locale.ROOT) }
             .filter { it.isNotBlank() }
             .distinct()
         val effectiveSource = when {
-            normalized.packageId != null &&
+            packageId != null &&
                 java.io.File(normalized.command).name.equals("flatpak", ignoreCase = true) ->
                 AppSource.FLATPAK
-            normalized.packageId != null &&
+            packageId != null &&
                 java.io.File(normalized.command).name.equals("snap", ignoreCase = true) ->
                 AppSource.SNAP
             else -> source
         }
         return ScannedApp(
-            processName = normalized.processName,
+            processName = processName,
             displayName = entry.name,
             isRunning = false,
             exePath = normalized.command,
@@ -1270,35 +1295,27 @@ object InstalledAppsScanner {
         if (command.any { it in ";|&$`()<>!\n\r" }) return null
 
         if (commandName == "flatpak") {
-            val appId = tokens.drop(index + 1)
-                .dropWhile { it == "run" || it.startsWith("-") }
-                .firstOrNull()
-                ?.takeIf { it.isNotBlank() }
-            val flatpakName = appId?.let(::flatpakProcessName)
-                ?.takeIf { SAFE_LINUX_PROCESS_NAME.matches(it) }
+            val appId = recognizedPackageInvocation(tokens, index)
+                ?.takeIf { SAFE_LINUX_PACKAGE_ID.matches(it) }
                 ?: return null
             return NormalizedLinuxExec(
-                processName = flatpakName,
+                processName = "flatpak",
                 command = command,
                 fullCommand = fullCommand,
-                aliases = listOfNotNull(appId),
+                aliases = emptyList(),
                 packageId = appId
             )
         }
 
         if (commandName == "snap") {
-            val snapId = tokens.drop(index + 1)
-                .dropWhile { it == "run" || it.startsWith("-") }
-                .firstOrNull()
-                ?.takeIf { it.isNotBlank() }
-                ?.lowercase(Locale.ROOT)
-                ?.takeIf { SAFE_LINUX_PROCESS_NAME.matches(it) }
+            val snapId = recognizedPackageInvocation(tokens, index)
+                ?.takeIf { SAFE_LINUX_PACKAGE_ID.matches(it) }
                 ?: return null
             return NormalizedLinuxExec(
-                processName = snapId,
+                processName = "snap",
                 command = command,
                 fullCommand = fullCommand,
-                aliases = listOf(snapId),
+                aliases = emptyList(),
                 packageId = snapId
             )
         }
@@ -1314,14 +1331,10 @@ object InstalledAppsScanner {
         )
     }
 
-    private fun flatpakProcessName(appId: String): String {
-        val parts = appId.split('.').filter { it.isNotBlank() }
-        if (parts.isEmpty()) return appId.lowercase()
-        return if (parts.size >= 3 && parts.last().equals("desktop", ignoreCase = true)) {
-            parts.drop(1).joinToString("-")
-        } else {
-            parts.last()
-        }.lowercase()
+    private fun recognizedPackageInvocation(tokens: List<String>, executableIndex: Int): String? {
+        if (tokens.getOrNull(executableIndex + 1) != "run") return null
+        return tokens.getOrNull(executableIndex + 2)
+            ?.takeIf { SAFE_LINUX_PACKAGE_ID.matches(it) }
     }
 
     /** Tokenize the quoted/escaped command grammar used by desktop Exec= values. */
@@ -1359,6 +1372,13 @@ object InstalledAppsScanner {
     /** Exposed to the Linux unit tests without making parser internals public. */
     internal fun normalizeLinuxExecForTesting(exec: String): String? =
         normalizeLinuxExec(exec)?.processName
+
+    internal fun normalizeLinuxExecIdentityForTesting(
+        exec: String
+    ): Triple<String, String?, List<String>>? =
+        normalizeLinuxExec(exec)?.let {
+            Triple(it.processName, it.packageId, it.aliases)
+        }
 
     internal fun parseLinuxDesktopContentForTesting(
         content: String,
@@ -1475,14 +1495,7 @@ object InstalledAppsScanner {
             }
             .toSet()
 
-    private fun stableCatalogKey(app: AppDescriptor): String =
-        (
-            app.desktopId ?: app.packageId ?: app.processName.takeIf { it.isNotBlank() }
-                ?: app.canonicalReference?.stableAppId
-                ?: app.canonicalReference?.referenceId.orEmpty()
-        )
-            .trim()
-            .lowercase(Locale.ROOT)
+    private fun stableCatalogKey(app: AppDescriptor): String = app.stableCatalogKey()
 
     private fun strongerConfidence(
         first: AppDetectionConfidence,

@@ -32,17 +32,38 @@ class InstalledAppsScannerLinuxTest {
     }
 
     @Test
-    fun `derives stable names for flatpak app ids`() {
-        assertEquals(
-            "telegram-desktop",
-            InstalledAppsScanner.normalizeLinuxExecForTesting(
+    fun `keeps package ids separate from inferred process names and aliases`() {
+        val flatpak = requireNotNull(
+            InstalledAppsScanner.normalizeLinuxExecIdentityForTesting(
                 "flatpak run org.telegram.desktop %U"
             )
         )
-        assertEquals(
-            "nautilus",
-            InstalledAppsScanner.normalizeLinuxExecForTesting(
-                "flatpak run org.gnome.Nautilus"
+        assertEquals("flatpak", flatpak.first)
+        assertEquals("org.telegram.desktop", flatpak.second)
+        assertTrue(flatpak.third.isEmpty())
+
+        val snap = requireNotNull(
+            InstalledAppsScanner.normalizeLinuxExecIdentityForTesting("snap run snap-reader")
+        )
+        assertEquals("snap", snap.first)
+        assertEquals("snap-reader", snap.second)
+        assertTrue(snap.third.isEmpty())
+    }
+
+    @Test
+    fun `does not infer package ids from dotted command arguments or arbitrary flags`() {
+        val ordinary = requireNotNull(
+            InstalledAppsScanner.normalizeLinuxExecIdentityForTesting(
+                "editor org.example.SomeApp"
+            )
+        )
+        assertEquals("editor", ordinary.first)
+        assertNull(ordinary.second)
+        assertEquals(listOf("editor"), ordinary.third)
+
+        assertNull(
+            InstalledAppsScanner.normalizeLinuxExecIdentityForTesting(
+                "flatpak --app=org.example.SomeApp"
             )
         )
     }

@@ -169,12 +169,19 @@ private fun catalogCorrelationNotice(
     val relevant = correlations.filter { resolution ->
         resolution.candidates.any { it.catalogKey == app.catalogKey() }
     }
-    return when {
-        relevant.any { it.status == CatalogMatchStatus.AMBIGUOUS } ->
-            "Ambiguous process match · catalog evidence only"
-        relevant.any { it.status == CatalogMatchStatus.POSSIBLE } ->
-            "Possible process match · not authorization"
-        else -> null
+    val ambiguous = relevant.firstOrNull { it.status == CatalogMatchStatus.AMBIGUOUS }
+    if (ambiguous != null) {
+        return "Ambiguous: ${ambiguous.candidates.size} app candidates · identity unresolved"
+    }
+    val strongest = relevant.firstOrNull { it.status == CatalogMatchStatus.EXACT }
+        ?: relevant.firstOrNull { it.status == CatalogMatchStatus.POSSIBLE }
+        ?: return null
+    val evidence = strongest.candidates.singleOrNull()?.evidence?.firstOrNull()?.description
+        ?: "Process and app catalog evidence"
+    return when (strongest.status) {
+        CatalogMatchStatus.EXACT -> "$evidence · catalog evidence only, not authorization"
+        CatalogMatchStatus.POSSIBLE -> "$evidence · possible match, not authorization"
+        CatalogMatchStatus.NONE, CatalogMatchStatus.AMBIGUOUS -> null
     }
 }
 
@@ -1026,10 +1033,11 @@ private fun CatalogAppRow(
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = app.processName.ifBlank {
+                    text = app.processName.takeUnless { it in setOf("flatpak", "snap") }.orEmpty()
+                        .ifBlank {
                         app.desktopId ?: app.packageId ?: app.canonicalReference?.stableAppId
                             ?: "Explicit target"
-                    },
+                        },
                     color = OnSurface2,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -1231,10 +1239,4 @@ private fun formatRefreshTime(timestamp: Long): String =
         .format(Instant.ofEpochMilli(timestamp))
 
 fun AppDescriptor.catalogKey(): String =
-    (
-        desktopId ?: packageId ?: processName.takeIf { it.isNotBlank() }
-            ?: canonicalReference?.stableAppId
-            ?: canonicalReference?.referenceId.orEmpty()
-    )
-        .trim()
-        .lowercase(Locale.ROOT)
+    stableCatalogKey()

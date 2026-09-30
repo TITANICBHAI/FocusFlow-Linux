@@ -234,10 +234,7 @@ object LinuxProcessCatalogResolver {
     private fun basename(path: String): String? =
         runCatching { Path.of(path).fileName?.toString() }.getOrNull()
 
-    private fun catalogKey(app: AppDescriptor): String =
-        (app.desktopId ?: app.packageId ?: app.processName)
-            .trim()
-            .lowercase(Locale.ROOT)
+    private fun catalogKey(app: AppDescriptor): String = app.stableCatalogKey()
 
     private val SAFE_PACKAGE_ID = Regex("^[A-Za-z0-9][A-Za-z0-9_.+-]*$")
 }

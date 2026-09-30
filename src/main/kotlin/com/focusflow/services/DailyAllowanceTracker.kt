@@ -2,8 +2,14 @@ package com.focusflow.services
 
 import com.focusflow.data.Database
 import com.focusflow.data.models.DailyAllowance
+import com.focusflow.enforcement.LinuxProcessRepository
+import com.focusflow.enforcement.LinuxProcessSafety
+import com.focusflow.enforcement.LinuxProcessSnapshot
+import com.focusflow.enforcement.ProcessInstanceIdentity
 import com.focusflow.enforcement.ProcessMonitor
 import com.focusflow.enforcement.getForegroundProcessName
+import com.focusflow.enforcement.isLinux
+import com.focusflow.enforcement.isSameKnownProcessObservation
 import com.focusflow.enforcement.isWindows
 import com.focusflow.enforcement.killProcessByName
 import kotlinx.coroutines.*
@@ -25,6 +31,13 @@ import java.time.LocalDate
  * ProcessHandle.destroyForcibly() throws when the JVM's own PID appears in allProcesses().
  */
 object DailyAllowanceTracker {
+
+    private data class RunningProcessTarget(
+        val pid: Long,
+        val processName: String,
+        val processHandle: ProcessHandle? = null,
+        val linuxObservation: LinuxProcessSnapshot? = null
+    )
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     // @Volatile: start() writes on the Compose application thread; stop() reads on the
@@ -132,17 +145,39 @@ object DailyAllowanceTracker {
         // Background processes running silently should not consume the user's quota.
         val foregroundProcess = if (isWindows) getForegroundProcessName()?.lowercase() else null
 
-        val processHandles: List<ProcessHandle> = try {
-            ProcessHandle.allProcesses().toList()
-        } catch (_: Exception) { return }
-
-        val runningMap: Map<String, List<ProcessHandle>> = processHandles
-            .filter { ph -> ph.pid() != ownPid }
-            .mapNotNull { ph ->
-                val cmd = ph.info().command().orElse(null) ?: return@mapNotNull null
-                java.io.File(cmd).name.lowercase() to ph
+        val runningMap: Map<String, List<RunningProcessTarget>> = try {
+            if (isLinux) {
+                LinuxProcessRepository.system.snapshot().processes
+                    .mapNotNull { observation ->
+                        if (observation.pid == ownPid) return@mapNotNull null
+                        val processName = observation.executableBasename
+                            ?.lowercase()
+                            ?.takeIf { it.isNotBlank() }
+                            ?: return@mapNotNull null
+                        processName to RunningProcessTarget(
+                            pid = observation.pid,
+                            processName = processName,
+                            linuxObservation = observation
+                        )
+                    }
+                    .groupBy({ it.first }, { it.second })
+            } else {
+                ProcessHandle.allProcesses()
+                    .toList()
+                    .mapNotNull { processHandle ->
+                        if (processHandle.pid() == ownPid) return@mapNotNull null
+                        val command = processHandle.info().command().orElse(null)
+                            ?: return@mapNotNull null
+                        val processName = java.io.File(command).name.lowercase()
+                        processName to RunningProcessTarget(
+                            pid = processHandle.pid(),
+                            processName = processName,
+                            processHandle = processHandle
+                        )
+                    }
+                    .groupBy({ it.first }, { it.second })
             }
-            .groupBy({ it.first }, { it.second })
+        } catch (_: Exception) { return }
 
         for (allowance in allowances) {
             val proc = allowance.processName.lowercase()
@@ -209,12 +244,40 @@ object DailyAllowanceTracker {
      * ProcessHandle.destroyForcibly() "destroy of current process" crash).
      * On other platforms, uses ProcessHandle with own-PID filter.
      */
-    private fun killProcess(processName: String, handles: List<ProcessHandle>?) {
+    private fun killProcess(processName: String, targets: List<RunningProcessTarget>?) {
         if (isWindows) {
             killProcessByName(processName)
+        } else if (isLinux) {
+            val repository = LinuxProcessRepository.system
+            targets?.forEach { target ->
+                val expected = target.linuxObservation ?: return@forEach
+                if (expected.processInstanceIdentity !is ProcessInstanceIdentity.Known) {
+                    return@forEach
+                }
+                if (
+                    target.pid == ownPid ||
+                    LinuxProcessSafety.isProtectedProcess(target.pid, target.processName)
+                ) {
+                    return@forEach
+                }
+                val processHandle = ProcessHandle.of(target.pid).orElse(null)
+                    ?: return@forEach
+                val current = repository.readProcess(target.pid)
+                if (
+                    isSameKnownProcessObservation(expected, current) &&
+                    current.executableBasename?.equals(target.processName, ignoreCase = true) == true &&
+                    processHandle.isAlive
+                ) {
+                    runCatching { processHandle.destroyForcibly() }
+                }
+            }
         } else {
-            handles?.forEach { ph ->
-                if (ph.pid() != ownPid) runCatching { ph.destroyForcibly() }
+            targets?.forEach { target ->
+                target.processHandle?.let { processHandle ->
+                    if (processHandle.pid() != ownPid) {
+                        runCatching { processHandle.destroyForcibly() }
+                    }
+                }
             }
         }
     }

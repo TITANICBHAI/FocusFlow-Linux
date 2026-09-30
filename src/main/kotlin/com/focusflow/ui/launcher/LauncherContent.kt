@@ -239,13 +239,17 @@ private fun AppTile(app: FocusLauncherApp) {
                     try {
                         val processName = app.processName.lowercase()
                         val executablePath = app.exePath?.lowercase()
-                        val matchingProcesses = ProcessHandle.allProcesses().toList().filter { process ->
-                            if (!process.isAlive) return@filter false
-                            val command = process.info().command().orElse("")
-                            val commandName = command.substringAfterLast('\\')
-                                .substringAfterLast('/').lowercase()
-                            commandName == processName ||
-                                (executablePath != null && command.equals(executablePath, ignoreCase = true))
+                        val matchingProcesses = if (isWindows) {
+                            ProcessHandle.allProcesses().toList().filter { process ->
+                                if (!process.isAlive) return@filter false
+                                val command = process.info().command().orElse("")
+                                val commandName = command.substringAfterLast('\\')
+                                    .substringAfterLast('/').lowercase()
+                                commandName == processName ||
+                                    (executablePath != null && command.equals(executablePath, ignoreCase = true))
+                            }
+                        } else {
+                            emptyList()
                         }
                         val focusedExisting = isWindows &&
                             matchingProcesses.any { focusWindowByPid(it.pid()) }

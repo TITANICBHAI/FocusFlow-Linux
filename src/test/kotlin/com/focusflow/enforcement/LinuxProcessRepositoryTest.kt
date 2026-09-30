@@ -190,6 +190,7 @@ class LinuxProcessRepositoryTest {
                 replacement.processInstanceIdentity
             )
         )
+        assertFalse(isSameKnownProcessObservation(first, replacement))
         assertEquals(first.fingerprint, replacement.fingerprint)
     }
 
@@ -209,6 +210,8 @@ class LinuxProcessRepositoryTest {
                 afterExec.processInstanceIdentity
             )
         )
+        assertTrue(isSameKnownProcessObservation(before, before.copy()))
+        assertFalse(isSameKnownProcessObservation(before, afterExec))
         assertNotEquals(before.fingerprint, afterExec.fingerprint)
         assertFalse(before.fingerprint.toString().contains("--password"))
     }
@@ -241,6 +244,7 @@ class LinuxProcessRepositoryTest {
             assertIs<ProcessInstanceIdentity.Unknown>(identity)
             assertNull((identity as? ProcessInstanceIdentity.Known)?.key)
             assertFalse(isSameKnownProcessInstance(identity, identity))
+            assertFalse(isSameKnownProcessObservation(missingTicks, missingTicks))
         } finally {
             nativeLibc.close(descriptor)
         }

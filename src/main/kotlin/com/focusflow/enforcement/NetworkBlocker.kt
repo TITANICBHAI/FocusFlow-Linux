@@ -193,7 +193,7 @@ object NetworkBlocker {
      * Strategy (layered, all run on a background thread so the enforcement
      * loop is never stalled):
      *   1. Register intent immediately — same-session double-blocks are skipped.
-     *   2. Find all running PIDs for this process name via ProcessHandle.
+     *   2. Find process instances for this executable in the canonical repository.
      *   3. For each PID read /proc/<pid>/net/tcp[6] to collect ESTABLISHED
      *      remote IPs (loopback and private ranges are skipped).
      *   4. Add an iptables OUTPUT REJECT rule per IP, tagged with a comment
@@ -222,28 +222,35 @@ object NetworkBlocker {
             val blocked = linuxBlockedIps.getOrPut(lower) {
                 java.util.Collections.synchronizedSet(mutableSetOf())
             }
-            // Locate all running PIDs whose executable basename matches
-            val pids = ProcessHandle.allProcesses()
-                .filter { ph ->
-                    val cmd  = ph.info().command().orElse("")
-                    val base = cmd.substringAfterLast('/')
-                    base.equals(lower, ignoreCase = true) ||
-                    base.equals(lower.removeSuffix(".exe"), ignoreCase = true) ||
-                    base.equals(processName, ignoreCase = true)
-                }
-                .map { it.pid() }
-                .toList()
+            // Resolve executable names and process identity from the shared
+            // repository; `/proc/<pid>/net` below remains the specialized socket
+            // table read that supplies remote-address observations.
+            val repository = LinuxProcessRepository.system
+            val matchingProcesses = repository.snapshot().processes.filter { process ->
+                process.processInstanceIdentity is ProcessInstanceIdentity.Known &&
+                    process.executableBasename?.let { base ->
+                        base.equals(lower, ignoreCase = true) ||
+                            base.equals(lower.removeSuffix(".exe"), ignoreCase = true) ||
+                            base.equals(processName, ignoreCase = true)
+                    } == true
+            }
 
-            if (pids.isEmpty()) {
+            if (matchingProcesses.isEmpty()) {
                 linuxRuleMessages[lower] = "Target process is not running; waiting to retry"
                 return@Thread
             }
 
             // Collect established remote IPs from /proc/<pid>/net/tcp[6]
             val ips = mutableSetOf<String>()
-            for (pid in pids) {
-                ips += parseLinuxProcNetTcp(pid, "tcp")
-                ips += parseLinuxProcNetTcp(pid, "tcp6")
+            for (observed in matchingProcesses) {
+                val beforeRead = repository.readProcess(observed.pid)
+                if (!isSameKnownProcessObservation(observed, beforeRead)) continue
+                val processIps = parseLinuxProcNetTcp(observed.pid, "tcp") +
+                    parseLinuxProcNetTcp(observed.pid, "tcp6")
+                val afterRead = repository.readProcess(observed.pid)
+                if (isSameKnownProcessObservation(observed, afterRead)) {
+                    ips += processIps
+                }
             }
 
             if (ips.isEmpty()) {

@@ -109,6 +109,16 @@ internal fun isSameKnownProcessInstance(
     return expectedKey == currentKey
 }
 
+/** Reject unknown identities and stale observations of same-instance execs. */
+internal fun isSameKnownProcessObservation(
+    expected: LinuxProcessSnapshot,
+    current: LinuxProcessSnapshot
+): Boolean =
+    isSameKnownProcessInstance(
+        expected.processInstanceIdentity,
+        current.processInstanceIdentity
+    ) && expected.fingerprint == current.fingerprint
+
 /**
  * Stable identity for one Linux process instance. Construction is restricted
  * to observations containing both PID and start ticks.

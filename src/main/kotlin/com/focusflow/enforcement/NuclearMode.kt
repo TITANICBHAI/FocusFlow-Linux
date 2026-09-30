@@ -184,6 +184,22 @@ object NuclearMode {
 
     private fun getRunningEscapeProcessesFallback(): Set<String> {
         return try {
+            if (isLinux) {
+                val repository = LinuxProcessRepository.system
+                return repository.snapshot().processes
+                    .mapNotNull { observation ->
+                        if (observation.pid == ownPid) return@mapNotNull null
+                        val exeName = observation.executableBasename
+                            ?.lowercase()
+                            ?.takeIf { it.isNotBlank() }
+                            ?: return@mapNotNull null
+                        exeName.takeIf {
+                            !LinuxProcessSafety.isProtectedProcess(observation.pid, it)
+                        }
+                    }
+                    .filter { it in escapeProcesses }
+                    .toSet()
+            }
             ProcessHandle.allProcesses()
                 .filter { ph -> ph.pid() != ownPid && ph.info().command().isPresent }
                 .toList()
@@ -208,6 +224,9 @@ object NuclearMode {
      */
     private fun getEscapeProcessesByPath(): Set<String> {
         return try {
+            // These suffix rules describe Windows installation paths. Linux
+            // process discovery is handled by the canonical procfs repository.
+            if (isLinux) return emptySet()
             ProcessHandle.allProcesses()
                 .filter { ph -> ph.pid() != ownPid && ph.info().command().isPresent }
                 .toList()
@@ -266,19 +285,36 @@ object NuclearMode {
         // Linux kill: use ProcessHandle.destroyForcibly() on each matching process
         if (isLinux) {
             try {
-                ProcessHandle.allProcesses()
-                    .filter { ph -> ph.isAlive && ph.pid() != ownPid && ph.info().command().isPresent }
-                    .toList()
-                    .forEach { ph ->
-                        val cmd = ph.info().command().orElse(null) ?: return@forEach
-                        val exeName = java.io.File(cmd).name.lowercase()
-                        if (
-                            exeName in found &&
-                            !LinuxProcessSafety.isProtectedProcess(ph.pid(), exeName)
-                        ) {
-                            try { ph.destroyForcibly() } catch (_: Exception) {}
-                        }
+                val repository = LinuxProcessRepository.system
+                repository.snapshot().processes.forEach { observation ->
+                    if (observation.pid == ownPid) return@forEach
+                    if (observation.processInstanceIdentity !is ProcessInstanceIdentity.Known) {
+                        return@forEach
                     }
+                    val exeName = observation.executableBasename
+                        ?.lowercase()
+                        ?: return@forEach
+                    if (
+                        exeName !in found ||
+                        LinuxProcessSafety.isProtectedProcess(observation.pid, exeName)
+                    ) {
+                        return@forEach
+                    }
+                    val processHandle = ProcessHandle.of(observation.pid)
+                        .orElse(null)
+                        ?: return@forEach
+                    val freshObservation = repository.readProcess(observation.pid)
+                    if (
+                        !isSameKnownProcessObservation(observation, freshObservation) ||
+                        freshObservation.executableBasename?.lowercase() != exeName ||
+                        !processHandle.isAlive
+                    ) {
+                        return@forEach
+                    }
+                    try {
+                        processHandle.destroyForcibly()
+                    } catch (_: Exception) {}
+                }
             } catch (_: Exception) {}
         }
 

@@ -544,10 +544,10 @@ object ProcessMonitor {
                         val processHandle = ProcessHandle.of(observation.pid)
                             .orElse(null)
                             ?: return@forEach
-                        val freshIdentity = repository.readProcess(observation.pid)
-                            .processInstanceIdentity
+                        val freshObservation = repository.readProcess(observation.pid)
                         if (
-                            !isSameKnownProcessInstance(identity, freshIdentity) ||
+                            !isSameKnownProcessObservation(observation, freshObservation) ||
+                            freshObservation.executableBasename?.lowercase() != exeName ||
                             !processHandle.isAlive
                         ) {
                             return@forEach

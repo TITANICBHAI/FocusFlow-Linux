@@ -49,7 +49,7 @@ class LinuxProcessRepositoryTest {
     @Test
     fun `cmdline parser preserves NUL separated argument boundaries`() {
         val argv = LinuxProcessRepository.parseCommandLine(
-            "player\0--profile\0a profile with spaces\0--mode\0".toByteArray(
+            "player\u0000--profile\u0000a profile with spaces\u0000--mode\u0000".toByteArray(
                 StandardCharsets.UTF_8
             )
         )
@@ -94,7 +94,7 @@ class LinuxProcessRepositoryTest {
         assertEquals("/home/test-user", process.workingDirectory)
         assertEquals("/user.slice/test", process.cgroupPath)
         assertEquals(LinuxProcessIoState.AVAILABLE, process.ioState)
-        assertTrue(process.fieldAvailability.containsAll(LinuxProcessField.values()))
+        assertTrue(process.fieldAvailability.containsAll(LinuxProcessField.values().toSet()))
         assertIs<ProcessInstanceIdentity.Known>(process.processInstanceIdentity)
     }
 
@@ -137,6 +137,24 @@ class LinuxProcessRepositoryTest {
     }
 
     @Test
+    fun `malformed stat remains observable but cannot become an identity key`() {
+        val procRoot = tempDirectory.resolve("proc")
+        val processDirectory = createProcessFixture(procRoot, pid = 528, startTicks = 7655L)
+        Files.writeString(processDirectory.resolve("stat"), "malformed stat contents")
+
+        val process = LinuxProcessRepository(procRoot).snapshot().processes.single()
+
+        assertEquals(528L, process.pid)
+        assertNull(process.processStartTicks)
+        assertEquals(LinuxProcessIoState.PARTIAL, process.ioState)
+        assertEquals(
+            LinuxProcessFieldStatus.MALFORMED,
+            process.fieldStatuses[LinuxProcessField.PROCESS_START_TICKS]
+        )
+        assertIs<ProcessInstanceIdentity.Unknown>(process.processInstanceIdentity)
+    }
+
+    @Test
     fun `process that disappears before observation is retained as exited and unknown`() {
         val repository = LinuxProcessRepository(tempDirectory.resolve("proc"))
         val observation = repository.readProcess(8301L)
@@ -166,6 +184,12 @@ class LinuxProcessRepositoryTest {
         )
 
         assertNotEquals(firstIdentity.key, replacementIdentity.key)
+        assertFalse(
+            isSameKnownProcessInstance(
+                first.processInstanceIdentity,
+                replacement.processInstanceIdentity
+            )
+        )
         assertEquals(first.fingerprint, replacement.fingerprint)
     }
 
@@ -179,6 +203,12 @@ class LinuxProcessRepositoryTest {
         )
 
         assertEquals(before.processInstanceIdentity, afterExec.processInstanceIdentity)
+        assertTrue(
+            isSameKnownProcessInstance(
+                before.processInstanceIdentity,
+                afterExec.processInstanceIdentity
+            )
+        )
         assertNotEquals(before.fingerprint, afterExec.fingerprint)
         assertFalse(before.fingerprint.toString().contains("--password"))
     }
@@ -210,6 +240,7 @@ class LinuxProcessRepositoryTest {
             val identity = missingTicks.processInstanceIdentity
             assertIs<ProcessInstanceIdentity.Unknown>(identity)
             assertNull((identity as? ProcessInstanceIdentity.Known)?.key)
+            assertFalse(isSameKnownProcessInstance(identity, identity))
         } finally {
             nativeLibc.close(descriptor)
         }
@@ -237,7 +268,7 @@ class LinuxProcessRepositoryTest {
         if (includeCmdline) {
             Files.write(
                 processDirectory.resolve("cmdline"),
-                "example-app\0--config\0profile with spaces\0"
+                "example-app\u0000--config\u0000profile with spaces\u0000"
                     .toByteArray(StandardCharsets.UTF_8)
             )
         }

@@ -501,12 +501,11 @@ object ProcessMonitor {
     /**
      * Full-process-list enforcement for launcher kiosk mode.
      *
-     * Iterates every running process via ProcessHandle and kills any process whose
-     * name is NOT in [allowed] AND NOT in [launcherSafeProcesses]. This is the
-     * definitive fix for UWP apps running inside ApplicationFrameHost.exe:
-     * the UWP process (e.g. calculator.exe) appears as its own ProcessHandle entry
-     * even though its window frame is owned by applicationframehost.exe, so it is
-     * correctly caught and terminated here.
+     * Uses the canonical Linux process repository for Linux sweeps and
+     * ProcessHandle for Windows. Processes outside [allowed] and
+     * [launcherSafeProcesses] are candidates only when a Linux process-instance
+     * key can be freshly revalidated. The Windows branch retains its existing
+     * ProcessHandle and taskkill behavior.
      *
      * Called every [LAUNCHER_SWEEP_INTERVAL_MS] ms from [tickPoll] while kiosk
      * mode is active. Uses the same [tryAcquireCooldown] gate as the foreground
@@ -539,27 +538,31 @@ object ProcessMonitor {
                         exeName !in launcherSafeProcesses &&
                         exeName !in currentAllowed
                     ) {
-                        if (tryAcquireCooldown("sweep:$exeName", now)) {
-                            // Unknown identities and same-PID replacements are
-                            // never actionable. Acquire the handle before the
-                            // final fresh identity check, then target that handle.
-                            val processHandle = ProcessHandle.of(observation.pid)
-                                .orElse(null)
-                                ?: return@forEach
-                            val freshIdentity = repository.readProcess(observation.pid)
-                                .processInstanceIdentity
-                            if (freshIdentity != identity || !processHandle.isAlive) {
-                                return@forEach
-                            }
-                            try {
-                                processHandle.destroyForcibly()
-                            } catch (exception: Exception) {
-                                EnforcementLog.warn(
-                                    "ProcessMonitor",
-                                    "Could not terminate Linux process instance $identity",
-                                    exception
-                                )
-                            }
+                        // Unknown identities and same-PID replacements are never
+                        // actionable. Acquire the handle before the final fresh
+                        // identity check, then target that handle.
+                        val processHandle = ProcessHandle.of(observation.pid)
+                            .orElse(null)
+                            ?: return@forEach
+                        val freshIdentity = repository.readProcess(observation.pid)
+                            .processInstanceIdentity
+                        if (
+                            !isSameKnownProcessInstance(identity, freshIdentity) ||
+                            !processHandle.isAlive
+                        ) {
+                            return@forEach
+                        }
+                        if (!tryAcquireCooldown("sweep:$exeName", now)) {
+                            return@forEach
+                        }
+                        try {
+                            processHandle.destroyForcibly()
+                        } catch (exception: Exception) {
+                            EnforcementLog.warn(
+                                "ProcessMonitor",
+                                "Could not terminate Linux process instance $identity",
+                                exception
+                            )
                         }
                     }
                 }

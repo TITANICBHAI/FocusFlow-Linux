@@ -342,6 +342,7 @@ object InstalledAppsScanner {
         }
 
         return ProcessHandle.allProcesses()
+            .toList()
             .mapNotNull { process ->
                 val info = process.info()
                 RunningProcessObservation(
@@ -369,22 +370,14 @@ object InstalledAppsScanner {
                     // Linux argv is already tokenized by the process repository;
                     // do not reconstruct a shell command before interpreting it.
                     val normalized = if (isLinux) normalizeLinuxArgv(process.argv) else null
-                    val sandboxPackage = if (
-                        isLinux && commandName in setOf("bwrap", "xdg-dbus-proxy")
-                    ) {
-                        linuxPackageIdFromArgv(process.argv)
-                    } else {
-                        null
-                    }
                     val exe = normalized?.processName
-                        ?: sandboxPackage?.let(::flatpakProcessName)
                         ?: comm?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotBlank() }
                         ?: commandName
                     val display = curated[exe] ?: friendlyName(exe)
                     val aliases = (
                         listOf(exe, commandName, comm.orEmpty()) +
                             normalized?.aliases.orEmpty() +
-                            listOfNotNull(normalized?.packageId, sandboxPackage)
+                            listOfNotNull(normalized?.packageId)
                         )
                         .map { it.trim().lowercase(Locale.ROOT) }
                         .filter { it.isNotBlank() && it !in setOf("flatpak", "snap", "env") }
@@ -398,11 +391,11 @@ object InstalledAppsScanner {
                         // observation, but never cache it as a desktop Exec string.
                         execCommand = commandLine.takeIf { !isLinux && it.isNotBlank() },
                         processAliases = aliases,
-                        packageId = normalized?.packageId ?: sandboxPackage,
+                        packageId = normalized?.packageId,
                         source = AppSource.RUNNING_ONLY,
                         runningPids = listOf(pid),
                         detectionConfidence = when {
-                            normalized != null || sandboxPackage != null -> AppDetectionConfidence.HIGH
+                            normalized != null -> AppDetectionConfidence.HIGH
                             comm != null && comm.equals(commandName, ignoreCase = true) ->
                                 AppDetectionConfidence.HIGH
                             else -> AppDetectionConfidence.MEDIUM
@@ -1304,12 +1297,6 @@ object InstalledAppsScanner {
                 )
             }
             .toSet()
-
-    private fun linuxPackageIdFromArgv(argv: List<String>): String? =
-        argv.firstOrNull {
-            it.matches(Regex("^[A-Za-z0-9][A-Za-z0-9_.-]*\\.[A-Za-z0-9_.-]+$"))
-        }
-            ?.takeIf { it.contains('.') }
 
     private fun strongerConfidence(
         first: AppDetectionConfidence,

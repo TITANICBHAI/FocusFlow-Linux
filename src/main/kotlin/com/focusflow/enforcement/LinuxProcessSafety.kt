@@ -1,6 +1,5 @@
 package com.focusflow.enforcement
 
-import java.io.File
 import java.util.Locale
 
 enum class LinuxProcessProtectionCategory(val rationale: String) {
@@ -155,16 +154,15 @@ object LinuxProcessSafety {
     }
 
     /**
-     * Uses the actual executable basename when a PID is available. The exact
-     * current FocusFlow PID remains protected even when its runtime name is
-     * generic or unknown.
+     * Uses the canonical Linux process observation for a PID. The exact current
+     * FocusFlow PID remains protected even when its executable is unavailable.
      */
     fun isProtectedProcess(pid: Long): Boolean {
         if (!isLinux || pid <= 0L) return false
         if (pid == focusFlowPid) return true
-        val command = ProcessHandle.of(pid)
-            .flatMap { it.info().command() }
-            .orElse(null)
-        return isProtectedProcess(pid, command?.let(::File)?.name)
+        val executableBasename = LinuxProcessRepository.system
+            .readProcess(pid)
+            .executableBasename
+        return isProtectedProcess(pid, executableBasename)
     }
 }

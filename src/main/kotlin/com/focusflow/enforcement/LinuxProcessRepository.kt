@@ -349,9 +349,17 @@ class LinuxProcessRepository(
             return exitedSnapshot(pid)
         }
         statuses[LinuxProcessField.INSTANCE_STABILITY] = stabilityStatus
+        if (
+            statBefore?.processStartTicks != null &&
+            stabilityStatus != LinuxProcessFieldStatus.AVAILABLE
+        ) {
+            statuses[LinuxProcessField.PROCESS_START_TICKS] = stabilityStatus
+        }
 
         val executablePath = executableRead.value
-        val processTicks = statBefore?.processStartTicks
+        val processTicks = statBefore?.processStartTicks.takeIf {
+            stabilityStatus == LinuxProcessFieldStatus.AVAILABLE
+        }
         val normalizedStatuses = completeStatusMap(statuses)
         val ioState = if (normalizedStatuses.values.all {
                 it == LinuxProcessFieldStatus.AVAILABLE

@@ -20,3 +20,4 @@
 - [Stored identity migration boundary](stored-identity-migration-boundary.md) — Keep legacy process columns as enforcement compatibility and add identity metadata additively.
 - [Migration backup and atomicity](migration-backup-atomicity.md) — Gate schema changes on a verified WAL-aware snapshot and never replace the live DB after migration failure.
 - [Linux preset stale references](linux-preset-stale-references.md) — Preserve normalized missing preset entries so onboarding choices can resolve after a later catalog refresh.
+- [Protected Replit config edits](protected-replit-config-edits.md) — Replace blocked `.replit` edits through the schema validator using a temporary workspace file.

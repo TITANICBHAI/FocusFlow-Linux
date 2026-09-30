@@ -1,6 +1,11 @@
 package com.focusflow.enforcement
 
 import com.focusflow.ProcessNameNormalizer
+import com.focusflow.data.models.AppReferenceSource
+import com.focusflow.data.models.AppResolutionStatus
+import com.focusflow.data.models.CanonicalAppReference
+import com.focusflow.data.models.RuntimeAuthorizationPurpose
+import com.focusflow.data.models.RuntimeDefinition
 import com.sun.jna.platform.win32.Advapi32Util
 import com.sun.jna.platform.win32.WinReg
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,7 +66,9 @@ data class AppDescriptor(
     val source: AppSource = AppSource.MANUAL,
     /** PIDs currently matched to this catalog entry. */
     val runningPids: List<Long> = emptyList(),
-    val detectionConfidence: AppDetectionConfidence = AppDetectionConfidence.UNKNOWN
+    val detectionConfidence: AppDetectionConfidence = AppDetectionConfidence.UNKNOWN,
+    /** Canonical selection metadata; scanner observations never use it as policy. */
+    val canonicalReference: CanonicalAppReference? = null
 )
 
 data class AppCatalogState(
@@ -70,13 +77,26 @@ data class AppCatalogState(
     val lastRefreshedAtMs: Long? = null,
     val isPartial: Boolean = false,
     val errorMessage: String? = null,
-    val permissionDenied: Boolean = false
+    val permissionDenied: Boolean = false,
+    val correlations: List<LinuxProcessCatalogResolution> = emptyList()
 )
 
 data class AppCatalogScanStatus(
     val isPartial: Boolean = false,
     val errorMessage: String? = null,
     val permissionDenied: Boolean = false
+)
+
+enum class AppCatalogReferenceStatus {
+    RESOLVED,
+    AMBIGUOUS,
+    MISSING
+}
+
+data class AppCatalogReferenceResolution(
+    val status: AppCatalogReferenceStatus,
+    val app: AppDescriptor? = null,
+    val candidates: List<AppDescriptor> = emptyList()
 )
 
 /** Compatibility name retained for current callers while the catalog adopts AppDescriptor. */
@@ -106,6 +126,7 @@ object InstalledAppCatalog : AppCatalogRepository {
             _state.update { current ->
                 current.copy(
                     apps = apps,
+                    correlations = InstalledAppsScanner.lastCatalogCorrelations(),
                     isPartial = scanStatus.isPartial,
                     errorMessage = scanStatus.errorMessage,
                     permissionDenied = scanStatus.permissionDenied
@@ -146,6 +167,7 @@ object InstalledAppCatalog : AppCatalogRepository {
             _state.update {
                 it.copy(
                     apps = apps,
+                    correlations = InstalledAppsScanner.lastCatalogCorrelations(),
                     isRefreshing = false,
                     lastRefreshedAtMs = System.currentTimeMillis(),
                     isPartial = scanStatus.isPartial,
@@ -316,8 +338,12 @@ object InstalledAppsScanner {
     private var installedScanned = false
     private val installLock = Any()
     private val lastScan = AtomicReference(AppCatalogScanStatus())
+    private val lastCatalogCorrelationResults =
+        AtomicReference<List<LinuxProcessCatalogResolution>>(emptyList())
 
     fun lastScanStatus(): AppCatalogScanStatus = lastScan.get()
+    fun lastCatalogCorrelations(): List<LinuxProcessCatalogResolution> =
+        lastCatalogCorrelationResults.get()
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -326,7 +352,13 @@ object InstalledAppsScanner {
         val command: String?,
         val commandLine: String,
         val comm: String?,
-        val argv: List<String>
+        val argv: List<String>,
+        val snapshot: LinuxProcessSnapshot? = null
+    )
+
+    private data class RunningAppsScan(
+        val apps: List<ScannedApp>,
+        val snapshots: List<LinuxProcessSnapshot>
     )
 
     private fun runningProcessObservations(): List<RunningProcessObservation> {
@@ -337,7 +369,8 @@ object InstalledAppsScanner {
                     command = process.executablePath,
                     commandLine = "",
                     comm = process.comm,
-                    argv = process.argv
+                    argv = process.argv,
+                    snapshot = process
                 )
             }
         }
@@ -357,9 +390,18 @@ object InstalledAppsScanner {
             .toList()
     }
 
-    fun getRunningApps(): List<ScannedApp> {
-        val running: List<ScannedApp> = try {
+    fun getRunningApps(): List<ScannedApp> = scanRunningApps().apps
+
+    private fun scanRunningApps(): RunningAppsScan {
+        val observations = try {
             runningProcessObservations()
+        } catch (e: LinuxProcessRepositoryException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val running: List<ScannedApp> = try {
+            observations
                 .mapNotNull { process ->
                     val pid = process.pid
                     val cmd = process.command
@@ -438,7 +480,10 @@ object InstalledAppsScanner {
             if (app.exePath != null) exePathCache[app.processName] = app.exePath
         }
 
-        return running.sortedBy { it.displayName }
+        return RunningAppsScan(
+            apps = running.sortedBy { it.displayName },
+            snapshots = observations.mapNotNull { it.snapshot }
+        )
     }
 
     /**
@@ -464,8 +509,18 @@ object InstalledAppsScanner {
      */
     fun getAppCatalog(): List<AppDescriptor> {
         val installed = getInstalledApps()
-        val running = getRunningApps()
-        return mergeInstalledAndRunning(installed, running)
+        val runningScan = scanRunningApps()
+        val correlations = if (isLinux) {
+            runningScan.snapshots.map { process ->
+                LinuxProcessCatalogResolver.resolve(process, installed)
+            }
+        } else {
+            emptyList()
+        }
+        lastCatalogCorrelationResults.set(
+            correlations.filter { it.status != CatalogMatchStatus.NONE }
+        )
+        return mergeInstalledAndRunning(installed, runningScan.apps, correlations)
     }
 
     /**
@@ -502,27 +557,71 @@ object InstalledAppsScanner {
     fun resolveAppReference(
         reference: String,
         apps: List<AppDescriptor>
-    ): AppDescriptor? {
-        val raw = ProcessNameNormalizer.normalize(reference) ?: return null
-        val stored = ProcessNameNormalizer.normalizeStored(reference)
-        val keys = listOfNotNull(raw, stored).toSet()
-        return apps.firstOrNull { app ->
-            sequenceOf(
-                app.desktopId,
-                app.packageId,
-                app.processName,
-                app.displayName
-            ).filterNotNull().any { value ->
+    ): AppDescriptor? = resolveAppReferenceDetailed(reference, apps).app
+
+    fun resolveAppReferenceDetailed(
+        reference: String,
+        apps: List<AppDescriptor>
+    ): AppCatalogReferenceResolution {
+        val trimmed = reference.trim()
+        if (trimmed.isEmpty()) {
+            return AppCatalogReferenceResolution(AppCatalogReferenceStatus.MISSING)
+        }
+        if (trimmed.startsWith("/")) {
+            val pathMatches = apps.filter { app -> app.exePath == trimmed }
+            return uniqueReferenceResolution(pathMatches)
+        }
+
+        val normalized = ProcessNameNormalizer.normalize(trimmed) ?: trimmed.lowercase(Locale.ROOT)
+        val stored = ProcessNameNormalizer.normalizeStored(trimmed)
+        val normalizedKeys = listOfNotNull(normalized, stored).toSet()
+        val ranked = apps.mapNotNull { app ->
+            val exactStableIdentity = listOfNotNull(app.desktopId, app.packageId)
+                .any { it == trimmed }
+            val normalizedStableIdentity = listOfNotNull(app.desktopId, app.packageId)
+                .any { value ->
+                    listOfNotNull(
+                        ProcessNameNormalizer.normalize(value),
+                        ProcessNameNormalizer.normalizeStored(value)
+                    ).any { it in normalizedKeys }
+                }
+            val processIdentity = listOf(app.processName) + app.processAliases
+            val processMatch = processIdentity.any { value ->
                 listOfNotNull(
                     ProcessNameNormalizer.normalize(value),
                     ProcessNameNormalizer.normalizeStored(value)
-                ).any { it in keys }
-            } || app.processAliases.any {
-                listOfNotNull(
-                    ProcessNameNormalizer.normalize(it),
-                    ProcessNameNormalizer.normalizeStored(it)
-                ).any { it in keys }
+                ).any { it in normalizedKeys }
             }
+            val displayMatch = app.displayName.equals(trimmed, ignoreCase = true)
+            val rank = when {
+                exactStableIdentity -> 100
+                normalizedStableIdentity -> 80
+                processMatch -> 60
+                displayMatch -> 40
+                else -> 0
+            }
+            if (rank == 0) null else app to rank
+        }
+        val bestRank = ranked.maxOfOrNull { it.second }
+            ?: return AppCatalogReferenceResolution(AppCatalogReferenceStatus.MISSING)
+        return uniqueReferenceResolution(ranked.filter { it.second == bestRank }.map { it.first })
+    }
+
+    private fun uniqueReferenceResolution(
+        matches: List<AppDescriptor>
+    ): AppCatalogReferenceResolution {
+        val distinctMatches = matches.distinctBy(::stableCatalogKey)
+        return when (distinctMatches.size) {
+            0 -> AppCatalogReferenceResolution(AppCatalogReferenceStatus.MISSING)
+            1 -> AppCatalogReferenceResolution(
+                AppCatalogReferenceStatus.RESOLVED,
+                app = distinctMatches.single(),
+                candidates = distinctMatches
+            )
+            else -> AppCatalogReferenceResolution(
+                AppCatalogReferenceStatus.AMBIGUOUS,
+                candidates = distinctMatches
+            )
         }
     }
 
@@ -1281,22 +1380,48 @@ object InstalledAppsScanner {
 
     internal fun mergeInstalledAndRunningForTesting(
         installed: List<AppDescriptor>,
-        running: List<AppDescriptor>
-    ): List<AppDescriptor> = mergeInstalledAndRunning(installed, running)
+        running: List<AppDescriptor>,
+        processResolutions: List<LinuxProcessCatalogResolution> = emptyList()
+    ): List<AppDescriptor> = mergeInstalledAndRunning(installed, running, processResolutions)
 
     internal fun resolveAppReferenceForTesting(
         reference: String,
         apps: List<AppDescriptor>
     ): AppDescriptor? = resolveAppReference(reference, apps)
 
+    internal fun resolveAppReferenceDetailedForTesting(
+        reference: String,
+        apps: List<AppDescriptor>
+    ): AppCatalogReferenceResolution = resolveAppReferenceDetailed(reference, apps)
+
     private fun mergeInstalledAndRunning(
         installed: List<AppDescriptor>,
-        running: List<AppDescriptor>
+        running: List<AppDescriptor>,
+        processResolutions: List<LinuxProcessCatalogResolution> = emptyList()
     ): List<AppDescriptor> {
         val usedRunning = BooleanArray(running.size)
+        val resolutionsByPid = processResolutions.associateBy { it.pid }
+
+        fun uniquelyCorrelatedCatalogKey(app: AppDescriptor): String? {
+            if (processResolutions.isEmpty() || app.runningPids.isEmpty()) return null
+            val matches = app.runningPids.mapNotNull(resolutionsByPid::get)
+            if (matches.size != app.runningPids.size) return null
+            if (matches.any { it.status !in setOf(CatalogMatchStatus.EXACT, CatalogMatchStatus.POSSIBLE) }) {
+                return null
+            }
+            val keys = matches.mapNotNull { it.candidates.singleOrNull()?.catalogKey }.distinct()
+            return keys.singleOrNull()
+        }
+
         val mergedInstalled = installed.map { app ->
             val runningIndex = running.indices.firstOrNull { index ->
-                !usedRunning[index] && appsMatch(app, running[index])
+                if (usedRunning[index]) {
+                    false
+                } else if (processResolutions.isEmpty()) {
+                    appsMatch(app, running[index])
+                } else {
+                    uniquelyCorrelatedCatalogKey(running[index]) == stableCatalogKey(app)
+                }
             } ?: -1
             if (runningIndex < 0) {
                 app
@@ -1349,6 +1474,15 @@ object InstalledAppsScanner {
                 )
             }
             .toSet()
+
+    private fun stableCatalogKey(app: AppDescriptor): String =
+        (
+            app.desktopId ?: app.packageId ?: app.processName.takeIf { it.isNotBlank() }
+                ?: app.canonicalReference?.stableAppId
+                ?: app.canonicalReference?.referenceId.orEmpty()
+        )
+            .trim()
+            .lowercase(Locale.ROOT)
 
     private fun strongerConfidence(
         first: AppDetectionConfidence,

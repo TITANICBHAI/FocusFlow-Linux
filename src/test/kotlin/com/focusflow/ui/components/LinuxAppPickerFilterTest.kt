@@ -197,6 +197,43 @@ class LinuxAppPickerFilterTest {
     }
 
     @Test
+    fun `legacy selection aliases resolve only when catalog match is unique`() {
+        val unique = nativeEditor.copy(processAliases = listOf("old-editor-name"))
+        assertEquals(
+            setOf(unique.catalogKey()),
+            selectedAppKeysForProcessNames(listOf(unique), setOf("old-editor-name"))
+        )
+        assertTrue(
+            staleAppSelectionsForProcessNames(
+                listOf(unique),
+                setOf("old-editor-name")
+            ).isEmpty()
+        )
+
+        val duplicateA = unique.copy(
+            displayName = "Editor A",
+            desktopId = "org.example.EditorA"
+        )
+        val duplicateB = unique.copy(
+            displayName = "Editor B",
+            desktopId = "org.example.EditorB"
+        )
+        assertEquals(
+            setOf("old-editor-name"),
+            selectedAppKeysForProcessNames(
+                listOf(duplicateA, duplicateB),
+                setOf("old-editor-name")
+            )
+        )
+        assertTrue(
+            staleAppSelectionsForProcessNames(
+                listOf(duplicateA, duplicateB),
+                setOf("old-editor-name")
+            ).getValue("old-editor-name").contains("2 possible apps")
+        )
+    }
+
+    @Test
     fun `relink replaces stale selection without dropping other selected apps`() {
         assertEquals(
             setOf("org.example.editor", "org.telegram.desktop"),

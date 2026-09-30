@@ -26,6 +26,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -68,6 +70,12 @@ import com.focusflow.enforcement.AppIconExtractor
 import com.focusflow.enforcement.AppSource
 import com.focusflow.enforcement.InstalledAppCatalog
 import com.focusflow.enforcement.InstalledAppsScanner
+import com.focusflow.enforcement.ManualLinuxAppTargetParser
+import com.focusflow.enforcement.ManualLinuxTargetInput
+import com.focusflow.enforcement.ManualLinuxTargetType
+import com.focusflow.enforcement.CatalogMatchStatus
+import com.focusflow.enforcement.toCanonicalAppReference
+import com.focusflow.data.models.CanonicalAppReference
 import com.focusflow.enforcement.LinuxProcessSafety
 import com.focusflow.ProcessNameNormalizer
 import com.focusflow.ui.theme.Error
@@ -154,25 +162,55 @@ internal fun appPickerContentState(
     else -> AppPickerContentState.CONTENT
 }
 
+private fun catalogCorrelationNotice(
+    app: AppDescriptor,
+    correlations: List<com.focusflow.enforcement.LinuxProcessCatalogResolution>
+): String? {
+    val relevant = correlations.filter { resolution ->
+        resolution.candidates.any { it.catalogKey == app.catalogKey() }
+    }
+    return when {
+        relevant.any { it.status == CatalogMatchStatus.AMBIGUOUS } ->
+            "Ambiguous process match · catalog evidence only"
+        relevant.any { it.status == CatalogMatchStatus.POSSIBLE } ->
+            "Possible process match · not authorization"
+        else -> null
+    }
+}
+
 internal fun mergeStaleAppSelections(
     selectedAppKeys: Set<String>,
     staleSelections: Map<String, String>,
-    catalogKeys: Set<String>
+    catalogKeys: Set<String>,
+    catalogApps: List<AppDescriptor> = emptyList()
 ): Map<String, String> = buildMap {
     val normalizedCatalogKeys = catalogKeys
         .map { it.trim().lowercase(Locale.ROOT) }
         .toSet()
 
+    fun resolves(key: String): Boolean =
+        key.trim().lowercase(Locale.ROOT) in normalizedCatalogKeys ||
+            InstalledAppsScanner.resolveAppReferenceDetailed(key, catalogApps).status ==
+            com.focusflow.enforcement.AppCatalogReferenceStatus.RESOLVED
+
     // A refresh may resolve a previously stale selection. Do not keep
     // rendering the old stale row when its stable catalog key is present again.
     staleSelections.forEach { (key, label) ->
-        if (key.trim().lowercase(Locale.ROOT) !in normalizedCatalogKeys) {
+        if (!resolves(key)) {
             put(key, label)
         }
     }
     selectedAppKeys
-        .filter { it.trim().lowercase(Locale.ROOT) !in normalizedCatalogKeys }
+        .filterNot(::resolves)
         .forEach { key -> putIfAbsent(key, key) }
+}
+
+internal fun resolveSelectedAppKeys(
+    selectedAppKeys: Set<String>,
+    catalogApps: List<AppDescriptor>
+): Set<String> = selectedAppKeys.mapTo(linkedSetOf()) { key ->
+    val result = InstalledAppsScanner.resolveAppReferenceDetailed(key, catalogApps)
+    result.app?.catalogKey() ?: key
 }
 
 internal fun filterAppCatalog(
@@ -230,24 +268,47 @@ fun LinuxAppPicker(
     staleSelections: Map<String, String> = emptyMap(),
     onRefresh: () -> Unit = {},
     allowManualEntry: Boolean = true,
-    onManualEntry: (AppDescriptor) -> Unit = {}
+    onManualEntry: (AppDescriptor) -> Unit = {},
+    onSelectionReferencesChanged: (List<CanonicalAppReference>) -> Unit = {}
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var presenceValue by rememberSaveable { mutableStateOf(AppPickerPresenceFilter.ALL.name) }
     var sourceValue by rememberSaveable { mutableStateOf(AppPickerSourceFilter.ALL.name) }
     var manualProcess by rememberSaveable { mutableStateOf("") }
+    var manualTypeValue by rememberSaveable { mutableStateOf(ManualLinuxTargetType.PROCESS_NAME.name) }
+    var manualExecutable by rememberSaveable { mutableStateOf("") }
+    var manualArgument by rememberSaveable { mutableStateOf("") }
+    var manualArgumentValue by rememberSaveable { mutableStateOf("") }
     var manualError by rememberSaveable { mutableStateOf<String?>(null) }
     var manualEntries by remember { mutableStateOf(emptyList<AppDescriptor>()) }
+    var referenceCache by remember {
+        mutableStateOf<Map<String, CanonicalAppReference>>(emptyMap())
+    }
     var relinkTargetKey by rememberSaveable { mutableStateOf<String?>(null) }
 
     val presence = enumValueOf<AppPickerPresenceFilter>(presenceValue)
     val source = enumValueOf<AppPickerSourceFilter>(sourceValue)
+    val manualType = enumValueOf<ManualLinuxTargetType>(manualTypeValue)
     val catalogApps = remember(state.apps, manualEntries) {
         (manualEntries + state.apps).distinctBy { it.catalogKey() }
     }
     val filteredApps = filterAppCatalog(catalogApps, query, presence, source)
     val catalogKeys = remember(catalogApps) { catalogApps.map { it.catalogKey() }.toSet() }
-    val staleEntries = mergeStaleAppSelections(selectedAppKeys, staleSelections, catalogKeys)
+    val resolvedSelectedAppKeys = remember(selectedAppKeys, catalogApps) {
+        resolveSelectedAppKeys(selectedAppKeys, catalogApps)
+    }
+    LaunchedEffect(selectedAppKeys, resolvedSelectedAppKeys) {
+        if (resolvedSelectedAppKeys != selectedAppKeys) {
+            onSelectionChanged(resolvedSelectedAppKeys)
+        }
+    }
+    val activeSelectedAppKeys = resolvedSelectedAppKeys
+    val staleEntries = mergeStaleAppSelections(
+        activeSelectedAppKeys,
+        staleSelections,
+        catalogKeys,
+        catalogApps
+    )
     val visibleStaleEntries = staleEntries
         .filter { (key, label) ->
             presence == AppPickerPresenceFilter.ALL &&
@@ -257,18 +318,32 @@ fun LinuxAppPicker(
                     label.contains(query.trim(), ignoreCase = true))
         }
 
+    fun notifySelectionChanged(nextKeys: Set<String>) {
+        onSelectionChanged(nextKeys)
+        val references = nextKeys.mapNotNull { selectedKey ->
+            val app = catalogApps.firstOrNull { it.catalogKey() == selectedKey }
+                ?: return@mapNotNull null
+            val reference = app.canonicalReference ?: referenceCache[selectedKey]
+                ?: app.toCanonicalAppReference().also { created ->
+                    referenceCache = referenceCache + (selectedKey to created)
+                }
+            reference
+        }
+        onSelectionReferencesChanged(references)
+    }
+
     fun selectCatalogKey(key: String) {
         val staleKey = relinkTargetKey
         if (staleKey != null) {
-            onSelectionChanged(
-                replaceStaleAppSelection(selectedAppKeys, staleKey, key)
+            notifySelectionChanged(
+                replaceStaleAppSelection(activeSelectedAppKeys, staleKey, key)
             )
             relinkTargetKey = null
         } else {
-            onSelectionChanged(
+            notifySelectionChanged(
                 if (multiSelect) {
-                    if (key in selectedAppKeys) selectedAppKeys - key
-                    else selectedAppKeys + key
+                    if (key in activeSelectedAppKeys) activeSelectedAppKeys - key
+                    else activeSelectedAppKeys + key
                 } else {
                     setOf(key)
                 }
@@ -337,7 +412,18 @@ fun LinuxAppPicker(
 
         if (allowManualEntry) {
             ManualProcessEntry(
+                type = manualType,
+                onTypeChange = {
+                    manualTypeValue = it.name
+                    manualError = null
+                },
                 value = manualProcess,
+                executable = manualExecutable,
+                onExecutableChange = { manualExecutable = it; manualError = null },
+                argumentName = manualArgument,
+                onArgumentNameChange = { manualArgument = it; manualError = null },
+                argumentValue = manualArgumentValue,
+                onArgumentValueChange = { manualArgumentValue = it; manualError = null },
                 error = manualError,
                 enabled = enabled,
                 onValueChange = {
@@ -345,34 +431,38 @@ fun LinuxAppPicker(
                     manualError = null
                 },
                 onAdd = {
-                    val normalizedManual = ProcessNameNormalizer.normalizeManual(manualProcess)
-                    val protectedReason = LinuxProcessSafety.protectedReason(normalizedManual)
-                    val runtimeReason =
-                        LinuxProcessSafety.manualTargetRestrictionReason(normalizedManual)
-                    val manual = InstalledAppsScanner.createManualProcessEntry(manualProcess)
-                    if (protectedReason != null) {
-                        manualError = protectedReason
-                    } else if (runtimeReason != null) {
-                        manualError = runtimeReason
-                    } else if (manual == null) {
-                        manualError = "Enter a process name using letters, numbers, '.', '_', '+' or '-'."
+                    val result = ManualLinuxAppTargetParser.parse(
+                        ManualLinuxTargetInput(
+                            type = manualType,
+                            value = manualProcess,
+                            executable = manualExecutable,
+                            argumentName = manualArgument,
+                            argumentValue = manualArgumentValue
+                        )
+                    )
+                    val manual = result.target?.descriptor
+                    if (manual == null) {
+                        manualError = result.errorMessage ?: "Enter a valid target."
                     } else {
                         manualEntries = (manualEntries + manual)
                             .distinctBy { it.catalogKey() }
                         val key = manual.catalogKey()
                         val staleKey = relinkTargetKey
-                        onSelectionChanged(
+                        notifySelectionChanged(
                             if (staleKey != null) {
                                 relinkTargetKey = null
-                                replaceStaleAppSelection(selectedAppKeys, staleKey, key)
+                                replaceStaleAppSelection(activeSelectedAppKeys, staleKey, key)
                             } else if (multiSelect) {
-                                selectedAppKeys + key
+                                activeSelectedAppKeys + key
                             } else {
                                 setOf(key)
                             }
                         )
                         onManualEntry(manual)
                         manualProcess = ""
+                        manualExecutable = ""
+                        manualArgument = ""
+                        manualArgumentValue = ""
                         manualError = null
                     }
                 }
@@ -454,11 +544,11 @@ fun LinuxAppPicker(
                                 StaleAppRow(
                                     protected = LinuxProcessSafety.isProtectedProcessName(key),
                                     label = label,
-                                    selected = key in selectedAppKeys,
+                                    selected = key in activeSelectedAppKeys,
                                     enabled = enabled,
                                     multiSelect = multiSelect,
                                     onClick = {
-                                        onSelectionChanged(selectedAppKeys - key)
+                                        notifySelectionChanged(activeSelectedAppKeys - key)
                                     },
                                     onRelink = {
                                         relinkTargetKey = key
@@ -471,13 +561,14 @@ fun LinuxAppPicker(
                             key = { "app:${it.catalogKey()}" }
                         ) { app ->
                             val key = app.catalogKey()
-                            val selected = key in selectedAppKeys
+                            val selected = key in activeSelectedAppKeys
                             CatalogAppRow(
                                 app = app,
                                 selected = selected,
                                 enabled = enabled &&
                                     !LinuxProcessSafety.isProtectedProcessName(app.processName),
                                 multiSelect = multiSelect,
+                                diagnostic = catalogCorrelationNotice(app, state.correlations),
                                 onClick = {
                                     selectCatalogKey(key)
                                 }
@@ -496,11 +587,11 @@ fun LinuxAppPicker(
                             StaleAppRow(
                                 protected = LinuxProcessSafety.isProtectedProcessName(key),
                                 label = label,
-                                selected = key in selectedAppKeys,
+                                selected = key in activeSelectedAppKeys,
                                 enabled = enabled,
                                 multiSelect = multiSelect,
                                 onClick = {
-                                    onSelectionChanged(selectedAppKeys - key)
+                                    notifySelectionChanged(activeSelectedAppKeys - key)
                                 },
                                 onRelink = {
                                     relinkTargetKey = key
@@ -509,13 +600,14 @@ fun LinuxAppPicker(
                         }
                         filteredApps.forEach { app ->
                             val key = app.catalogKey()
-                            val selected = key in selectedAppKeys
+                            val selected = key in activeSelectedAppKeys
                             CatalogAppRow(
                                 app = app,
                                 selected = selected,
                                 enabled = enabled &&
                                     !LinuxProcessSafety.isProtectedProcessName(app.processName),
                                 multiSelect = multiSelect,
+                                diagnostic = catalogCorrelationNotice(app, state.correlations),
                                 onClick = {
                                     selectCatalogKey(key)
                                 }
@@ -549,38 +641,23 @@ fun LinuxAppPicker(
 internal fun selectedAppKeysForProcessNames(
     apps: List<AppDescriptor>,
     processNames: Set<String>
-): Set<String> {
-    fun matches(app: AppDescriptor, saved: String): Boolean =
-        InstalledAppsScanner.resolveAppReference(saved, listOf(app)) != null ||
-            saved.equals(app.processName, ignoreCase = true) ||
-            app.processAliases.any { alias ->
-                alias.equals(saved, ignoreCase = true)
-            }
-
-    val matchedKeys = apps
-        .filter { app -> processNames.any { saved -> matches(app, saved) } }
-        .map { it.catalogKey() }
-        .toSet()
-    val unmatchedProcesses = processNames.filter { saved ->
-        apps.none { app -> matches(app, saved) }
-    }
-    return matchedKeys + unmatchedProcesses
+): Set<String> = processNames.mapTo(linkedSetOf()) { saved ->
+    InstalledAppsScanner.resolveAppReferenceDetailed(saved, apps).app?.catalogKey() ?: saved
 }
 
 internal fun staleAppSelectionsForProcessNames(
     apps: List<AppDescriptor>,
     processNames: Set<String>
-): Map<String, String> = processNames
-    .filter { saved ->
-        apps.none { app ->
-            InstalledAppsScanner.resolveAppReference(saved, listOf(app)) != null ||
-                saved.equals(app.processName, ignoreCase = true) ||
-                app.processAliases.any { alias ->
-                    alias.equals(saved, ignoreCase = true)
-                }
-        }
+): Map<String, String> = processNames.mapNotNull { saved ->
+    val resolution = InstalledAppsScanner.resolveAppReferenceDetailed(saved, apps)
+    when (resolution.status) {
+        com.focusflow.enforcement.AppCatalogReferenceStatus.RESOLVED -> null
+        com.focusflow.enforcement.AppCatalogReferenceStatus.MISSING ->
+            saved to InstalledAppsScanner.friendlyNameFor(saved)
+        com.focusflow.enforcement.AppCatalogReferenceStatus.AMBIGUOUS ->
+            saved to "${InstalledAppsScanner.friendlyNameFor(saved)} — ${resolution.candidates.size} possible apps"
     }
-    .associateWith { InstalledAppsScanner.friendlyNameFor(it) }
+}.toMap()
 
 internal fun replaceStaleAppSelection(
     selectedAppKeys: Set<String>,
@@ -644,13 +721,16 @@ fun LinuxAppPickerDialog(
                         .distinctBy { it.catalogKey() }
                         .associateBy { it.catalogKey() }
                     val picked = selectedKeys.map { key ->
-                        byKey[key] ?: AppDescriptor(
+                        byKey[key]?.let { app ->
+                            if (app.canonicalReference != null) app
+                            else app.copy(canonicalReference = app.toCanonicalAppReference())
+                        } ?: AppDescriptor(
                             processName = key,
                             displayName = InstalledAppsScanner.friendlyNameFor(key),
                             isRunning = false,
                             source = AppSource.MANUAL
                         )
-                    }.distinctBy { it.processName.lowercase() }
+                    }.distinctBy { it.catalogKey() }
                     onConfirm(picked)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Purple80)
@@ -668,12 +748,21 @@ fun LinuxAppPickerDialog(
 
 @Composable
 private fun ManualProcessEntry(
+    type: ManualLinuxTargetType,
+    onTypeChange: (ManualLinuxTargetType) -> Unit,
     value: String,
+    executable: String,
+    onExecutableChange: (String) -> Unit,
+    argumentName: String,
+    onArgumentNameChange: (String) -> Unit,
+    argumentValue: String,
+    onArgumentValueChange: (String) -> Unit,
     error: String?,
     enabled: Boolean,
     onValueChange: (String) -> Unit,
     onAdd: () -> Unit
 ) {
+    var typeMenuExpanded by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -685,23 +774,93 @@ private fun ManualProcessEntry(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            TextButton(
+                onClick = { typeMenuExpanded = true },
+                enabled = enabled
+            ) {
+                Text(type.label)
+                DropdownMenu(
+                    expanded = typeMenuExpanded,
+                    onDismissRequest = { typeMenuExpanded = false }
+                ) {
+                    ManualLinuxTargetType.entries.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option.label) },
+                            onClick = {
+                                onTypeChange(option)
+                                typeMenuExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            TextButton(
+                onClick = onAdd,
+                enabled = enabled && when (type) {
+                    ManualLinuxTargetType.PROCESS_NAME,
+                    ManualLinuxTargetType.EXECUTABLE_PATH,
+                    ManualLinuxTargetType.DESKTOP_ID,
+                    ManualLinuxTargetType.PACKAGE_ID -> value.isNotBlank()
+                    ManualLinuxTargetType.COMMAND_PREDICATE ->
+                        executable.isNotBlank() || argumentName.isNotBlank()
+                }
+            ) { Text("Add") }
+        }
+        if (type == ManualLinuxTargetType.COMMAND_PREDICATE) {
+            OutlinedTextField(
+                value = executable,
+                onValueChange = onExecutableChange,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Executable path or basename") },
+                placeholder = { Text("e.g. /usr/bin/game or java") },
+                isError = error != null
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = argumentName,
+                    onValueChange = onArgumentNameChange,
+                    enabled = enabled,
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    label = { Text("Argument name") },
+                    placeholder = { Text("--gameDir") },
+                    isError = error != null
+                )
+                OutlinedTextField(
+                    value = argumentValue,
+                    onValueChange = onArgumentValueChange,
+                    enabled = enabled,
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    label = { Text("Expected value (optional)") },
+                    placeholder = { Text("Optional") },
+                    isError = error != null
+                )
+            }
+        } else {
+            val (label, placeholder) = when (type) {
+                ManualLinuxTargetType.PROCESS_NAME -> "Process name" to "e.g. firefox"
+                ManualLinuxTargetType.EXECUTABLE_PATH -> "Executable path" to "/usr/bin/firefox"
+                ManualLinuxTargetType.DESKTOP_ID -> "Desktop ID" to "org.mozilla.firefox"
+                ManualLinuxTargetType.PACKAGE_ID -> "Package ID" to "org.mozilla.firefox"
+                ManualLinuxTargetType.COMMAND_PREDICATE -> "" to ""
+            }
             OutlinedTextField(
                 value = value,
                 onValueChange = onValueChange,
                 enabled = enabled,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                label = { Text("Manual process") },
-                placeholder = { Text("e.g. firefox") },
-                isError = error != null,
-                supportingText = error?.let { { Text(it, color = Error) } }
+                label = { Text(label) },
+                placeholder = { Text(placeholder) },
+                isError = error != null
             )
-            TextButton(
-                onClick = onAdd,
-                enabled = enabled && value.isNotBlank()
-            ) {
-                Text("Add")
-            }
+        }
+        if (error != null) {
+            Text(error, color = Error, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -832,6 +991,7 @@ private fun CatalogAppRow(
     selected: Boolean,
     enabled: Boolean,
     multiSelect: Boolean,
+    diagnostic: String? = null,
     onClick: () -> Unit
 ) {
     val protected = LinuxProcessSafety.isProtectedProcessName(app.processName)
@@ -866,10 +1026,20 @@ private fun CatalogAppRow(
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = app.processName,
+                    text = app.processName.ifBlank {
+                        app.desktopId ?: app.packageId ?: app.canonicalReference?.stableAppId
+                            ?: "Explicit target"
+                    },
                     color = OnSurface2,
                     style = MaterialTheme.typography.bodySmall
                 )
+                diagnostic?.let {
+                    Text(
+                        text = it,
+                        color = Warning,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -1061,6 +1231,10 @@ private fun formatRefreshTime(timestamp: Long): String =
         .format(Instant.ofEpochMilli(timestamp))
 
 fun AppDescriptor.catalogKey(): String =
-    (desktopId ?: packageId ?: processName)
+    (
+        desktopId ?: packageId ?: processName.takeIf { it.isNotBlank() }
+            ?: canonicalReference?.stableAppId
+            ?: canonicalReference?.referenceId.orEmpty()
+    )
         .trim()
         .lowercase(Locale.ROOT)

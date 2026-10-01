@@ -252,25 +252,25 @@ Depends on: Batches 2 and 6.
 
 Depends on: Batches 1–7.
 
-- [ ] **PI-8.1 — Route legacy process-name consumers through one adapter**
+- [x] **PI-8.1 — Route legacy process-name consumers through one adapter**
   Compatibility consumers must use the canonical repository/matcher; do not
   create parallel Linux matching semantics.
-- [ ] **PI-8.2 — Migrate standard Linux process-targeting paths**
+- [x] **PI-8.2 — Migrate standard Linux process-targeting paths**
   Cover app blocking, schedules, standalone blocks, daily allowance, session
   extra-blocks, and network process targeting where applicable.
-- [ ] **PI-8.3 — Keep Nuclear Mode and safety inventories purpose-specific**
+- [x] **PI-8.3 — Keep Nuclear Mode and safety inventories purpose-specific**
   Do not conflate escape-tool blocking with global protection or selected-app
   authorization; preserve reasoned categories.
-- [ ] **PI-8.4 — Make unknown/ambiguous enforcement outcomes observable**
+- [x] **PI-8.4 — Make unknown/ambiguous enforcement outcomes observable**
   Diagnostics must explain why a process was allowed, safely denied, or left
   unenforced as unknown without exposing raw secret-bearing arguments.
-- [ ] **PI-8.5 — Run focused and full Linux verification**
+- [x] **PI-8.5 — Run focused and full Linux verification**
   Verify parser/matcher/migration/enforcement/launcher tests and the full Linux
   suite. Record any environment-dependent tests that could not run.
-- [ ] **PI-8.6 — Verify Windows compatibility**
+- [x] **PI-8.6 — Verify Windows compatibility**
   Run relevant Windows compilation/tests or documented checks and confirm no
   Windows targeting, enforcement, or persisted-data behavior was removed.
-- [ ] **PI-8.7 — Complete the V7 definition-of-done audit**
+- [x] **PI-8.7 — Complete the V7 definition-of-done audit**
   Check every applicable category in `Process.md` §52 and link evidence below;
   no unresolved safety blocker may be represented as complete.
 
@@ -297,3 +297,4 @@ Add one row per completed batch. Do not claim completion based only on a build.
 | 5 | 2026-09-30 | PI-5.1–PI-5.5 | FocusLauncherScreen reference propagation; FocusLauncherService lifecycle/restore paths; FocusLauncherRuntimePolicy and ProcessMonitor; session reference/runtime-definition persistence and cleanup; policy and SQLite tests | `gradle test --no-daemon` — passed (154 tests, 0 failures, 0 errors, 2 skipped); `git diff --check` — passed; Start application workflow restarted and remained running at `:run` | Tests cover selected/unselected refs, generic Java uncertainty, ambiguity/staleness, unknown/changed identity, authorization clearing, Windows legacy name-set adapter, and DB recovery/teardown. No Windows runtime or real destructive process test was available; VNC workflow has no browser port. Batch 4 checkboxes were left unchanged. | Batch 6 |
 | 6 | 2026-09-30 | PI-6.1–PI-6.7 | LinuxLaunchCapture tracker/controller and tests; Linux Launch & Detect dialog and Focus Launcher integration; persisted launch/runtime definitions and session-cleanup preservation; launcher runtime association metadata | `gradle test --no-daemon` — passed (165 tests, 0 failures, 0 errors, 2 skipped); `git diff --check` — passed; Start application workflow restarted and running | Tests cover baseline isolation, explicit candidate attribution, same-PID exec, reparenting, bounded grace/timeout, cancellation, runtime exit, PID reuse, unknown identity, close identity checks, raw command omission, and SQLite persistence through cleanup. Desktop app process was running under the VNC workflow; no browser screenshot port, real app handoff, destructive close, or Windows runtime was exercised. | Batch 7 |
 | 7 | 2026-10-01 | PI-7.1–PI-7.5 | LinuxProcessRuntimeMetadata and LinuxMinecraftAttribution; launch-session evidence and attribution in LinuxLaunchCapture; focused parser, selector, catalog-boundary, and handoff tests | `gradle test --tests com.focusflow.enforcement.LinuxMinecraftAttributionTest --tests com.focusflow.enforcement.LinuxProcessMatcherTest --tests com.focusflow.enforcement.LinuxLaunchCaptureTest --no-daemon` — passed (33 tests); `gradle test --no-daemon` — passed (175 tests, 0 failures, 0 errors, 2 skipped); `git diff --check` — passed; Start application workflow restarted and remained running | Tests cover Java runtime/environment derivation, structured class/JAR/module arguments and redaction, Vanilla/Fabric/Quilt/Forge/NeoForge signatures, game-directory-only and unknown-option negatives, non-authoritative catalog correlation, unrelated Java denial, selected-launcher-to-JVM timing, and reparenting. No live Minecraft launcher/runtime or Windows runtime was exercised; two tests were skipped by the existing suite configuration. | Batch 4 remains open; Batch 8 still depends on completion of Batches 1–7. |
+| 8 | 2026-10-01 | PI-8.1–PI-8.7 | LinuxProcessCompatibilityAdapter; ProcessMonitor; NetworkBlocker; NuclearMode; DailyAllowanceTracker; adapter/enforcement tests | `gradle test --no-daemon` — passed (182 tests, 0 failures, 0 errors, 2 skipped); `git diff --check` — passed; GitHub Actions on `11bdd03` — Linux Smoke Tests, Linux package builds and artifact validation, and Linux distribution-channel builds — passed | Tests cover adapter normalization/aliases, incomplete and unknown observations, PID/start-tick revalidation, exec changes, and argv-redacted diagnostics. Standard Linux target paths and purpose-specific Nuclear Mode/safety policies were reviewed. V7 §52 categories audited. `WinApiBindingsLinuxTest` and source review confirmed Windows branches remain intact; no native Windows runtime/build was available. Per user direction, checked PI-4 items and Batch 4's passing evidence row govern the dependency; the earlier Batch 7 note remains unchanged. | Core-v1 gates complete; optional hardening remains deferred and unassigned. |
